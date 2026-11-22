@@ -85,6 +85,8 @@ const KB_LAYOUTS: { move: [string[], string[], string[], string[]]; map: Record<
 ];
 
 const keys = new Set<string>();
+// Keys pressed since the last input read: a tap shorter than one frame still registers.
+const tapped = new Set<string>();
 const GAME_KEYS = new Set<string>();
 for (const l of KB_LAYOUTS) {
   l.move.flat().forEach((k) => GAME_KEYS.add(k));
@@ -97,6 +99,7 @@ export function installKeyboard() {
   inputListenersInstalled = true;
   window.addEventListener('keydown', (e) => {
     keys.add(e.code);
+    tapped.add(e.code);
     if (GAME_KEYS.has(e.code) && !(e.target instanceof HTMLInputElement)) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => keys.delete(e.code));
@@ -104,12 +107,17 @@ export function installKeyboard() {
 }
 
 export function keyDown(code: string) {
-  return keys.has(code);
+  return keys.has(code) || tapped.has(code);
+}
+
+/** Call once after every input read cycle. */
+export function endInputRead() {
+  tapped.clear();
 }
 
 function readKeyboard(layout: number, out: RawState) {
   const l = KB_LAYOUTS[layout];
-  const any = (arr: string[]) => arr.some((k) => keys.has(k));
+  const any = (arr: string[]) => arr.some((k) => keys.has(k) || tapped.has(k));
   const up = any(l.move[0]), dn = any(l.move[1]), lf = any(l.move[2]), rt = any(l.move[3]);
   out.mx += (rt ? 1 : 0) - (lf ? 1 : 0);
   out.my += (up ? 1 : 0) - (dn ? 1 : 0);

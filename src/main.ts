@@ -6,7 +6,7 @@ import { Match } from './match';
 import { HUD } from './hud';
 import { CPU, Difficulty } from './ai';
 import { ROSTER, CharacterDef, charById } from './characters';
-import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, keyDown } from './input';
+import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, keyDown, endInputRead } from './input';
 import { initAudio, sfx, startMusic, stopMusic, setMuted, muted } from './audio';
 import { TUNING } from './fighter';
 
@@ -121,7 +121,9 @@ function startMatch() {
   hud.setNames(match, setup.mode === 'cpu' ? ['YOU', `CPU · ${setup.diff}`] : ['PAD 1 / WASD', 'PAD 2 / ARROWS']);
   hud.show(true);
   keysHint.innerHTML = 'Move <b>WASD</b> · A attack <b>J</b> · B jump <b>K</b> · X grab <b>L</b> · Y guard <b>I</b> · L mobility <b>U</b> · R power <b>O</b> · Pause <b>Esc</b>' + (setup.mode === 'versus' ? '<br>P2: Arrows · A <b>.</b> · B <b>/</b> · X <b>,</b> · Y <b>;</b> · L <b>R-Shift</b> · R <b>Enter</b> (or numpad 1 2 3 5 4 6)' : '');
-  touchRoot.classList.toggle('off', !(('ontouchstart' in window) || navigator.maxTouchPoints > 0));
+  const touchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
+  touchRoot.classList.toggle('off', !touchDevice);
+  keysHint.style.display = touchDevice ? 'none' : '';
   paused = false;
   showScreen('none');
   startMusic();
@@ -285,8 +287,8 @@ function act(a: string, arg?: string) {
 
 // Menu navigation from keyboard / pads.
 const menuTrack = [new EdgeTracker(), new EdgeTracker()];
-let navCooldown = 0;
-function menuInput() {
+let navCooldown = 0; // ms
+function menuInput(dtMs: number) {
   const binds: DeviceBinding[] = [{ keyboard: [0, 1], gamepad: 0, touch: false }, { keyboard: [], gamepad: 1, touch: false }];
   for (let i = 0; i < 2; i++) {
     const raw = readDevices(binds[i]);
@@ -296,16 +298,17 @@ function menuInput() {
     const fr = menuTrack[i].frame;
     if (navCooldown > 0) continue;
     const step = fr.my > 0.5 || fr.mx < -0.5 ? -1 : fr.my < -0.5 || fr.mx > 0.5 ? 1 : 0;
-    if (step) { setFocus(focusIdx + step); navCooldown = 9; sfx.menu(); }
-    if (fr.b.attack.pressed) { const el = focusables()[focusIdx]; if (el) { initAudio(); el.click(); } navCooldown = 8; }
+    if (step) { setFocus(focusIdx + step); navCooldown = 150; sfx.menu(); }
+    if (fr.b.attack.pressed) { const el = focusables()[focusIdx]; if (el) { initAudio(); el.click(); } navCooldown = 180; }
     if (fr.b.jump.pressed) {
-      navCooldown = 8;
+      navCooldown = 180;
       if (screen === 'select') act('title');
       else if (screen === 'moves') act('back');
       else if (screen === 'pause') act('resume');
     }
   }
-  if (navCooldown > 0) navCooldown--;
+  if (navCooldown > 0) navCooldown -= dtMs;
+  endInputRead();
 }
 
 window.addEventListener('gamepadconnected', (e) => { toast(`Controller ${(e as GamepadEvent).gamepad.index + 1} connected`); if (screen === 'title') showScreen('title'); });
@@ -346,6 +349,7 @@ function simTick() {
     f.input = trackers[i].frame;
     if (trackers[i].frame.pause && !cpus[i] && !match.ended) { paused = true; showScreen('pause'); return; }
   }
+  endInputRead();
   match.camBasis.fwd = vcam.fwd;
   match.camBasis.right = vcam.right;
   match.update(DT);
@@ -385,7 +389,7 @@ function frame(now: number) {
   if (frameTimes.length > 600) frameTimes.shift();
   time += rawDt;
 
-  if (screen !== 'none') menuInput();
+  if (screen !== 'none') menuInput(rawDt * 1000);
   if (match && !paused && screen === 'none' && !manualStep) {
     if (fx.hitstop > 0) fx.hitstop -= rawDt; // brief impact emphasis: sim holds, rendering continues
     else {
@@ -406,6 +410,7 @@ function frame(now: number) {
     for (const f of match.fighters) f.animate(rawDt, time);
     vcam.update(match.fighters, rawDt, fx.shake);
     hud.update(match, time);
+    hud.el.classList.toggle('menu-up', screen !== 'none');
     // X-target markers for human players.
     match.fighters.forEach((f, i) => {
       const mk = markers[i];

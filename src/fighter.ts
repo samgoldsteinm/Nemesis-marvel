@@ -30,6 +30,7 @@ export const TUNING = {
   flightDrain: 5,
   sblockDrain: 16,
   teleportCost: 12,
+  rageGain: 0.6, // rage per point of damage dealt (lasting damage counts double)
   catchWindow: 14, // ticks after pressing guard
 };
 
@@ -1237,7 +1238,7 @@ export class Fighter {
     const rageMul = att.raging ? 1.2 : 1;
     const staminaBefore = this.stamina;
     this.applyDamage(spec.stamina * TUNING.staminaScale * vuln * rageMul / Math.sqrt(this.def.durability), spec.health * vuln * rageMul);
-    att.rage = Math.min(100, att.rage + (spec.stamina + spec.health * 2) * 1.1);
+    att.rage = Math.min(100, att.rage + (spec.stamina + spec.health * 2) * TUNING.rageGain);
     this.rage = Math.min(100, this.rage + spec.stamina * 0.3);
     att.stats.hits++;
     this.lastAttacker = att;

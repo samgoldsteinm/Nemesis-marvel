@@ -140,8 +140,8 @@ const basalt: CharacterDef = {
     weakness: 'Ground recovery barely changes his trajectory; off an open edge he falls.',
   },
   build(rig) {
-    const rock = mat(0x3c4757, 0.95, 0.05, 0x000000, 0, true);
-    const rock2 = mat(0x2a323e, 0.95, 0.05, 0x000000, 0, true);
+    const rock = mat(0x5a6a80, 0.9, 0.05, 0x000000, 0, true);
+    const rock2 = mat(0x3c4757, 0.92, 0.05, 0x000000, 0, true);
     const magma = mat(0xff5a1a, 0.4, 0, 0xff4a10, 1.6);
     const j = rig.joints;
     box(j.hips, 0.75, 0.4, 0.5, rock2, [0, 0.05, 0]);
@@ -365,8 +365,8 @@ const shunt: CharacterDef = {
     weakness: 'Teleports cost energy; with an empty meter he has no way back from a launch.',
   },
   build(rig) {
-    const coat = mat(0x262a34, 0.7, 0.15);
-    const under = mat(0x15171d, 0.6, 0.2);
+    const coat = mat(0x4b5468, 0.65, 0.2);
+    const under = mat(0x252a36, 0.55, 0.25);
     const cyan = mat(0x37f2ff, 0.2, 0, 0x20e0ff, 1.6);
     const mask = mat(0xb9c3cf, 0.35, 0.6);
     const j = rig.joints;

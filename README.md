@@ -1,0 +1,79 @@
+# BREAKLINE
+
+An original 3D rooftop arena brawler for the browser (Three.js + TypeScript + Vite). It is built from
+the mechanics described in the design brief (lift classes, breakable perimeters that turn into ring-outs,
+layered stamina/health, energy, Rage, Danger finishers and four recovery families). The characters,
+arena, art, audio and names are all original. It is not a recreation of any existing game.
+
+## Run it
+
+```bash
+npm install
+npm run dev        # http://localhost:5173  (add ?perf for the frame-time overlay, or press F3)
+npm run build      # production build in dist/
+npm run preview    # serve the build
+```
+
+Gameplay checks (needs Playwright with Chromium available to `require('playwright')`):
+
+```bash
+npm run dev &
+node tests/checks.cjs
+```
+
+## Controls
+
+| Action | Gamepad | Keyboard P1 | Keyboard P2 | Touch |
+|---|---|---|---|---|
+| Move | Left stick / d-pad | WASD | Arrows | Left virtual stick |
+| A: attack (chain ×3, rising/descending air attacks) | A | J | `.` / Num1 | A |
+| B: jump | B | K | `/` / Num2 | B |
+| X: grapple / pick up / throw | X | L | `,` / Num3 | X |
+| Y: guard; + direction = evade; A in evade = counter; timed Y catches | Y | I | `;` / Num5 | Y |
+| L: mobility (sprint / swing / flight / teleport); L+A mobility attack | LB / LT | U | Right Shift / Num4 | L |
+| R: power modifier (R+A, R+B, R+X, R+Y); hold to recharge; tap to Rage | RB / RT | O | Enter / Num6 | R |
+| L+R while launched: recovery | LB+RB | U+O | | **L+R** chord button |
+| Super block | R+Y | O+I | | **R+Y** chord button |
+| Pause | Start | Esc | Backspace | ‖ |
+
+In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A or Enter to confirm, and B or Esc to go back. Unplugging a human player's pad mid-bout pauses the game.
+
+## What's in this build
+
+- **Modes:** Versus CPU (easy, normal or hard) and shared-screen Versus 2P. After a bout you can rematch, switch sides, return to character select or go to the main menu.
+- **Arena: Clarion Rooftop.** The roof is enclosed by 28 breakable fence segments. It has seven sign letters that can be knocked loose into throwable debris, three A/C units (medium), an explosive fuel tank (heavy), crates and panels (light), an access hut that serves as cover and a cling wall, corner masts that act as swing anchors, and a visible city drop. Broken fence opens ring-outs. Broken props leave rubble. A rematch restores the pristine arena.
+- **Fighters** (each has a move sheet on the *Controls & Move Sheets* screen):
+  - **BASALT**: heavy lift class, ground recovery. Sprint, shoulder charge, a planted heavy throw, Thunderclap (a shockwave cone) and Ground Pound. He is the only fighter who can lift the A/C units and the fuel tank.
+  - **TETHER**: swing recovery. Line swing, wall cling and climb, ranged line-yank grapple, snare bolt. A launch that is fatal for Basalt can be saved by Tether's reel-in recovery.
+  - **AERIN VOLT**: flight recovery. Flight drains energy (B rises, Y sinks), volt bolts, flight dash.
+  - **SHUNT**: teleport recovery. Directional hop, neutral L flanks behind the opponent, blink strike, displacement pulse. A teleport needs energy, so with an empty meter he cannot get back.
+- **Resources:** yellow recoverable stamina is drawn over red lasting health. Powered hits, throws, props and explosions cut health. Energy shows quarter ticks. Rage builds from dealing damage, and a neutral tap of R gives 8 seconds of unlimited energy. **Danger** starts at health ≤ 25 or stamina ≤ 10. **Finisher** is R+X on a fighter in Danger, with at least a quarter of the energy meter or during Rage. Each fighter has its own cinematic finisher. Without enough energy, R+X becomes an ordinary grab and shows "NEED 1/4 POWER". A bout ends by K.O., RING OUT or FINISHER, and the results screen says which one ended it.
+- **Feel:** startup, active and recovery frames per move. Hit-stop and screen shake on heavy impacts. Directional knockback. Launched bodies break the fence. A diamond marker shows the current X target. Synthesized audio gives a distinct sound for hits, blocks, catches, wall breaks, explosions, Rage on and off, and Danger.
+- **Camera:** one shared camera sits perpendicular to the fighters. It holds its angle when one fighter is directly above the other, leaves room in the direction of a launch, and rate-limits rotation so fast side swaps don't whip the view. Props and the hut fade when they block the view. Finishers and victories get cinematic framing.
+- **CPU:** it reacts with a delay and commits to short plans. It recovers from off-roof launches, steers away from open edges, and tries to push the opponent toward broken fence. Heavies go for props, Aerin flies and shoots, and Shunt flanks. It holds fire on a fighter who is down and limits itself to two projectiles in a row. Difficulty changes reaction time and decision quality, not damage.
+- **Performance:** fixed 60 Hz simulation. Debris and sparks use instanced meshes. Adaptive quality lowers particle density, then render scale, then shadows. It never changes simulation, collision or input.
+
+## Checks actually run (`tests/checks.cjs`, 20/20 passing)
+
+These checks covered K.O. on depleted health, Danger from stamina with full health, leaving Danger before a finisher, a valid finisher, a failed finisher with too little energy, and a finisher during Rage. They covered Tether's aerial save from a launch off an open edge, Basalt's ring-out on the same trajectory, and Shunt's ring-out with no energy. They covered a clean rematch reset, the lift-class split (only Basalt lifts the tank), the planted heavy throw and tank explosion, catching a prop, an R+A chord on the same tick resolving once, X choosing between the opponent and an adjacent prop, a grab returning to a valid state after rematch, a thrown prop breaking the fence, super block deflecting a projectile, Rage turning on and back off, and four complete CPU-vs-CPU bouts with no errors.
+
+Also checked by hand in headless Chromium: the full keyboard menu flow (title → 2P → select → fight → pause/resume → K.O. → results → switch sides), and touch on an emulated Pixel 7 in landscape, steering with the stick while holding R and A at once.
+
+**Performance was not measured on real hardware.** The only measurements came from headless Chromium using software WebGL (SwiftShader), at about 100 ms per frame. That reflects the emulator, not the game. Use `?perf` on a real PC or phone to record p50, p95 and p99 frame times.
+
+## Approximations and known gaps
+
+- The reference YouTube video could not be watched because this build environment blocks YouTube. The mechanics follow the written brief. All frame data, damage, thresholds (`TUNING` in `src/fighter.ts`) and collision sizes are tuning estimates, not measured values.
+- Characters use procedural primitive rigs with pose-based animation, not skinned or mocapped models.
+- With the CPU on hard, bouts often end by finisher in 20–60 s. Ring-outs mostly happen after fence breaks. Pacing needs human playtesting.
+- Gamepad face buttons are mapped by label position on the browser's "standard" layout. Non-standard pads have not been tested.
+
+## Next-session checklist
+
+1. Measure frame times on a real PC and phone (`?perf`), then tune `fx.quality` and the shadow map size.
+2. Human playtest of Basalt vs Tether: compare a fight before and after the fence breaks, then tune `TUNING`, knockback and the Danger thresholds.
+3. More arenas, each needing a distinct layout: a narrow bridge deck, a street with liftable vehicles, a mansion interior with breakable columns, a two-level power plant with a cycling core, a station with columns and barriers, and a headquarters with force walls, mines and a healing chamber.
+4. More original fighters for each recovery family (more swing, flight and teleport fighters, plus a magnetic object-controller).
+5. Story mode: reusable objectives (clear an area, destroy targets, defend objects, defeat a named opponent), a catch-and-return barrier mission, a two-dish defense mission, and an underdog duel. Add unlocks saved across reloads.
+6. A follow camera with player control for Story mode.
+7. A rebind screen for keyboard and gamepad, plus layout handling for non-standard pads.
