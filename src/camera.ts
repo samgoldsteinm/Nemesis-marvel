@@ -13,6 +13,8 @@ export class VersusCamera {
   private pos = new THREE.Vector3(0, 8, 16);
   cinematic: { focus: () => THREE.Vector3; yaw: number; dist: number; h: number; t: number } | null = null;
   fwd = new THREE.Vector3(0, 0, -1);
+  /** Brief zoom-in on heavy impacts. */
+  punch = 0;
   right = new THREE.Vector3(1, 0, 0);
 
   constructor(aspect: number) {
@@ -92,7 +94,9 @@ export class VersusCamera {
       this.height += (wantH - this.height) * k;
       this.target.lerp(focus, 1 - Math.exp(-(this.cinematic ? 8 : 5) * dt));
     }
-    const camPos = new THREE.Vector3(this.target.x + Math.sin(this.yaw) * this.dist, this.target.y + this.height, this.target.z + Math.cos(this.yaw) * this.dist);
+    this.punch = Math.max(0, this.punch - dt * 3.5);
+    const pd = this.dist * (1 - 0.14 * this.punch);
+    const camPos = new THREE.Vector3(this.target.x + Math.sin(this.yaw) * pd, this.target.y + this.height * (1 - 0.1 * this.punch), this.target.z + Math.cos(this.yaw) * pd);
     if (camPos.y < 1.5) camPos.y = 1.5;
     this.pos.copy(camPos);
     this.cam.position.copy(camPos);

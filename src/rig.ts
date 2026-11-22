@@ -38,6 +38,9 @@ export class Rig {
   chestAnchor = new THREE.Group(); // for wings, capes
   hipHeight: number;
   private cur: Record<JointName, THREE.Vector3>;
+  private vel: Record<JointName, THREE.Vector3>;
+  /** Spring damping ratio: < 1 gives a little overshoot, i.e. follow-through after strikes. */
+  zeta = 0.72;
   private curBodyY = 0;
   private curPitch = 0;
   private curRoll = 0;
@@ -83,18 +86,32 @@ export class Rig {
     this.foot = { l: lf, r: rf };
     this.cur = {} as Record<JointName, THREE.Vector3>;
     for (const n of JOINTS) this.cur[n] = new THREE.Vector3();
+    this.vel = {} as Record<JointName, THREE.Vector3>;
+    for (const n of JOINTS) this.vel[n] = new THREE.Vector3();
   }
 
   /** Damp toward the target pose. rate ~ responsiveness per second. */
   apply(target: Pose, rate: number, dt: number) {
     const k = 1 - Math.exp(-rate * dt);
-    for (const n of JOINTS) {
-      const t = target.j[n] ?? ZERO;
-      const c = this.cur[n];
-      c.x += (t[0] - c.x) * k;
-      c.y += (t[1] - c.y) * k;
-      c.z += (t[2] - c.z) * k;
-      this.joints[n].rotation.set(c.x, c.y, c.z);
+    if (rate > 1e5) {
+      for (const n of JOINTS) { const t = target.j[n] ?? ZERO; this.cur[n].set(t[0], t[1], t[2]); this.vel[n].set(0, 0, 0); this.joints[n].rotation.set(t[0], t[1], t[2]); }
+    } else {
+      // Second-order spring per joint (sub-stepped for stability): anticipation in, overshoot out.
+      const w = rate * 0.9;
+      const kk = w * w, cc = 2 * this.zeta * w;
+      const steps = Math.max(1, Math.ceil(dt / (1 / 240)));
+      const h = dt / steps;
+      for (const n of JOINTS) {
+        const t = target.j[n] ?? ZERO;
+        const c = this.cur[n], v = this.vel[n];
+        for (let i = 0; i < steps; i++) {
+          v.x += (kk * (t[0] - c.x) - cc * v.x) * h;
+          v.y += (kk * (t[1] - c.y) - cc * v.y) * h;
+          v.z += (kk * (t[2] - c.z) - cc * v.z) * h;
+          c.x += v.x * h; c.y += v.y * h; c.z += v.z * h;
+        }
+        this.joints[n].rotation.set(c.x, c.y, c.z);
+      }
     }
     this.curBodyY += ((target.bodyY ?? 0) - this.curBodyY) * k;
     this.curPitch += ((target.pitch ?? 0) - this.curPitch) * k;

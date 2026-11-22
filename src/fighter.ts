@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { CharacterDef, MoveDef, HitSpec } from './characters';
+import { CharacterDef, MoveDef, HitSpec, PROP_SWING } from './characters';
 import { Rig, P, Pose } from './rig';
 import { InputFrame, emptyFrame } from './input';
 import { Prop, BOUNDS, KILL_Y, WallSeg } from './arena';
 import { sfx } from './audio';
+import { Ribbon } from './fx';
 import type { Match } from './match';
 
 export type FState =
@@ -11,7 +12,7 @@ export type FState =
   | 'grabbing' | 'grabbed' | 'lift' | 'throw' | 'lineGrab' | 'yanked'
   | 'hitstun' | 'launched' | 'down' | 'getup' | 'stunned'
   | 'swing' | 'cling' | 'fly' | 'teleport' | 'recover'
-  | 'finisher' | 'finished' | 'ko' | 'out' | 'victory' | 'idleLock';
+  | 'finisher' | 'finished' | 'ko' | 'out' | 'victory' | 'idleLock' | 'powerCharge' | 'pgrapple';
 
 export const TUNING = {
   gravity: 30,
@@ -92,11 +93,26 @@ export class Fighter {
   lastLaunchSpeed = 0;
   hitSide = 1;
 
+  ribbon: Ribbon;
+  private mats: THREE.MeshStandardMaterial[] = [];
+  private flashOn = false;
+  private lastStepPhase = 0;
   constructor(public def: CharacterDef, public idx: number, public match: Match) {
     this.rig = new Rig(def.proportions);
     const b = def.build(this.rig);
     this.accents = b.accents;
     for (const m of this.accents) m.userData.baseEI = m.emissiveIntensity;
+    // All body materials, for the white impact flash.
+    const seen = new Set<THREE.Material>();
+    this.rig.root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if (!m || o.userData.outline || !(m as any).isMeshStandardMaterial || seen.has(m)) return;
+      seen.add(m);
+      m.userData.baseEmissive = m.emissive.clone();
+      if (m.userData.baseEI === undefined) m.userData.baseEI = m.emissiveIntensity;
+      this.mats.push(m);
+    });
+    this.ribbon = new Ribbon(match.scene, new THREE.Color(def.color).lerp(new THREE.Color(0xffffff), 0.45).getHex());
     // Charge aura and rage aura.
     const auraGeo = new THREE.CylinderGeometry(def.radius * 1.6, def.radius * 1.9, def.height * 1.15, 18, 1, true);
     auraGeo.translate(0, def.height * 0.55, 0);
@@ -119,6 +135,7 @@ export class Fighter {
 
   dispose() {
     this.match.scene.remove(this.rig.root, this.shadowBlob, this.line);
+    this.ribbon.dispose(this.match.scene);
   }
 
   get opp(): Fighter {
@@ -227,12 +244,14 @@ export class Fighter {
       case 'teleport': this.stTeleport(dt); break;
       case 'recover': if (this.t > 10) this.setState(this.onGround ? 'ground' : 'air'); break;
       case 'finisher': this.stFinisher(dt); break;
+      case 'powerCharge': this.stPowerCharge(dt); break;
+      case 'pgrapple': this.stPGrapple(dt); break;
       case 'ko': this.stKO(dt); break;
       case 'out': break;
       case 'victory': case 'idleLock': this.friction(dt, 20); break;
     }
 
-    if (!['grabbed', 'finished', 'yanked', 'teleport', 'out', 'finisher', 'cling'].includes(this.state)) this.physics(dt);
+    if (!['grabbed', 'finished', 'yanked', 'teleport', 'out', 'finisher', 'cling', 'pgrapple'].includes(this.state)) this.physics(dt);
     if (this.heldProp) this.positionHeldProp();
     if (this.pos.y < KILL_Y && this.state !== 'out') this.ringOut();
   }
@@ -294,7 +313,7 @@ export class Fighter {
 
   // ======================================================================== physics
   private physics(dt: number) {
-    const gravityOn = !(this.state === 'fly' || this.state === 'swing' || (this.state === 'attack' && this.move?.id === 'flightDash'));
+    const gravityOn = !(this.state === 'fly' || this.state === 'swing' || this.state === 'pgrapple' && this.def.powerGrapple === 'skyDrop' || (this.state === 'attack' && (this.move?.id === 'flightDash' || this.move?.id === 'stormDash')));
     if (gravityOn && !this.onGround) this.vel.y -= TUNING.gravity * dt;
     if (this.state === 'swing' && !this.recoverSwing) this.vel.y -= TUNING.gravity * dt;
     const prev = this.pos.clone();
@@ -352,11 +371,14 @@ export class Fighter {
 
   private onLand(impact: number) {
     if (impact > 6) sfx.land();
+    if (impact > 4) this.match.fx.dust(this.pos, this.def.heavy ? 8 : 4, this.def.heavy ? 0.55 : 0.35, impact * 0.15);
+    if (impact > 8 && this.def.heavy) this.match.fx.shake = Math.max(this.match.fx.shake, 0.25);
     switch (this.state) {
       case 'air': this.setState('ground'); break;
       case 'launched':
         if (this.health <= 0) { this.setState('ko'); break; }
         this.match.fx.burstDebris(this.pos.clone(), 6, 0x777777, 3, 0.15);
+        this.match.fx.dust(this.pos, 8, 0.5, 2.2);
         this.setState('down');
         break;
       case 'attack':
@@ -411,9 +433,13 @@ export class Fighter {
     if ((b.attack.pressed && R) || (b.power.pressed && b.attack.down)) {
       mark();
       if (this.heldProp) { this.startThrow(true); return true; }
-      const m = ground ? this.def.moves.power : this.def.moves.powerAir;
+      const hs = Math.hypot(this.vel.x, this.vel.z);
+      const running = ground && hs > this.def.speed * 0.7 && this.stickMag() > 0.6;
+      const m = !ground ? this.def.moves.powerAir : running ? this.def.moves.dashPower : this.def.moves.power;
       if (!this.hasEnergy(m.energy ?? 0)) { this.noPower(); return true; }
       this.spend(m.energy ?? 0);
+      // Standing R+A: keep A held to charge into the character's charged power.
+      if (ground && !running) { this.vel.set(0, this.vel.y, 0); this.setState('powerCharge'); return true; }
       this.startMove(m);
       return true;
     }
@@ -446,7 +472,14 @@ export class Fighter {
     }
     // A: attack chain / air attacks / throw held prop.
     if (b.attack.pressed) {
-      if (this.heldProp) { this.startThrow(false); return true; }
+      if (this.heldProp) {
+        // Light props are swung as weapons; anything heavier is thrown.
+        if (this.heldProp.cls === 0) { this.startMove(PROP_SWING); return true; }
+        this.startThrow(false);
+        return true;
+      }
+      const hs = Math.hypot(this.vel.x, this.vel.z);
+      if (ground && hs > this.def.speed * 0.75 && this.stickMag() > 0.6) { this.startMove(this.def.moves.runAttack); return true; }
       if (ground) { this.chainIdx = 0; this.startMove(this.def.moves.chain[0]); }
       else this.startMove(this.vel.y > 0 ? this.def.moves.airRise : this.def.moves.airDive);
       return true;
@@ -746,9 +779,9 @@ export class Fighter {
     // Movement during move.
     if (m.lunge && t < activeEnd) {
       const f = this.forward.multiplyScalar(m.lunge);
-      if (this.onGround || m.id === 'flightDash' || m.id === 'swingKick' || m.id === 'shoulder') { this.vel.x = f.x; this.vel.z = f.z; }
+      if (m.special !== 'slingshot' && (this.onGround || m.id === 'flightDash' || m.id === 'stormDash' || m.id === 'swingKick' || m.id === 'shoulder')) { this.vel.x = f.x; this.vel.z = f.z; }
     } else if (this.onGround) this.friction(dt, 14);
-    if (m.id === 'flightDash') this.vel.y = 0;
+    if (m.id === 'flightDash' || m.id === 'stormDash') this.vel.y = 0;
 
     if (t === activeStart) this.onActiveStart(m);
     if (m.special === 'blinkStrike' && t === 5) {
@@ -763,6 +796,16 @@ export class Fighter {
       this.invuln = 6;
     }
     if (m.special === 'blinkStrike') this.rig.root.visible = !(t > 2 && t < 6);
+    if (m.special === 'slingshot' && t === 3) {
+      const o = this.opp;
+      const to = o.center.sub(this.pos);
+      if (to.length() < 13 && o.alive) { this.anchor = o.center; this.yaw = Math.atan2(to.x, to.z); this.vel.copy(to.normalize().multiplyScalar(22)); this.vel.y = Math.max(this.vel.y, 3); this.onGround = false; sfx.line(); }
+      else { this.vel.copy(this.forward.multiplyScalar(14)); }
+    }
+    if (m.special === 'slingshot' && t > 3 && t < activeEnd && this.vel.length() > 2) {
+      const o = this.opp;
+      if (o.pos.distanceTo(this.pos) < 1.6) this.vel.multiplyScalar(0.3);
+    }
     // Ground pound continues until it lands.
     if (m.special === 'groundPound') {
       if (!this.onGround && t >= activeStart) { this.vel.y = Math.min(this.vel.y, m.riseV ?? -20); this.vel.x *= 0.9; this.vel.z *= 0.9; this.t = Math.min(this.t, activeStart + 1); }
@@ -775,6 +818,10 @@ export class Fighter {
       this.chainIdx++;
       this.startMove(this.def.moves.chain[this.chainIdx]);
       return;
+    }
+    if (t === activeEnd && m.special === 'propSwing' && this.heldProp && this.heldProp.uses >= 3) {
+      this.match.shatterProp(this.heldProp, this.forward);
+      this.heldProp = null;
     }
     if (t >= total) {
       this.move = null;
@@ -803,6 +850,20 @@ export class Fighter {
       this.match.resolveArea(this, m, c);
     }
     if (m.special === 'bolt') this.match.spawnProjectile(this, 'bolt');
+    if (m.special === 'bigbolt') { this.match.spawnProjectile(this, 'bigbolt'); this.match.fx.flash(this.hand(), 1, 0xc9a8ff, 0.15); }
+    if (m.special === 'tripleSnare') for (const a of [-0.28, 0, 0.28]) this.match.spawnProjectile(this, 'snare', a);
+    if (m.special === 'mines') this.match.dropMines(this);
+    if (m.special === 'quake') {
+      this.match.fx.ring(this.pos.clone(), m.hit!.radius * 1.3, 0xff8040, 0.6);
+      this.match.fx.ring(this.pos.clone(), m.hit!.radius * 0.7, 0xffd0a0, 0.4);
+      this.match.fx.burstDebris(this.pos.clone(), 30, 0x6a6a72, 10, 0.35);
+      this.match.fx.shake = 1.2;
+      sfx.shock(); sfx.explosion();
+      this.match.resolveArea(this, m, this.pos.clone().setY(this.pos.y + 0.5), true);
+    }
+    if (m.special === 'propSwing' && this.heldProp) {
+      this.heldProp.uses++;
+    }
     if (m.special === 'snare') this.match.spawnProjectile(this, 'snare');
   }
 
@@ -926,6 +987,7 @@ export class Fighter {
     this.faceOpp(5);
     this.setState('grabbing');
     this.superGrabbing = superGrab;
+    this.pummels = 0;
   }
   superGrabbing = false;
 
@@ -951,12 +1013,30 @@ export class Fighter {
     const b = this.input.b;
     const wish = this.wishDir();
     if (wish.lengthSq() > 0.3) this.faceToward(wish, 6, dt);
-    if (this.t > 10 && (b.grab.pressed || b.attack.pressed) || this.t > 42) {
+    // A: knee pummel (up to three), each extends the hold. X or timeout: throw.
+    if (b.attack.pressed && this.t > 6 && this.pummels < 3 && !this.superGrabbing) {
+      this.pummels++;
+      o.applyDamage(4 * TUNING.staminaScale, 1);
+      o.hitFlash = 6;
+      this.rage = Math.min(100, this.rage + 4);
+      this.match.fx.sparksAt(o.center, 8, 0xffffff, 5);
+      this.match.fx.hitstop = 0.04;
+      sfx.hit(false);
+      this.t = Math.max(8, this.t - 12);
+      this.pummelT = 8;
+      if (o.health <= 0) { this.throwFighter(o, false); return; }
+    }
+    if (this.pummelT > 0) this.pummelT--;
+    if (this.t > 10 && b.grab.pressed || this.t > 42 || this.superGrabbing && this.t > 10) {
       this.throwFighter(o, this.superGrabbing);
     }
   }
 
+  pummels = 0;
+  pummelT = 0;
+  pgT = 0;
   private throwFighter(o: Fighter, superThrow: boolean) {
+    if (superThrow) { this.startPowerGrapple(o); return; }
     this.grabbed = null;
     o.grabbedBy = null;
     const dir = this.forward;
@@ -969,6 +1049,115 @@ export class Fighter {
     this.stats.throws++;
     this.startMove({ id: 'throwFighter', wind: P.throwW, strike: P.throwS, startup: 1, active: 4, recovery: heavy ? 18 : 12 });
     sfx.throwIt();
+  }
+
+  // ======================================================================== charged power & power grapples
+  private stPowerCharge(dt: number) {
+    const b = this.input.b;
+    this.friction(dt, 25);
+    const full = 18;
+    if (this.t >= full && this.t % 3 === 0) this.match.fx.trail(this.hand(), 0xfff0a0, 0.16, 0.3);
+    if (this.t === full) { this.match.fx.flash(this.center, 0.8, 0xfff0a0, 0.12); sfx.charge(); }
+    if (!b.attack.down || this.t >= 45) {
+      const cm = this.def.moves.chargePower;
+      if (this.t >= full && this.hasEnergy(cm.energy ?? 0)) { this.spend(cm.energy ?? 0); this.startMove(cm); }
+      else this.startMove(this.def.moves.power);
+    }
+  }
+
+  /** R+X on an opponent who is not in Danger: each fighter's own power grapple. */
+  private startPowerGrapple(o: Fighter) {
+    this.grabbed = o;
+    o.setState('grabbed');
+    o.grabbedBy = this;
+    this.setState('pgrapple');
+    this.pgT = 0;
+    this.finisherData = { start: this.pos.clone(), yaw0: this.yaw };
+    sfx.grab();
+  }
+
+  private stPGrapple(_dt: number) {
+    const o = this.grabbed;
+    const d = this.finisherData;
+    if (!o || !d || o.state !== 'grabbed') { this.grabbed = null; this.setState(this.onGround ? 'ground' : 'air'); return; }
+    const t = this.t;
+    const fwd = new THREE.Vector3(Math.sin(d.yaw0), 0, Math.cos(d.yaw0));
+    const fx = this.match.fx;
+    const release = (dir: THREE.Vector3, spec: HitSpec, after?: () => void) => {
+      this.grabbed = null;
+      o.grabbedBy = null;
+      o.setState('air');
+      o.receiveHit(this, spec, dir, { unblockable: true, source: 'throw' });
+      after?.();
+      this.stats.throws++;
+      sfx.throwIt();
+      this.startMove({ id: 'pgEnd', wind: P.throwS, strike: P.throwS, startup: 1, active: 2, recovery: 16 });
+    };
+    o.vel.set(0, 0, 0);
+    switch (this.def.powerGrapple) {
+      case 'piledriver': {
+        // Lift overhead, then drive them into the deck.
+        if (t < 22) o.pos.lerp(this.pos.clone().add(new THREE.Vector3(0, this.def.height + 0.4, 0)), 0.25);
+        else o.pos.lerp(this.pos.clone().addScaledVector(fwd, 1.4), 0.6);
+        o.yaw = this.yaw;
+        if (t === 28) {
+          fx.ring(this.pos.clone().addScaledVector(fwd, 1.4), 4, 0xff7a3a, 0.5);
+          fx.burstDebris(o.pos.clone(), 20, 0x6a6a72, 8, 0.3);
+          fx.shake = 1;
+          sfx.shock();
+          release(fwd, { fwd: 0, up: 0, radius: 0, stamina: 14, health: 18, kbF: 5, kbU: 9, stun: 44, launch: true, heavy: true, breaksWalls: 40 });
+        }
+        break;
+      }
+      case 'webSpin': {
+        // Spin on the line, then fling: the ring-out tool.
+        this.yaw = d.yaw0 + t * 0.32;
+        const r = 2.2;
+        o.pos.copy(this.pos).add(new THREE.Vector3(Math.sin(this.yaw) * r, 1.0, Math.cos(this.yaw) * r));
+        if (t % 3 === 0) fx.trail(o.center, 0xeaffff, 0.18, 0.4);
+        this.anchor = o.center;
+        if (t === 34) {
+          const wish = this.wishDir();
+          const dir = wish.lengthSq() > 0.2 ? wish.normalize() : new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+          this.yaw = Math.atan2(dir.x, dir.z);
+          release(dir, { fwd: 0, up: 0, radius: 0, stamina: 10, health: 12, kbF: 19, kbU: 7, stun: 40, launch: true, heavy: true, breaksWalls: 90 });
+        }
+        break;
+      }
+      case 'skyDrop': {
+        // Carry them up, then spike them down.
+        if (t < 30) {
+          this.pos.y += 0.22;
+          o.pos.copy(this.pos).addScaledVector(fwd, 0.8).add(new THREE.Vector3(0, -0.4, 0));
+          if (t % 2 === 0) fx.trail(this.pos, 0xa070ff, 0.2, 0.4);
+        }
+        if (t === 30) {
+          fx.flash(o.center, 1.6, 0xc9a8ff, 0.2);
+          sfx.zap();
+          release(fwd, { fwd: 0, up: 0, radius: 0, stamina: 12, health: 16, kbF: 6, kbU: 3, stun: 44, launch: true, heavy: true }, () => { o.vel.y = -20; });
+          this.vel.set(0, 2, 0);
+          this.onGround = false;
+        }
+        break;
+      }
+      case 'displace': {
+        // Vanish with the victim and drop them nine metres away — off an open edge if aimed there.
+        o.rig.root.visible = t < 6;
+        this.rig.root.visible = t < 6 || t > 16;
+        if (t === 6) { fx.flash(o.center, 1.2, 0x37f2ff, 0.2); sfx.teleport(); }
+        if (t === 18) {
+          const wish = this.wishDir();
+          const dir = wish.lengthSq() > 0.2 ? wish.normalize() : fwd;
+          o.pos.copy(this.pos).addScaledVector(dir, 9).setY(this.pos.y + 3);
+          o.rig.root.visible = true;
+          fx.flash(o.center, 1.4, 0x37f2ff, 0.25);
+          fx.sparksAt(o.center, 16, 0x37f2ff, 6);
+          release(dir, { fwd: 0, up: 0, radius: 0, stamina: 10, health: 10, kbF: 6, kbU: 4, stun: 40, launch: true, heavy: true });
+        }
+        break;
+      }
+    }
+    if (this.state === 'pgrapple' && t > 60) { this.releaseGrabbed(); this.setState('air'); }
   }
 
   private superGrab() {
@@ -1264,6 +1453,7 @@ export class Fighter {
     this.yaw = Math.atan2(-dir.x, -dir.z);
     sfx.hit(!!spec.heavy);
     this.match.fx.hitstop = spec.heavy ? 0.085 : 0.045;
+    if (spec.heavy) this.match.camera.punch = 1;
     this.match.fx.shake = Math.max(this.match.fx.shake, spec.heavy ? 0.45 : 0.15);
     this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.4), spec.heavy ? 16 : 8, spec.heavy ? 0xffc060 : 0xffffff, spec.heavy ? 9 : 6);
     if (spec.heavy) this.match.fx.flash(this.center, 0.7, 0xfff0d0, 0.1);
@@ -1449,7 +1639,7 @@ export class Fighter {
       case 'sblock': pose = P.block(); rate = 30; break;
       case 'evade': pose = P.evade(); rate = 30; break;
       case 'charge': pose = P.charge(time); break;
-      case 'grabbing': pose = this.t < 8 ? P.grab() : (this.def.lift === 2 ? P.holdOver() : P.grab()); break;
+      case 'grabbing': pose = this.pummelT > 0 ? P.kickS() : this.t < 8 ? P.grab() : (this.def.lift === 2 ? P.holdOver() : P.grab()); if (this.pummelT > 0) { pose.j.lThigh = [-1.3, 0, 0]; pose.j.lShin = [1.4, 0, 0]; pose.j.spine = [0.3, 0, 0]; } rate = this.pummelT > 0 ? 40 : 18; break;
       case 'grabbed': case 'yanked': pose = P.heldVictim(); break;
       case 'lift': pose = this.heldProp && this.heldProp.cls >= 1 ? (this.t < 10 ? P.slamS() : P.holdOver()) : P.carry(); rate = 12; break;
       case 'throw': pose = this.t < this.throwWind ? P.throwW() : P.throwS(); rate = this.t < this.throwWind ? 14 : 40; break;
@@ -1465,6 +1655,8 @@ export class Fighter {
       case 'teleport': pose = P.teleport(); rate = 40; break;
       case 'recover': pose = P.air(2); break;
       case 'finisher': pose = this.t < 30 ? P.grab() : this.t < 80 ? P.holdOver() : P.slamS(); rate = 20; break;
+      case 'powerCharge': pose = this.t < 18 ? P.charge(time) : P.clapW(); rate = 14; break;
+      case 'pgrapple': pose = this.def.powerGrapple === 'piledriver' ? (this.t < 22 ? P.holdOver() : P.slamS()) : this.def.powerGrapple === 'webSpin' ? P.swing(time) : this.def.powerGrapple === 'skyDrop' ? P.fly(4) : P.teleport(); rate = 20; break;
       case 'finished': pose = P.launched(); break;
       case 'ko': pose = this.onGround ? P.down() : P.launched(); rate = 10; break;
       case 'victory': pose = P.victory(time); break;
@@ -1473,6 +1665,34 @@ export class Fighter {
     }
     if (this.state === 'grabbed' || this.state === 'finished') { r.root.rotation.y = this.yaw; }
     r.apply(pose, rate, dt);
+    // Big launches tumble end over end.
+    if ((this.state === 'launched' || this.state === 'ko' && !this.onGround) && this.lastLaunchSpeed > 11) r.body.rotation.x = -0.7 - this.t * 0.22;
+    // Strike swoosh along the attacking limb during the active window.
+    const m = this.state === 'attack' ? this.move : null;
+    if (m && m.hit && this.t >= m.startup - 1 && this.t <= m.startup + m.active + 1) {
+      const limb = m.limb ?? 'rh';
+      const tip = new THREE.Vector3(), mid = new THREE.Vector3();
+      const [endObj, midObj] = limb === 'lh' ? [r.hand.l, r.joints.lFore] : limb === 'rf' ? [r.foot.r, r.joints.rShin] : limb === 'lf' ? [r.foot.l, r.joints.lShin] : [r.hand.r, r.joints.rFore];
+      endObj.getWorldPosition(tip);
+      midObj.getWorldPosition(mid);
+      this.ribbon.push(tip, mid);
+      if (limb === 'both') { r.hand.l.getWorldPosition(tip); r.joints.lFore.getWorldPosition(mid); this.ribbon.push(tip, mid); }
+    }
+    this.ribbon.update(dt);
+    // Footfalls: dust (and a little weight in the camera for the heavy).
+    if (this.state === 'ground' && this.onGround) {
+      const hsp = Math.hypot(this.vel.x, this.vel.z);
+      const step = Math.floor(this.runPhase / Math.PI);
+      if (step !== this.lastStepPhase && hsp > 3) {
+        const foot = new THREE.Vector3();
+        (step % 2 ? r.foot.l : r.foot.r).getWorldPosition(foot);
+        foot.y = this.pos.y;
+        this.match.fx.dust(foot, this.def.heavy ? 2 : 1, this.def.heavy ? 0.35 : 0.2, 0.6);
+        if (this.def.heavy && hsp > 6) this.match.fx.shake = Math.max(this.match.fx.shake, 0.08);
+      }
+      this.lastStepPhase = step;
+    }
+    if ((this.state === 'hitstun' || this.state === 'evade') && this.onGround && Math.hypot(this.vel.x, this.vel.z) > 4 && this.t % 3 === 0) this.match.fx.dust(this.pos, 1, 0.3, 0.4);
 
     // Wings shimmer when flying.
     const wings = (r as any).wings as THREE.Mesh[] | undefined;
@@ -1494,6 +1714,15 @@ export class Fighter {
       const base = m.userData.baseEI ?? 1;
       m.emissiveIntensity = base * (this.raging ? 2.2 + Math.sin(time * 18) * 0.5 : 1) + (this.hitFlash > 0 ? 1 : 0);
     }
+    // White impact flash across the whole body.
+    const flash = this.hitFlash > 4;
+    if (flash || this.flashOn) {
+      for (const mt of this.mats) {
+        if (flash) { mt.emissive.setRGB(1, 1, 1); mt.emissiveIntensity = 0.85; }
+        else { mt.emissive.copy(mt.userData.baseEmissive); if (!this.accents.includes(mt)) mt.emissiveIntensity = mt.userData.baseEI; }
+      }
+      this.flashOn = flash;
+    }
     // Ground marker: projected onto the surface below.
     const g = this.match.arena.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.1);
     this.shadowBlob.visible = Number.isFinite(g) && this.state !== 'out' && this.rig.root.visible;
@@ -1503,11 +1732,11 @@ export class Fighter {
       this.shadowBlob.scale.setScalar(Math.max(0.5, 1 - hgt * 0.05));
     }
     // Grapple line.
-    const showLine = (this.state === 'swing' && this.anchor) || (this.state === 'lineGrab' && this.lineTarget);
+    const showLine = ((this.state === 'swing' || this.state === 'pgrapple' && this.def.powerGrapple === 'webSpin' || this.state === 'attack' && this.move?.special === 'slingshot' && this.t < (this.move?.startup ?? 0) + 6) && this.anchor) || (this.state === 'lineGrab' && this.lineTarget);
     this.line.visible = !!showLine;
     if (showLine) {
       const a = this.hand();
-      const b = this.state === 'swing' ? this.anchor! : this.lineTarget!.point;
+      const b = this.state === 'lineGrab' ? this.lineTarget!.point : this.anchor!;
       const pos = this.lineGeo.attributes.position as THREE.BufferAttribute;
       pos.setXYZ(0, a.x, a.y, a.z);
       pos.setXYZ(1, b.x, b.y, b.z);

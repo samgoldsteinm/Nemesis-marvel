@@ -9,7 +9,7 @@ import { sfx } from './audio';
 export type EndHow = 'ko' | 'ringout' | 'finisher';
 
 interface Projectile {
-  kind: 'bolt' | 'snare';
+  kind: 'bolt' | 'snare' | 'bigbolt';
   owner: Fighter;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
@@ -45,6 +45,7 @@ export class Match {
   dispose() {
     for (const f of this.fighters) f.dispose();
     for (const m of this.projPool) this.scene.remove(m);
+    for (const m of this.mines) this.scene.remove(m.mesh);
   }
 
   restart() {
@@ -56,6 +57,8 @@ export class Match {
     this.introT = 90;
     this.events = [];
     for (const p of this.projectiles) p.mesh.visible = false;
+    for (const m of this.mines) this.scene.remove(m.mesh);
+    this.mines = [];
     this.projectiles = [];
     const [s0, s1] = this.arena.spawns;
     this.fighters[0].reset(s0, Math.PI / 2);
@@ -168,16 +171,61 @@ export class Match {
     return dx * dx + dy * dy + dz * dz < rr * rr;
   }
 
-  spawnProjectile(owner: Fighter, kind: 'bolt' | 'snare') {
+  // ------------------------------------------------------------------ proximity mines
+  mines: { pos: THREE.Vector3; owner: Fighter; t: number; mesh: THREE.Mesh }[] = [];
+  dropMines(owner: Fighter) {
+    const base = owner.pos.clone();
+    const fwd = owner.forward;
+    const side = new THREE.Vector3(fwd.z, 0, -fwd.x);
+    for (const off of [side.clone().multiplyScalar(-1.6), fwd.clone().multiplyScalar(-1.2), side.clone().multiplyScalar(1.6)]) {
+      const p = base.clone().add(off);
+      p.y = Math.max(0, this.arena.groundAt(p.x, p.z, base.y + 0.5)) + 0.08;
+      if (!Number.isFinite(p.y)) continue;
+      const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 0.12, 12), new THREE.MeshBasicMaterial({ color: 0x37f2ff }));
+      mesh.position.copy(p);
+      this.scene.add(mesh);
+      this.mines.push({ pos: p, owner, t: 0, mesh });
+    }
+    this.fx.flash(owner.center, 1.2, 0x37f2ff, 0.15);
+    sfx.zap();
+  }
+  private updateMines(dt: number) {
+    for (const m of this.mines) {
+      m.t += dt;
+      (m.mesh.material as THREE.MeshBasicMaterial).color.setHex(m.t > 0.6 && Math.floor(m.t * 6) % 2 ? 0xffffff : 0x37f2ff);
+      const o = m.owner.opp;
+      const armed = m.t > 0.6;
+      const near = armed && o.alive && o.pos.distanceTo(m.pos) < 1.5 && o.state !== 'teleport';
+      if (near || m.t > 9) {
+        if (near || m.t > 9) {
+          this.fx.flash(m.pos.clone().setY(m.pos.y + 0.5), 1.6, 0x37f2ff, 0.25);
+          this.fx.ring(m.pos.clone(), 3, 0x37f2ff, 0.4);
+          sfx.zap(); sfx.hit(true);
+          if (this.sphereVsFighter(m.pos.clone().setY(m.pos.y + 0.5), 1.6, o)) {
+            const dir = o.pos.clone().sub(m.pos).setY(0);
+            if (dir.lengthSq() < 0.01) dir.set(1, 0, 0);
+            o.receiveHit(m.owner, { fwd: 0, up: 0, radius: 0, stamina: 6, health: 6, kbF: 6, kbU: 9, stun: 30, launch: true, heavy: true }, dir.normalize(), { unblockable: true, source: 'mine' });
+            this.log(`mine hits ${o.def.id}`);
+          }
+        }
+        this.scene.remove(m.mesh);
+        m.t = -1;
+      }
+    }
+    this.mines = this.mines.filter((m) => m.t >= 0);
+  }
+
+  spawnProjectile(owner: Fighter, kind: 'bolt' | 'snare' | 'bigbolt', angle = 0) {
     const mesh = this.projPool.find((m) => !m.visible);
     if (!mesh) return;
     const o = owner.opp;
     const origin = owner.hand();
     const aim = o.center.sub(origin);
     const dir = aim.lengthSq() > 0 && aim.clone().setY(0).normalize().dot(owner.forward) > 0.5 ? aim.normalize() : owner.forward.clone().setY(0);
-    const speed = kind === 'bolt' ? 30 : 22;
-    (mesh.material as THREE.MeshBasicMaterial).color.setHex(kind === 'bolt' ? 0xc9a8ff : 0xeaffff);
-    mesh.scale.setScalar(kind === 'bolt' ? 1.1 : 1.4);
+    if (angle) dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
+    const speed = kind === 'bolt' ? 30 : kind === 'bigbolt' ? 24 : 22;
+    (mesh.material as THREE.MeshBasicMaterial).color.setHex(kind === 'snare' ? 0xeaffff : 0xc9a8ff);
+    mesh.scale.setScalar(kind === 'bolt' ? 1.1 : kind === 'bigbolt' ? 2.6 : 1.4);
     mesh.visible = true;
     mesh.position.copy(origin);
     this.projectiles.push({ kind, owner, pos: origin.clone(), vel: dir.multiplyScalar(speed), life: 1.3, mesh, alive: true });
@@ -190,7 +238,7 @@ export class Match {
       p.life -= dt;
       p.pos.addScaledVector(p.vel, dt);
       p.mesh.position.copy(p.pos);
-      this.fx.trail(p.pos, p.kind === 'bolt' ? 0xa070ff : 0xeaffff, 0.1, 0.2);
+      this.fx.trail(p.pos, p.kind === 'snare' ? 0xeaffff : 0xa070ff, p.kind === 'bigbolt' ? 0.25 : 0.1, 0.2);
       const kill = () => { p.alive = false; p.mesh.visible = false; };
       if (p.life <= 0) { kill(); continue; }
       for (const f of this.fighters) {
@@ -206,7 +254,10 @@ export class Match {
           this.log(`${f.def.id} deflects ${p.kind}`);
           break;
         }
-        if (p.kind === 'bolt') {
+        if (p.kind === 'bigbolt') {
+          f.receiveHit(p.owner, { fwd: 0, up: 0, radius: 0, stamina: 8, health: 12, kbF: 10, kbU: 7, stun: 34, launch: true, heavy: true }, dir, { source: 'projectile' });
+          this.fx.flash(p.pos, 1.4, 0xc9a8ff, 0.2);
+        } else if (p.kind === 'bolt') {
           f.receiveHit(p.owner, { fwd: 0, up: 0, radius: 0, stamina: 4, health: 5, kbF: 4, kbU: f.onGround ? 0 : 5, stun: 18, launch: !f.onGround }, dir, { source: 'projectile' });
         } else {
           const r = f.receiveHit(p.owner, { fwd: 0, up: 0, radius: 0, stamina: 4, health: 1, kbF: 1, kbU: 0, stun: 10 }, dir, { source: 'projectile' });
@@ -218,7 +269,7 @@ export class Match {
       if (!p.alive) continue;
       const w = this.arena.wallAt(p.pos, 0.2);
       if (w) {
-        if (w.damage(p.kind === 'bolt' ? 12 : 4, this.fx, p.vel.clone().normalize())) this.arena.spawnRubble(w.center.clone().setY(0.6).addScaledVector(w.outward, -1.2));
+        if (w.damage(p.kind === 'bolt' ? 12 : p.kind === 'bigbolt' ? 45 : 4, this.fx, p.vel.clone().normalize())) this.arena.spawnRubble(w.center.clone().setY(0.6).addScaledVector(w.outward, -1.2));
         this.fx.sparksAt(p.pos, 8, 0xc9a8ff, 5);
         kill();
         continue;
@@ -363,6 +414,7 @@ export class Match {
     });
     this.updateThrownProps();
     this.updateProjectiles(dt);
+    this.updateMines(dt);
     // Post-bout poses.
     if (this.ended && this.tick - this.ended.tick > 70) {
       const w = this.ended.winner;

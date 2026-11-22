@@ -101,6 +101,7 @@ export class Prop {
   holder: any = null;
   thrower: any = null;
   power = 1; // throw multiplier (super throw)
+  uses = 0; // melee swings taken with it
   life = 0;
   solid: Solid;
   hitIds = new Set<any>();

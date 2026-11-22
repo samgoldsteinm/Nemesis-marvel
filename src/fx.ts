@@ -16,12 +16,66 @@ interface Particle {
   color: THREE.Color;
 }
 
+/** A fading ribbon that follows a striking limb: a readable swoosh for every attack. */
+export class Ribbon {
+  mesh: THREE.Mesh;
+  private pts: { a: THREE.Vector3; b: THREE.Vector3; life: number }[] = [];
+  private pos: Float32Array;
+  private col: Float32Array;
+  private color: THREE.Color;
+  static N = 14;
+  constructor(scene: THREE.Scene, color: number) {
+    const N = Ribbon.N;
+    this.color = new THREE.Color(color);
+    const g = new THREE.BufferGeometry();
+    this.pos = new Float32Array(N * 2 * 3);
+    this.col = new Float32Array(N * 2 * 3);
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(this.col, 3));
+    const idx: number[] = [];
+    for (let i = 0; i < N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    g.setIndex(idx);
+    this.mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    this.mesh.frustumCulled = false;
+    scene.add(this.mesh);
+  }
+  push(a: THREE.Vector3, b: THREE.Vector3) {
+    this.pts.unshift({ a: a.clone(), b: b.clone(), life: 0.16 });
+    if (this.pts.length > Ribbon.N) this.pts.pop();
+  }
+  update(dt: number) {
+    for (const p of this.pts) p.life -= dt;
+    while (this.pts.length && this.pts[this.pts.length - 1].life <= 0) this.pts.pop();
+    const N = Ribbon.N;
+    for (let i = 0; i < N; i++) {
+      const p = this.pts[Math.min(i, this.pts.length - 1)];
+      const k = p ? Math.max(0, p.life / 0.16) * (1 - i / N) : 0;
+      for (let j = 0; j < 2; j++) {
+        const v = p ? (j ? p.b : p.a) : this.mesh.position;
+        const o = (i * 2 + j) * 3;
+        this.pos[o] = v.x; this.pos[o + 1] = v.y; this.pos[o + 2] = v.z;
+        const c = j ? k : k * 0.35;
+        this.col[o] = this.color.r * c; this.col[o + 1] = this.color.g * c; this.col[o + 2] = this.color.b * c;
+      }
+    }
+    const g = this.mesh.geometry;
+    g.attributes.position.needsUpdate = true;
+    g.attributes.color.needsUpdate = true;
+  }
+  dispose(scene: THREE.Scene) {
+    scene.remove(this.mesh);
+  }
+}
+
 export class FX {
   quality = 1;
   private debris: THREE.InstancedMesh;
   private sparks: THREE.InstancedMesh;
   private dParts: Particle[] = [];
   private sParts: Particle[] = [];
+  private puffs: THREE.InstancedMesh;
+  private pParts: Particle[] = [];
+  private maxP = 120;
   private rings: { m: THREE.Mesh; life: number; max: number; r0: number; r1: number }[] = [];
   private flashes: { m: THREE.Mesh; life: number; max: number; s: number }[] = [];
   private tmp = new THREE.Object3D();
@@ -42,6 +96,11 @@ export class FX {
     this.sparks.frustumCulled = false;
     this.sparks.count = 0;
     scene.add(this.sparks);
+    this.puffs = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshLambertMaterial({ color: 0xb8b0a8, transparent: true, opacity: 0.45, depthWrite: false }), this.maxP);
+    this.puffs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.puffs.frustumCulled = false;
+    this.puffs.count = 0;
+    scene.add(this.puffs);
     const ringGeo = new THREE.RingGeometry(0.85, 1, 40);
     ringGeo.rotateX(-Math.PI / 2);
     for (let i = 0; i < 8; i++) {
@@ -61,6 +120,7 @@ export class FX {
 
   clear() {
     this.dParts.length = 0;
+    this.pParts.length = 0;
     this.sParts.length = 0;
     for (const r of this.rings) { r.life = 0; r.m.visible = false; }
     for (const f of this.flashes) { f.life = 0; f.m.visible = false; }
@@ -86,6 +146,18 @@ export class FX {
       const v = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.3, Math.random() - 0.5).normalize().multiplyScalar(speed * (0.3 + Math.random()));
       const life = 0.25 + Math.random() * 0.35;
       this.sParts.push({ p: pos.clone(), v, r: new THREE.Euler(), rv: new THREE.Vector3(), life, max: life, size: size * (0.6 + Math.random()), grav, color: new THREE.Color(color) });
+    }
+  }
+
+  /** Soft dust from landings, footsteps and slides. */
+  dust(pos: THREE.Vector3, count: number, size = 0.35, spread = 1.5) {
+    const n = Math.max(1, Math.round(count * this.quality));
+    for (let i = 0; i < n; i++) {
+      if (this.pParts.length >= this.maxP) this.pParts.shift();
+      const a = Math.random() * Math.PI * 2;
+      const v = new THREE.Vector3(Math.cos(a) * spread * (0.5 + Math.random()), 0.6 + Math.random() * 0.8, Math.sin(a) * spread * (0.5 + Math.random()));
+      const life = 0.45 + Math.random() * 0.35;
+      this.pParts.push({ p: pos.clone().add(new THREE.Vector3(0, 0.15, 0)), v, r: new THREE.Euler(), rv: new THREE.Vector3(), life, max: life, size: size * (0.6 + Math.random() * 0.8), grav: 0.5, color: new THREE.Color() });
     }
   }
 
@@ -167,6 +239,25 @@ export class FX {
     this.sparks.count = i;
     this.sparks.instanceMatrix.needsUpdate = true;
     if (this.sparks.instanceColor) this.sparks.instanceColor.needsUpdate = true;
+
+    i = 0;
+    for (let k = this.pParts.length - 1; k >= 0; k--) {
+      const d = this.pParts[k];
+      d.life -= dt;
+      if (d.life <= 0) { this.pParts.splice(k, 1); continue; }
+      d.v.multiplyScalar(Math.exp(-3 * dt));
+      d.v.y -= d.grav * dt;
+      d.p.addScaledVector(d.v, dt);
+      const f = 1 - d.life / d.max;
+      t.position.copy(d.p);
+      t.rotation.set(0, 0, 0);
+      t.scale.setScalar(d.size * (0.6 + f * 1.2) * (1 - f * f));
+      t.updateMatrix();
+      this.puffs.setMatrixAt(i, t.matrix);
+      i++;
+    }
+    this.puffs.count = i;
+    this.puffs.instanceMatrix.needsUpdate = true;
 
     for (const r of this.rings) {
       if (r.life <= 0) continue;

@@ -49,6 +49,21 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
   - **TETHER**: swing recovery. Line swing, wall cling and climb, ranged line-yank grapple, snare bolt. A launch that is fatal for Basalt can be saved by Tether's reel-in recovery.
   - **AERIN VOLT**: flight recovery. Flight drains energy (B rises, Y sinks), volt bolts, flight dash.
   - **SHUNT**: teleport recovery. Directional hop, neutral L flanks behind the opponent, blink strike, displacement pulse. A teleport needs energy, so with an empty meter he cannot get back.
+- **Move-set structure (shared across the roster, different content per fighter):**
+  - **Chains and aerials:** a 3-hit A chain, plus rising and falling air attacks
+  - **Running A:** a running attack
+  - **R+A:** standing power; running R+A for a **dash power**; keep A held for a **charged power**; aerial power in the air
+  - **Mobility:** an attack out of mobility (L+A)
+  - **Grapples:** pummels while holding a grab (A, up to three), and a light prop swung as a weapon (breaks after three swings)
+  - **R+X power grapple, unique per fighter:** Basalt *Piledriver*, Tether *Line Spin* (a fling built for ring-outs), Aerin *Skyfall Drop*, Shunt *Displace* (teleports the victim nine metres, off an open edge if you aim there)
+  - **Finisher:** each fighter has a cinematic finisher
+
+  The full per-fighter list is on the *Controls & Move Sheets* screen.
+- **Presentation:**
+  - spring-driven joint animation with anticipation and follow-through
+  - swoosh ribbons along the striking limb, plus a white flash on the victim when hit
+  - hit-stop, and a camera punch-in on heavy impacts
+  - dust from landings, footfalls and slides, and tumbling launches
 - **Resources:** yellow recoverable stamina is drawn over red lasting health. Powered hits, throws, props and explosions cut health. Energy shows quarter ticks. Rage builds from dealing damage, and a neutral tap of R gives 8 seconds of unlimited energy. **Danger** starts at health ≤ 25 or stamina ≤ 10. **Finisher** is R+X on a fighter in Danger, with at least a quarter of the energy meter or during Rage. Each fighter has its own cinematic finisher. Without enough energy, R+X becomes an ordinary grab and shows "NEED 1/4 POWER". A bout ends by K.O., RING OUT or FINISHER, and the results screen says which one ended it.
 - **Feel:** startup, active and recovery frames per move. Hit-stop and screen shake on heavy impacts. Directional knockback. Launched bodies break the fence. A diamond marker shows the current X target. Synthesized audio gives a distinct sound for hits, blocks, catches, wall breaks, explosions, Rage on and off, and Danger.
 - **Camera:** one shared camera sits perpendicular to the fighters. It holds its angle when one fighter is directly above the other, leaves room in the direction of a launch, and rate-limits rotation so fast side swaps don't whip the view. Props and the hut fade when they block the view. Finishers and victories get cinematic framing.
@@ -63,9 +78,9 @@ These come from 40 frames of the gameplay clip you supplied. They're genre conve
 - bloom with a full-screen red wash during Rage
 - an elevated roadway arena full of throwable cars and barrels
 
-## Checks actually run (`tests/checks.cjs`, 22/22 passing)
+## Checks actually run (`tests/checks.cjs`, 27/27 passing)
 
-These checks covered K.O. on depleted health, Danger from stamina with full health, leaving Danger before a finisher, a valid finisher, a failed finisher with too little energy, and a finisher during Rage. They covered Tether's aerial save from a launch off an open edge, Basalt's ring-out on the same trajectory, and Shunt's ring-out with no energy. They covered a clean rematch reset, the lift-class split (only Basalt lifts the tank), the planted heavy throw and tank explosion, catching a prop, an R+A chord on the same tick resolving once, X choosing between the opponent and an adjacent prop, a grab returning to a valid state after rematch, a thrown prop breaking the fence, super block deflecting a projectile, Rage turning on and back off, Basalt lifting a car on the Overpass and the car exploding, CPU bouts on the Overpass, and four complete CPU-vs-CPU bouts with no errors.
+These checks covered K.O. on depleted health, Danger from stamina with full health, leaving Danger before a finisher, a valid finisher, a failed finisher with too little energy, and a finisher during Rage. They covered Tether's aerial save from a launch off an open edge, Basalt's ring-out on the same trajectory, and Shunt's ring-out with no energy. They covered a clean rematch reset, the lift-class split (only Basalt lifts the tank), the planted heavy throw and tank explosion, catching a prop, an R+A chord on the same tick resolving once, X choosing between the opponent and an adjacent prop, a grab returning to a valid state after rematch, a thrown prop breaking the fence, super block deflecting a projectile, Rage turning on and back off, Basalt lifting a car on the Overpass and the car exploding, CPU bouts on the Overpass, the tap/charged/dash power variants, the running attack, grab pummels, all four power grapples, a Displace ring-out, prop-weapon swings breaking the prop, and four complete CPU-vs-CPU bouts with no errors.
 
 Also checked by hand in headless Chromium: the full keyboard menu flow (title → 2P → select → fight → pause/resume → K.O. → results → switch sides), and touch on an emulated Pixel 7 in landscape, steering with the stick while holding R and A at once.
 

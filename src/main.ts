@@ -278,9 +278,12 @@ function render(s: Screen): string {
           <tr><td>X</td><td>Grapple the opponent, pick up a prop, or throw what you hold. The diamond marker shows the current target.</td></tr>
           <tr><td>Y</td><td>Guard · Y + direction: evade (A during evade: counter) · Press Y as a thrown prop arrives to catch it</td></tr>
           <tr><td>L</td><td>Mobility (sprint / swing / flight / teleport) · L+A mobility attack</td></tr>
-          <tr><td>R + A</td><td>Powered attack (costs energy)</td></tr>
+          <tr><td>R + A</td><td>Powered attack (costs energy). Running: dash power. Keep A held: charged power. In the air: aerial power.</td></tr>
+          <tr><td>A (running)</td><td>Running attack</td></tr>
+          <tr><td>X, then A</td><td>Pummel a grabbed opponent (up to 3), X or a direction + X to throw</td></tr>
+          <tr><td>A with a light prop</td><td>Swing it as a weapon (breaks after 3 swings); X throws it</td></tr>
           <tr><td>R + B</td><td>Super jump</td></tr>
-          <tr><td>R + X</td><td>Super grapple / super throw. On a DANGER opponent with ≥¼ energy: FINISHER</td></tr>
+          <tr><td>R + X</td><td>Power grapple (unique per fighter). On a DANGER opponent with ≥¼ energy: FINISHER</td></tr>
           <tr><td>R + Y</td><td>Super block — deflects projectiles and thrown props</td></tr>
           <tr><td>Hold R</td><td>Recharge energy (standing still, vulnerable)</td></tr>
           <tr><td>Tap R</td><td>Activate Rage when the meter is full: ${TUNING.rageDuration}s of unlimited power</td></tr>
@@ -302,6 +305,7 @@ function render(s: Screen): string {
           <tr><td>Grapple</td><td>${c.sheet.grapple}</td></tr>
           <tr><td>Finisher</td><td>${c.sheet.finisher}</td></tr>
           <tr><td>Weakness</td><td>${c.sheet.weakness}</td></tr>
+          ${c.sheet.moves.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}
         </table>`).join('')}
       </div>
       <div class="row"><button class="btn" data-nav data-act="back">Back</button></div>

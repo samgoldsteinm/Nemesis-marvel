@@ -27,6 +27,7 @@ export class CPU {
   private projCooldown = 0;
   private wantProp: Prop | null = null;
   lastPlan = '';
+  private dashPending = 0;
   constructor(public f: Fighter, public match: Match, public diff: Difficulty = 'normal') {}
 
   get p() {
@@ -49,6 +50,8 @@ export class CPU {
       this.nextThink = this.tick + this.p.react + Math.floor(Math.random() * this.p.react * 0.6);
     }
     const plan = this.plan;
+    // Dash power: run in, then R+A once at speed.
+    if (this.dashPending > 0 && --this.dashPending === 0 && f.onGround) { out.down.power = true; out.down.attack = true; }
     if (plan) {
       const mv = typeof plan.move === 'function' ? plan.move() : plan.move;
       if (mv) this.stick(out, mv);
@@ -140,8 +143,10 @@ export class CPU {
       const edge = this.match.arena.openEdgeNear(f.pos, 10);
       const dir = edge ? edge.center.clone().sub(f.pos) : f.pos.clone().setY(0).lengthSq() > 4 ? f.pos.clone().setY(0) : f.forward;
       this.stick(out, dir);
-      if (f.t > 14) out.down.grab = !this.lastPress.has('grab');
-      this.lastPress = new Set(out.down.grab ? ['grab'] : []);
+      if (f.pummels < 2 && f.t > 7 && Math.random() < 0.5) out.down.attack = !this.lastPress.has('attack');
+      else if (f.t > 14 && f.pummels >= 2) out.down.grab = !this.lastPress.has('grab');
+      else if (f.t > 30) out.down.grab = !this.lastPress.has('grab');
+      this.lastPress = new Set((['grab', 'attack'] as ActionName[]).filter((k) => out.down[k]));
       return true;
     }
     return false;
@@ -213,6 +218,7 @@ export class CPU {
         this.set('go-light', 20, { move: () => prop.state === 'rest' ? prop.pos.clone().sub(f.pos) : null }); return;
       }
       if (f.def.recovery === 'ground' && rnd < 0.4) { this.set('sprint-in', 30, { move: toward, hold: ['mobility'] }); return; }
+      if (dist < 9 && f.hasEnergy(30) && rnd < 0.3 * p.aggression) { this.set('dash-power', 30, { move: toward, press: [] }); this.dashPending = 12; return; }
       this.set('approach', 25, { move: toward }); return;
     }
     // 7. Close range. Position to push them toward an open edge when possible.
@@ -227,7 +233,9 @@ export class CPU {
     if (dist < f.def.radius + o.def.radius + 1.2 && Math.abs(dy) < 1.4) {
       if (o.state === 'down' || o.state === 'getup') { this.set('wait', 12, { move: toward().multiplyScalar(-1) }); return; }
       if (o.state === 'guard' && rnd < 0.6) { this.set('grab', 6, { press: ['grab'] }); return; }
+      if (rnd < 0.12 && f.hasEnergy(20) && !o.danger) { f.yaw = Math.atan2(toO.x, toO.z); this.set('power-grapple', 6, { hold: ['power'], press: ['grab'] }); return; }
       if (rnd < 0.15 && f.hasEnergy(30) && f.onGround) { this.set('power', 14, { hold: ['power'], press: ['attack'] }); return; }
+      if (rnd < 0.22 && f.hasEnergy(45) && f.onGround) { this.set('charged-power', 26, { hold: ['power', 'attack'] }); return; }
       if (rnd < 0.2) { this.set('grab', 6, { press: ['grab'] }); return; }
       if (rnd < p.aggression) { this.set('chain', 34, { press: ['attack'], tapEvery: 9 }); return; }
       this.set('guard', 16, { hold: ['guard'] }); return;

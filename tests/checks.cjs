@@ -365,6 +365,81 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     return { pass: outcomes.every((o) => !o.includes('timeout')), info: outcomes.join(' ; ') };
   });
 
+  await check('Move set: tap R+A = power, hold R+A = charged power, running R+A = dash power', () => {
+    const ids = [];
+    let m = T.setup('basalt', 'tether');
+    let [a] = m.fighters;
+    T.place(a, 0, 0, 0); a.energy = 100;
+    T.hold(0, ['power', 'attack'], 1); T.idle(2); ids.push(a.move?.id);
+    m = T.setup('basalt', 'tether'); [a] = m.fighters;
+    T.place(a, 0, 0, 0); a.energy = 100;
+    T.hold(0, ['power', 'attack'], 26); T.idle(1); ids.push(a.move?.id); const eCharged = a.energy;
+    m = T.setup('basalt', 'tether'); [a] = m.fighters;
+    T.place(a, -8, 0, Math.PI / 2); a.energy = 100;
+    const camR = T.G.match.camBasis.right;
+    T.hold(0, [], 30, [camR.x > 0 ? 1 : -1, 0]);
+    T.hold(0, ['power', 'attack'], 1, [camR.x > 0 ? 1 : -1, 0]); ids.push(a.move?.id);
+    return { pass: ids[0] === 'thunderclap' && ids[1] === 'tectonic' && ids[2] === 'avalanche' && eCharged < 60, info: `${ids.join(', ')} energyAfterCharge=${eCharged.toFixed(0)}` };
+  });
+
+  await check('Move set: running A = running attack; grab A pummels then X throws', () => {
+    const m = T.setup('tether', 'basalt');
+    const [a, b] = m.fighters;
+    T.place(a, -8, 0, Math.PI / 2);
+    const camR = T.G.match.camBasis.right;
+    T.hold(0, [], 30, [camR.x > 0 ? 1 : -1, 0]);
+    T.hold(0, ['attack'], 1, [camR.x > 0 ? 1 : -1, 0]);
+    const run = a.move?.id;
+    T.idle(40);
+    T.faceEachOther(m, 1.6);
+    T.hold(0, ['grab'], 1); T.idle(8);
+    const st0 = b.stamina;
+    for (let i = 0; i < 3; i++) { T.hold(0, ['attack'], 1); T.idle(9); }
+    const pummels = a.pummels, st1 = b.stamina, stillHeld = b.state === 'grabbed';
+    T.hold(0, ['grab'], 1); T.idle(5);
+    return { pass: run === 'slideKick' && pummels === 3 && st1 < st0 && stillHeld && b.state === 'launched', info: `run=${run} pummels=${pummels} stamina ${st0.toFixed(0)}->${st1.toFixed(0)} held=${stillHeld} after=${b.state}` };
+  });
+
+  await check('Power grapples: each fighter has its own R+X throw', () => {
+    const out = [];
+    for (const id of ['basalt', 'tether', 'aerin', 'shunt']) {
+      const m = T.setup(id, 'basalt');
+      const [a, b] = m.fighters;
+      T.faceEachOther(m, a.def.radius + b.def.radius + 0.6);
+      a.energy = 100;
+      const p0 = b.pos.clone();
+      T.hold(0, ['power', 'grab'], 1);
+      let seen = false;
+      for (let i = 0; i < 80; i++) { T.idle(1); if (a.state === 'pgrapple') seen = true; }
+      out.push(`${id}:${a.def.powerGrapple}:${seen ? 'ok' : 'NO'}:hp${b.health.toFixed(0)}:moved${b.pos.distanceTo(p0).toFixed(1)}`);
+    }
+    return { pass: out.every((o) => o.includes(':ok:') && !o.includes('hp100')), info: out.join(' ; ') };
+  });
+
+  await check('SHUNT Displace drops the victim off an open edge for a ring-out', () => {
+    const m = T.setup('shunt', 'basalt');
+    const [a, b] = m.fighters;
+    m.arena.walls.filter((w) => w.outward.z === 1 && Math.abs(w.center.x) < 3).forEach((w) => w.damage(999, m.fx));
+    T.place(a, 0, 9, 0);
+    T.place(b, 0, 10.2, Math.PI);
+    a.energy = 100; b.energy = 0;
+    T.hold(0, ['power', 'grab'], 1);
+    T.idle(320);
+    return { pass: m.ended?.how === 'ringout' && m.ended.winner === a, info: `end=${m.ended?.how} basaltState=${b.state}` };
+  });
+
+  await check('Light prop swings as a weapon and breaks after three swings', () => {
+    const m = T.setup('tether', 'basalt');
+    const [a, b] = m.fighters;
+    const crate = m.arena.props.find((p) => p.kind === 'crate' && Math.abs(p.pos.x - 3.5) < 0.1);
+    T.place(a, crate.pos.x - 1.2, crate.pos.z, Math.PI / 2);
+    T.place(b, -12, -8, 0);
+    T.hold(0, ['grab'], 1); T.idle(10);
+    const held = a.heldProp === crate;
+    for (let i = 0; i < 3; i++) { T.hold(0, ['attack'], 1); T.idle(30); }
+    return { pass: held && crate.state === 'gone' && !a.heldProp, info: `held=${held} crate=${crate.state} uses=${crate.uses}` };
+  });
+
   await check('CPU vs CPU: 4 full bouts run to a single resolved winner without errors', () => {
     const outcomes = [];
     const pairs = [['basalt', 'tether'], ['tether', 'basalt'], ['aerin', 'shunt'], ['shunt', 'basalt']];

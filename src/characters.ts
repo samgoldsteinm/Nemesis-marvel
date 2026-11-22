@@ -19,7 +19,11 @@ export interface HitSpec {
 }
 
 export type Special =
-  | 'thunderclap' | 'groundPound' | 'bolt' | 'snare' | 'pulse' | 'blinkStrike' | 'counter' | 'dash';
+  | 'thunderclap' | 'groundPound' | 'bolt' | 'snare' | 'pulse' | 'blinkStrike' | 'counter' | 'dash'
+  | 'quake' | 'tripleSnare' | 'bigbolt' | 'mines' | 'slingshot' | 'propSwing';
+
+/** Which limb draws the strike swoosh. */
+export type Limb = 'rh' | 'lh' | 'rf' | 'lf' | 'both';
 
 export interface MoveDef {
   id: string;
@@ -34,7 +38,11 @@ export interface MoveDef {
   special?: Special;
   riseV?: number; // vertical velocity applied when active begins
   airOk?: boolean;
+  limb?: Limb;
+  name?: string; // display name for the move sheet
 }
+
+export type PowerGrapple = 'piledriver' | 'webSpin' | 'skyDrop' | 'displace';
 
 export interface CharacterDef {
   id: string;
@@ -60,37 +68,47 @@ export interface CharacterDef {
     power: MoveDef;
     powerAir: MoveDef;
     counter: MoveDef;
+    runAttack: MoveDef; // A while running
+    dashPower: MoveDef; // R+A while running
+    chargePower: MoveDef; // hold R+A
   };
-  sheet: { mobility: string; power: string; grapple: string; finisher: string; weakness: string };
+  powerGrapple: PowerGrapple; // R+X on an opponent not in Danger
+  sheet: { mobility: string; power: string; grapple: string; finisher: string; weakness: string; moves: [string, string][] };
   build: (rig: Rig) => { accents: THREE.MeshStandardMaterial[] };
 }
 
 // ------------------------------------------------------------------ shared moves
 const jab = (dmg = 5, reach = 0.95): MoveDef => ({
-  id: 'jab', wind: P.jabW, strike: P.jabS, startup: 5, active: 4, recovery: 9, lunge: 2.5,
+  id: 'jab', limb: 'rh', wind: P.jabW, strike: P.jabS, startup: 5, active: 4, recovery: 9, lunge: 2.5,
   hit: { fwd: reach, up: 1.3, radius: 0.55, stamina: dmg, health: 0, kbF: 2, kbU: 0, stun: 16 },
 });
 const cross = (dmg = 6, reach = 1.0): MoveDef => ({
-  id: 'cross', wind: P.crossW, strike: P.crossS, startup: 6, active: 4, recovery: 11, lunge: 3,
+  id: 'cross', limb: 'lh', wind: P.crossW, strike: P.crossS, startup: 6, active: 4, recovery: 11, lunge: 3,
   hit: { fwd: reach, up: 1.3, radius: 0.6, stamina: dmg, health: 0, kbF: 2.5, kbU: 0, stun: 18 },
 });
 const launcher = (dmg: number, reach: number, kbF: number, kbU: number, extra: Partial<MoveDef> = {}): MoveDef => ({
-  id: 'launcher', wind: P.upperW, strike: P.upperS, startup: 10, active: 5, recovery: 18, lunge: 3.5,
+  id: 'launcher', limb: 'rh', wind: P.upperW, strike: P.upperS, startup: 10, active: 5, recovery: 18, lunge: 3.5,
   hit: { fwd: reach, up: 1.4, radius: 0.7, stamina: dmg, health: 2, kbF, kbU, stun: 30, launch: true, heavy: true, breaksWalls: 25 },
   ...extra,
 });
 const airRise = (dmg = 6): MoveDef => ({
-  id: 'airRise', wind: P.upperW, strike: P.kickS, startup: 4, active: 6, recovery: 10, airOk: true,
+  id: 'airRise', limb: 'lf', wind: P.upperW, strike: P.kickS, startup: 4, active: 6, recovery: 10, airOk: true,
   hit: { fwd: 0.9, up: 1.5, radius: 0.75, stamina: dmg, health: 0, kbF: 4, kbU: 9, stun: 26, launch: true },
 });
 const airDive = (dmg = 8): MoveDef => ({
-  id: 'airDive', wind: P.overheadW, strike: P.diveS, startup: 6, active: 10, recovery: 12, airOk: true, riseV: -14,
+  id: 'airDive', limb: 'both', wind: P.overheadW, strike: P.diveS, startup: 6, active: 10, recovery: 12, airOk: true, riseV: -14,
   hit: { fwd: 0.8, up: 0.6, radius: 0.85, stamina: dmg, health: 1, kbF: 6, kbU: 3, stun: 28, launch: true, heavy: true },
 });
 const counter = (): MoveDef => ({
-  id: 'counter', wind: P.crossW, strike: P.kickS, startup: 3, active: 5, recovery: 14, lunge: 6, special: 'counter',
+  id: 'counter', limb: 'lf', wind: P.crossW, strike: P.kickS, startup: 3, active: 5, recovery: 14, lunge: 6, special: 'counter',
   hit: { fwd: 1.0, up: 1.2, radius: 0.8, stamina: 10, health: 3, kbF: 9, kbU: 6, stun: 30, launch: true, heavy: true, breaksWalls: 20 },
 });
+
+/** A melee swing with a held light prop (A while carrying). */
+export const PROP_SWING: MoveDef = {
+  id: 'propSwing', limb: 'both', wind: P.overheadW, strike: P.slamS, startup: 9, active: 5, recovery: 14, lunge: 3, special: 'propSwing',
+  hit: { fwd: 1.4, up: 1.2, radius: 0.9, stamina: 7, health: 5, kbF: 8, kbU: 4, stun: 26, heavy: true, breaksWalls: 20 },
+};
 
 // ------------------------------------------------------------------ materials
 function mat(color: number, rough = 0.6, metal = 0.1, emissive = 0x000000, ei = 0, flat = false) {
@@ -131,13 +149,27 @@ const basalt: CharacterDef = {
       hit: { fwd: 0, up: 0.4, radius: 3.4, stamina: 12, health: 9, kbF: 10, kbU: 9, stun: 34, launch: true, heavy: true, breaksWalls: 30 },
     },
     counter: counter(),
+    runAttack: {
+      id: 'lariat', name: 'Lariat', limb: 'both', wind: P.crossW, strike: P.clapW, startup: 7, active: 7, recovery: 15, lunge: 9,
+      hit: { fwd: 0.9, up: 1.4, radius: 1.0, stamina: 9, health: 2, kbF: 9, kbU: 5, stun: 28, launch: true, heavy: true, breaksWalls: 30 },
+    },
+    dashPower: {
+      id: 'avalanche', name: 'Avalanche Charge', limb: 'both', wind: P.evade, strike: P.jabS, startup: 10, active: 16, recovery: 20, lunge: 15, energy: 25,
+      hit: { fwd: 1.1, up: 1.2, radius: 1.1, stamina: 14, health: 10, kbF: 16, kbU: 6, stun: 36, launch: true, heavy: true, breaksWalls: 100 },
+    },
+    chargePower: {
+      id: 'tectonic', name: 'Tectonic Slam', limb: 'both', wind: P.overheadW, strike: P.slamS, startup: 6, active: 4, recovery: 30, energy: 20, special: 'quake',
+      hit: { fwd: 0, up: 0.5, radius: 4.8, stamina: 16, health: 14, kbF: 12, kbU: 11, stun: 40, launch: true, heavy: true, breaksWalls: 70 },
+    },
   },
+  powerGrapple: 'piledriver',
   sheet: {
     mobility: 'L: Sprint — L+A shoulder charge breaks walls',
     power: 'R+A: Thunderclap shockwave cone · in air: Ground Pound',
     grapple: 'Lifts every prop class, including the fuel tank. Planted heavy throw.',
     finisher: 'Quarry Drop — lifts and spikes the opponent through the roof deck',
     weakness: 'Ground recovery barely changes his trajectory; off an open edge he falls.',
+    moves: [['A A A', 'Jab, cross, hammer launcher'], ['A (running)', 'Lariat'], ['R+A', 'Thunderclap cone'], ['R+A (running)', 'Avalanche Charge — smashes barriers'], ['Hold R+A', 'Tectonic Slam — huge quake'], ['R+A (air)', 'Ground Pound'], ['L+A', 'Shoulder charge'], ['R+X', 'Piledriver'], ['Grab, A', 'Knee pummel']],
   },
   build(rig) {
     const rock = mat(0x5a6a80, 0.9, 0.05, 0x000000, 0, true);
@@ -167,6 +199,14 @@ const basalt: CharacterDef = {
       limb(sh, 0.45, 0.21, 0.24, rock);
       box(sh, 0.36, 0.14, 0.5, rock2, [0, -0.48, 0.08]);
     }
+    // Back boulders, knuckle stones and a cracked magma core in the chest.
+    for (const [x, y, z, r] of [[0.25, 0.95, -0.42, 0.22], [-0.3, 0.75, -0.4, 0.2], [0, 0.45, -0.36, 0.18]] as const) {
+      const b = sphere(j.spine, r, rock2, [x, y, z]);
+      b.scale.set(1.2, 0.9, 0.8);
+    }
+    for (const f of [j.lFore, j.rFore]) for (const x of [-0.12, 0.0, 0.12]) box(f, 0.1, 0.1, 0.1, rock, [x, -0.8, 0.17], [0.3, 0.2, 0.1]);
+    sphere(j.spine, 0.11, magma, [0, 0.78, 0.4], [1.3, 1, 0.6], false);
+    box(j.hips, 0.85, 0.12, 0.56, rock2, [0, 0.22, 0]);
     return { accents: [magma] };
   },
 };
@@ -203,13 +243,24 @@ const tether: CharacterDef = {
       id: 'snareAir', wind: P.shoot, strike: P.shoot, startup: 8, active: 2, recovery: 14, energy: 20, special: 'snare', airOk: true,
     },
     counter: counter(),
+    runAttack: {
+      id: 'slideKick', name: 'Slide Trip', limb: 'lf', wind: P.evade, strike: P.kickS, startup: 5, active: 8, recovery: 12, lunge: 10,
+      hit: { fwd: 0.9, up: 0.5, radius: 0.8, stamina: 7, health: 1, kbF: 4, kbU: 8, stun: 26, launch: true },
+    },
+    dashPower: {
+      id: 'slingshot', name: 'Line Slingshot', limb: 'lf', wind: P.shoot, strike: P.kickS, startup: 7, active: 10, recovery: 14, energy: 20, special: 'slingshot', airOk: true,
+      hit: { fwd: 0.9, up: 1.1, radius: 0.9, stamina: 10, health: 7, kbF: 13, kbU: 7, stun: 32, launch: true, heavy: true, breaksWalls: 40 },
+    },
+    chargePower: { id: 'tripleSnare', name: 'Snare Spread', limb: 'rh', wind: P.shoot, strike: P.shoot, startup: 4, active: 2, recovery: 18, energy: 15, special: 'tripleSnare' },
   },
+  powerGrapple: 'webSpin',
   sheet: {
     mobility: 'L: Line swing (hold) · sticks to walls on contact · L+A swing kick',
     power: 'R+A: Snare bolt — binds the target briefly',
     grapple: 'X at range: line-yank opponent or light prop. Lifts light props only.',
     finisher: 'Cocoon Spin — binds, spins and flings',
     weakness: 'Cannot lift medium or heavy props; low weight means long launches.',
+    moves: [['A A A', 'Jab, cross, flip kick'], ['A (running)', 'Slide Trip'], ['R+A', 'Snare bolt'], ['R+A (running)', 'Line Slingshot — pulls in with a kick'], ['Hold R+A', 'Snare Spread — three bolts'], ['L+A', 'Swing kick'], ['X (range)', 'Line yank'], ['R+X', 'Line Spin — fling for a ring-out'], ['Grab, A', 'Knee pummel']],
   },
   build(rig) {
     const suit = mat(0x109c8e, 0.45, 0.15);
@@ -236,6 +287,17 @@ const tether: CharacterDef = {
       limb(sh, 0.42, 0.08, 0.065, dark);
       box(sh, 0.11, 0.07, 0.24, dark, [0, -0.45, 0.06]);
     }
+    // Chest emblem (a hooked line), belt with launcher cartridges, boots and mask seams.
+    const em = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.018, 6, 16, Math.PI * 1.4), gold);
+    em.position.set(0, 0.46, 0.215);
+    em.rotation.z = -0.6;
+    j.spine.add(em);
+    box(j.spine, 0.02, 0.2, 0.02, gold, [0.07, 0.37, 0.215], [0, 0, 0.25], false);
+    box(j.hips, 0.4, 0.07, 0.27, dark, [0, 0.12, 0]);
+    for (const x of [-0.14, -0.05, 0.05, 0.14]) box(j.hips, 0.05, 0.08, 0.04, gold, [x, 0.12, 0.15], undefined, false);
+    for (const sh of [j.lShin, j.rShin]) box(sh, 0.13, 0.2, 0.15, dark, [0, -0.33, 0.01]);
+    box(j.head, 0.02, 0.24, 0.02, dark, [0, 0.16, 0.17], [0.3, 0, 0], false);
+    for (const a of [j.lArm, j.rArm]) box(a, 0.15, 0.08, 0.15, dark, [0, -0.02, 0]);
     return { accents: [lens, gold] };
   },
 };
@@ -268,13 +330,24 @@ const aerin: CharacterDef = {
     power: { id: 'bolt', wind: P.shoot, strike: P.shoot, startup: 7, active: 2, recovery: 12, energy: 12, special: 'bolt', airOk: true },
     powerAir: { id: 'boltAir', wind: P.shoot, strike: P.shoot, startup: 6, active: 2, recovery: 10, energy: 12, special: 'bolt', airOk: true },
     counter: counter(),
+    runAttack: {
+      id: 'spinKick', name: 'Gale Kick', limb: 'lf', wind: P.crossW, strike: P.kickS, startup: 6, active: 6, recovery: 12, lunge: 8,
+      hit: { fwd: 0.9, up: 1.2, radius: 0.9, stamina: 8, health: 1, kbF: 8, kbU: 3, stun: 24 },
+    },
+    dashPower: {
+      id: 'stormDash', name: 'Storm Dash', limb: 'both', wind: P.fly.bind(null, 12), strike: P.diveS, startup: 5, active: 14, recovery: 14, lunge: 18, energy: 20, airOk: true,
+      hit: { fwd: 0.9, up: 1.0, radius: 1.0, stamina: 10, health: 8, kbF: 12, kbU: 6, stun: 30, launch: true, heavy: true, breaksWalls: 40 },
+    },
+    chargePower: { id: 'chainLightning', name: 'Chain Lightning', limb: 'rh', wind: P.shoot, strike: P.shoot, startup: 4, active: 2, recovery: 20, energy: 15, special: 'bigbolt', airOk: true },
   },
+  powerGrapple: 'skyDrop',
   sheet: {
     mobility: 'L: Toggle flight (B rise, Y sink) · L+A flight dash',
     power: 'R+A: Volt bolt — lasting damage, deflectable by super block',
     grapple: 'Lifts light props only.',
     finisher: 'Skyfall — carries the opponent up and drives them down in a lightning strike',
     weakness: 'Flight burns energy; caught charging on the ground she is exposed.',
+    moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Gale Kick'], ['R+A', 'Volt bolt'], ['R+A (running)', 'Storm Dash'], ['Hold R+A', 'Chain Lightning — heavy bolt'], ['L', 'Flight (B up, Y down)'], ['L+A', 'Flight dash'], ['R+X', 'Skyfall Drop'], ['Grab, A', 'Knee pummel']],
   },
   build(rig) {
     const white = mat(0xe8e6f4, 0.4, 0.15);
@@ -318,6 +391,19 @@ const aerin: CharacterDef = {
     rw.rotation.y = 0.5;
     rig.chestAnchor.add(lw, rw);
     (rig as any).wings = [lw, rw];
+    // Ponytail, glowing pauldrons, belt and boots.
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.55, 8), hair);
+    tail.position.set(0, 0.05, -0.2);
+    tail.rotation.x = 2.6;
+    tail.castShadow = true;
+    j.head.add(tail);
+    for (const [a, sx] of [[j.lArm, 1], [j.rArm, -1]] as const) {
+      const pad = sphere(a, 0.1, violet, [sx * 0.03, 0.02, 0]);
+      pad.scale.set(1.1, 0.7, 1.1);
+      box(a, 0.06, 0.02, 0.1, glow, [sx * 0.06, 0.07, 0], undefined, false);
+    }
+    box(j.hips, 0.36, 0.06, 0.25, glow, [0, 0.12, 0], undefined, false);
+    for (const sh of [j.lShin, j.rShin]) { box(sh, 0.12, 0.22, 0.14, white, [0, -0.33, 0.01]); box(sh, 0.11, 0.06, 0.22, white, [0, -0.45, 0.05]); }
     return { accents: [glow] };
   },
 };
@@ -356,13 +442,24 @@ const shunt: CharacterDef = {
       hit: { fwd: 0, up: 1.0, radius: 2.8, stamina: 10, health: 7, kbF: 12, kbU: 7, stun: 32, launch: true, heavy: true, breaksWalls: 30 },
     },
     counter: counter(),
+    runAttack: {
+      id: 'phaseElbow', name: 'Phase Elbow', limb: 'rh', wind: P.crossW, strike: P.crossS, startup: 6, active: 6, recovery: 12, lunge: 9,
+      hit: { fwd: 1.0, up: 1.3, radius: 0.85, stamina: 8, health: 1, kbF: 9, kbU: 2, stun: 24 },
+    },
+    dashPower: {
+      id: 'phaseLunge', name: 'Phase Lunge', limb: 'lf', wind: P.teleport, strike: P.kickS, startup: 8, active: 6, recovery: 14, special: 'blinkStrike', energy: 20,
+      hit: { fwd: 1.0, up: 1.2, radius: 0.95, stamina: 11, health: 8, kbF: 13, kbU: 7, stun: 32, launch: true, heavy: true, breaksWalls: 40 },
+    },
+    chargePower: { id: 'mineTrail', name: 'Pulse Mines', limb: 'both', wind: P.charge.bind(null, 0), strike: P.clapW, startup: 4, active: 2, recovery: 16, energy: 15, special: 'mines' },
   },
+  powerGrapple: 'displace',
   sheet: {
     mobility: 'L+direction: Hop-teleport · L neutral: flank behind opponent · L+A blink strike',
     power: 'R+A: Displacement pulse — radial blast',
     grapple: 'Lifts light props only.',
     finisher: 'Scatter — a chain of teleport strikes from every side',
     weakness: 'Teleports cost energy; with an empty meter he has no way back from a launch.',
+    moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Phase Elbow'], ['R+A', 'Displacement pulse'], ['R+A (running)', 'Phase Lunge — blink behind and strike'], ['Hold R+A', 'Pulse Mines — three proximity charges'], ['L + dir / L', 'Hop / flank teleport'], ['L+A', 'Blink strike'], ['R+X', 'Displace — teleports the victim away (off an edge!)'], ['Grab, A', 'Knee pummel']],
   },
   build(rig) {
     const coat = mat(0x4b5468, 0.65, 0.2);
@@ -394,6 +491,17 @@ const shunt: CharacterDef = {
       limb(sh, 0.44, 0.08, 0.065, under);
       box(sh, 0.12, 0.08, 0.26, coat, [0, -0.46, 0.06]);
     }
+    // Shoulder plates, a displacement core on the back, belt and boots.
+    for (const [a, sx] of [[j.lArm, 1], [j.rArm, -1]] as const) {
+      box(a, 0.2, 0.08, 0.22, mask, [sx * 0.04, 0.04, 0], [0, 0, sx * 0.35]);
+      box(a, 0.12, 0.02, 0.18, cyan, [sx * 0.08, 0.09, 0], [0, 0, sx * 0.35], false);
+    }
+    const pack = box(j.spine, 0.32, 0.4, 0.16, under, [0, 0.42, -0.24]);
+    pack.castShadow = true;
+    sphere(j.spine, 0.08, cyan, [0, 0.42, -0.33], undefined, false);
+    for (const y of [0.3, 0.54]) box(j.spine, 0.26, 0.02, 0.02, cyan, [0, y, -0.33], undefined, false);
+    box(j.hips, 0.44, 0.07, 0.3, mask, [0, 0.12, 0]);
+    for (const sh of [j.lShin, j.rShin]) box(sh, 0.13, 0.22, 0.15, under, [0, -0.33, 0.01]);
     return { accents: [cyan] };
   },
 };
