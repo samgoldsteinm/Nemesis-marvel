@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { BOUNDS } from './arena';
 
 // Pooled visual effects. Debris and sparks are single InstancedMeshes so heavy fights stay cheap.
 // Density scales with `quality` (lowered first when frame time is over budget).
@@ -125,7 +126,7 @@ export class FX {
       if (d.life <= 0) { this.dParts.splice(k, 1); continue; }
       d.v.y -= d.grav * dt;
       d.p.addScaledVector(d.v, dt);
-      if (d.p.y < d.size * 0.5 && Math.abs(d.p.x) < 18 && Math.abs(d.p.z) < 13) {
+      if (d.p.y < d.size * 0.5 && Math.abs(d.p.x) < BOUNDS.hw && Math.abs(d.p.z) < BOUNDS.hd) {
         d.p.y = d.size * 0.5;
         d.v.y *= -0.3;
         d.v.x *= 0.6;

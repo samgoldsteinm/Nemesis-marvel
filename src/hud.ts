@@ -19,11 +19,14 @@ export class HUD {
     for (const i of [0, 1]) {
       const p = root.querySelector(`.p${i}`) as HTMLElement;
       p.innerHTML = `
-        <div class="hud-name"><span class="tag">P${i + 1}</span><span class="nm"></span><span class="ctl"></span></div>
-        <div class="bar vit"><div class="hp"></div><div class="st"></div><div class="dm"></div></div>
-        <div class="bar en"><div class="fill"></div><i style="left:25%"></i><i style="left:50%"></i><i style="left:75%"></i></div>
-        <div class="bar rg"><div class="fill"></div><span class="rlabel">RAGE</span></div>
-        <div class="flags"><span class="danger">DANGER</span><span class="fin">FINISH! R+X</span><span class="note"></span></div>`;
+        <div class="por"><span class="ini"></span><span class="tag">P${i + 1}</span></div>
+        <div class="meters">
+          <div class="pips">${'<b><i></i></b>'.repeat(4)}<span class="nm"></span></div>
+          <div class="bar vit"><div class="hp"></div><div class="st"></div></div>
+          <div class="bar rg"><div class="fill"></div></div>
+          <div class="flags"><span class="danger">DANGER</span><span class="rage">RAGE</span><span class="fin"><kbd>R</kbd>+<kbd>X</kbd> FINISH</span><span class="note"></span></div>
+          <div class="ctl"></div>
+        </div>`;
       this.panels.push(p);
     }
     this.center = root.querySelector('.hud-big') as HTMLElement;
@@ -35,6 +38,9 @@ export class HUD {
       const p = this.panels[i];
       (p.querySelector('.nm') as HTMLElement).textContent = f.def.name;
       (p.querySelector('.nm') as HTMLElement).style.color = f.def.color;
+      const por = p.querySelector('.por') as HTMLElement;
+      por.style.setProperty('--c', f.def.color);
+      (p.querySelector('.ini') as HTMLElement).textContent = f.def.name[0];
       (p.querySelector('.ctl') as HTMLElement).textContent = controllers[i];
     });
   }
@@ -63,25 +69,30 @@ export class HUD {
     const st = p.querySelector('.st') as HTMLElement;
     hp.style.width = `${f.health}%`;
     st.style.width = `${f.stamina}%`;
-    const en = p.querySelector('.en .fill') as HTMLElement;
-    en.style.width = `${f.energy}%`;
-    en.classList.toggle('low', f.energy < TUNING.finisherCost);
-    en.classList.toggle('flash', f.noPowerFlash > 0 && Math.floor(time * 12) % 2 === 0);
+    // Energy as four quarter pips: one pip = the finisher threshold.
+    const pips = p.querySelectorAll<HTMLElement>('.pips i');
+    pips.forEach((el, k) => { el.style.width = `${Math.max(0, Math.min(1, (f.energy - k * 25) / 25)) * 100}%`; });
+    const pipRow = p.querySelector('.pips') as HTMLElement;
+    pipRow.classList.toggle('flash', f.noPowerFlash > 0 && Math.floor(time * 12) % 2 === 0);
+    pipRow.classList.toggle('unlimited', f.raging);
     const rg = p.querySelector('.rg .fill') as HTMLElement;
-    const rl = p.querySelector('.rlabel') as HTMLElement;
+    const rageTag = p.querySelector('.rage') as HTMLElement;
     if (f.raging) {
       rg.style.width = `${(f.rageTime / TUNING.rageDuration) * 100}%`;
-      rl.textContent = `RAGE ${f.rageTime.toFixed(1)}s — UNLIMITED POWER`;
       rg.parentElement!.classList.add('on');
       rg.parentElement!.classList.remove('ready');
+      rageTag.style.display = '';
+      rageTag.textContent = `RAGE ${f.rageTime.toFixed(1)}`;
     } else {
       rg.style.width = `${f.rage}%`;
       rg.parentElement!.classList.remove('on');
       const ready = f.rage >= 100;
       rg.parentElement!.classList.toggle('ready', ready);
-      rl.textContent = ready ? 'RAGE READY — TAP R' : 'RAGE';
+      rageTag.style.display = ready ? '' : 'none';
+      rageTag.textContent = 'RAGE · TAP R';
     }
-    (p.querySelector('.danger') as HTMLElement).style.visibility = f.danger && Math.floor(time * 4) % 2 === 0 ? 'visible' : 'hidden';
+    (p.querySelector('.danger') as HTMLElement).style.display = f.danger ? '' : 'none';
+    (p.querySelector('.danger') as HTMLElement).style.opacity = Math.floor(time * 4) % 2 === 0 ? '1' : '0.45';
     const o = f.opp;
     const canFin = o.danger && f.hasEnergy(TUNING.finisherCost) && f.alive;
     (p.querySelector('.fin') as HTMLElement).style.display = canFin ? '' : 'none';

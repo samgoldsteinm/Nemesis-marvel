@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RawState, emptyRaw, ActionName } from './input';
 import type { Fighter } from './fighter';
 import type { Match } from './match';
-import { HW, HD, Prop } from './arena';
+import { BOUNDS, Prop } from './arena';
 import { TUNING } from './fighter';
 
 // CPU fighter. Perceives distance, altitude, props it can lift, open edges, danger and energy,
@@ -254,7 +254,7 @@ export class CPU {
       if (p.state !== 'rest' || p.cls > f.def.lift) continue;
       const d = p.pos.distanceTo(f.pos);
       if (d > maxDist) continue;
-      if (Math.abs(p.pos.x) > HW - 0.5 || Math.abs(p.pos.z) > HD - 0.5) continue;
+      if (Math.abs(p.pos.x) > BOUNDS.hw - 0.5 || Math.abs(p.pos.z) > BOUNDS.hd - 0.5) continue;
       const s = p.cls * 6 + (p.explosive ? 5 : 0) - d;
       if (s > bs) { bs = s; best = p; }
     }

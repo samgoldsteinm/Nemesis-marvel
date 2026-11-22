@@ -72,8 +72,9 @@ export class VersusCamera {
           }
         }
       }
-      wantDist = THREE.MathUtils.clamp(8.5 + spread * 1.35 + vspan * 0.6, 10, 32);
-      wantH = 3.2 + wantDist * 0.3 + vspan * 0.35;
+      // Low, close framing near shoulder height; pulls wide only as the fighters separate.
+      wantDist = THREE.MathUtils.clamp(6.5 + spread * 1.25 + vspan * 0.6, 8, 28);
+      wantH = 1.6 + wantDist * 0.2 + vspan * 0.35;
     }
     if (snap) {
       this.yaw = wantYaw;
@@ -101,7 +102,7 @@ export class VersusCamera {
       this.cam.position.y += (Math.random() - 0.5) * s;
       this.cam.position.z += (Math.random() - 0.5) * s;
     }
-    this.cam.lookAt(this.target.x, this.target.y - 0.4, this.target.z);
+    this.cam.lookAt(this.target.x, this.target.y - 0.15, this.target.z);
     this.fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
   }

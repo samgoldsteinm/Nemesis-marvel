@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { Arena } from './arena';
+import { Arena, LAYOUTS, LayoutId } from './arena';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { FX } from './fx';
 import { VersusCamera } from './camera';
 import { Match } from './match';
@@ -24,6 +28,18 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 container.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
+function skyTexture(stops: [number, string][]) {
+  const c = document.createElement('canvas');
+  c.width = 4; c.height = 256;
+  const g = c.getContext('2d')!;
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  for (const [o, col] of stops) grad.addColorStop(o, col);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 4, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 {
   // Dusk sky: deep violet overhead to a burnt-orange horizon. Warm rooftop light, cool fill.
   const c = document.createElement('canvas');
@@ -60,9 +76,34 @@ scene.add(rim);
 const keyLight = new THREE.DirectionalLight(0xfff0e0, 0.9);
 scene.add(keyLight, keyLight.target);
 
+// Per-venue palette: each arena has its own hour and light.
+const PALETTES: Record<LayoutId, { sky: [number, string][]; fog: number; fogNear: number; fogFar: number; hemi: [number, number, number]; sun: [number, number]; sunPos: [number, number, number]; rim: [number, number] }> = {
+  rooftop: { sky: [[0, '#120a24'], [0.45, '#3a1c48'], [0.7, '#a0405a'], [0.85, '#ff9a5a'], [1, '#2a1622']], fog: 0x4a2a48, fogNear: 70, fogFar: 230, hemi: [0x9a86c8, 0x2a1e30, 0.75], sun: [0xffb27a, 2.6], sunPos: [-28, 22, 14], rim: [0x6c7cff, 0.9] },
+  overpass: { sky: [[0, '#03060c'], [0.5, '#0a1c28'], [0.78, '#1d4a58'], [0.9, '#3a7a84'], [1, '#081014']], fog: 0x173842, fogNear: 45, fogFar: 170, hemi: [0x6a9ab0, 0x0c1418, 0.85], sun: [0xa8dcff, 1.5], sunPos: [18, 30, -12], rim: [0xffa040, 1.3] },
+};
+function applyPalette(id: LayoutId) {
+  const p = PALETTES[id];
+  scene.background = skyTexture(p.sky);
+  scene.fog = new THREE.Fog(p.fog, p.fogNear, p.fogFar);
+  hemi.color.setHex(p.hemi[0]); hemi.groundColor.setHex(p.hemi[1]); hemi.intensity = p.hemi[2];
+  sun.color.setHex(p.sun[0]); sun.intensity = p.sun[1]; sun.position.set(...p.sunPos);
+  rim.color.setHex(p.rim[0]); rim.intensity = p.rim[1];
+}
+
 const fx = new FX(scene);
 const arena = new Arena(scene, fx);
 const vcam = new VersusCamera(window.innerWidth / window.innerHeight);
+// Bloom: hazy highlights on lamps, sparks, explosions and power effects. First thing dropped when slow.
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, vcam.cam));
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.45, 0.8);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+let bloomOn = !new URLSearchParams(location.search).has('nobloom');
+// Full-screen Rage wash.
+const tint = document.createElement('div');
+tint.id = 'tint';
+document.body.insertBefore(tint, document.getElementById('hud'));
 const hud = new HUD(document.getElementById('hud')!);
 hud.show(false);
 const keysHint = document.createElement('div');
@@ -88,14 +129,15 @@ const markers = [0x3aa0ff, 0xff4a4a].map((c) => {
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
   vcam.cam.aspect = window.innerWidth / window.innerHeight;
   vcam.cam.updateProjectionMatrix();
 });
 
 // ============================================================ app state
 type Mode = 'cpu' | 'versus';
-interface Setup { mode: Mode; p1: string; p2: string; diff: Difficulty; p1Human: boolean }
-const setup: Setup = { mode: 'cpu', p1: 'tether', p2: 'basalt', diff: 'normal', p1Human: true };
+interface Setup { mode: Mode; p1: string; p2: string; diff: Difficulty; p1Human: boolean; arena: LayoutId }
+const setup: Setup = { mode: 'cpu', p1: 'tether', p2: 'basalt', diff: 'normal', p1Human: true, arena: 'rooftop' };
 let match: Match | null = null;
 let cpus: (CPU | null)[] = [null, null];
 const trackers = [new EdgeTracker(), new EdgeTracker()];
@@ -115,6 +157,8 @@ function bindings(): DeviceBinding[] {
 function startMatch() {
   if (match) match.dispose();
   const d: [CharacterDef, CharacterDef] = [charById(setup.p1), charById(setup.p2)];
+  if (arena.layout !== setup.arena) arena.setLayout(setup.arena);
+  applyPalette(setup.arena);
   match = new Match(scene, arena, fx, vcam, d);
   cpus = [null, setup.mode === 'cpu' ? new CPU(match.fighters[1], match, setup.diff) : null];
   trackers.forEach((t) => t.reset());
@@ -188,8 +232,9 @@ function render(s: Screen): string {
         </div>`).join('')}
       </div>
       ${setup.mode === 'cpu' ? `<div class="row"><span>CPU difficulty:</span><span class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="btn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d}</button>`).join('')}</span></div>` : ''}
+      <div class="row"><span>Arena:</span><span class="seg">${LAYOUTS.map((l) => `<button class="btn ${setup.arena === l.id ? 'on' : ''}" data-nav data-act="arena" data-arg="${l.id}">${l.name}</button>`).join('')}</span></div>
+      <div class="hint">${LAYOUTS.find((l) => l.id === setup.arena)!.blurb}</div>
       <div class="row"><button class="btn" data-nav data-act="title">Back</button></div>
-      <div class="hint">Arena: Clarion Rooftop (more venues in development).</div>
     </div>`;
   }
   if (s === 'result' && match?.ended) {
@@ -273,6 +318,7 @@ function act(a: string, arg?: string) {
       if (selectStage === 0) { setup.p1 = arg!; selectStage = 1; showScreen('select'); }
       else { setup.p2 = arg!; startMatch(); }
       break;
+    case 'arena': setup.arena = arg as LayoutId; { const i = focusIdx; showScreen('select'); setFocus(i); } break;
     case 'diff': setup.diff = arg as Difficulty; { const i = focusIdx; showScreen('select'); setFocus(i); } break;
     case 'title': if (match) { match.dispose(); match = null; } hud.show(false); stopMusic(); touchRoot.classList.add('off'); showScreen('title'); break;
     case 'select': selectStage = 0; showScreen('select'); break;
@@ -371,7 +417,8 @@ function adaptQuality(now: number) {
   const { p95 } = perfStats();
   // Lower particle density and render scale first; simulation and collision are never touched.
   if (p95 > 19) {
-    if (fx.quality > 0.5) fx.quality = 0.5;
+    if (bloomOn) bloomOn = false;
+    else if (fx.quality > 0.5) fx.quality = 0.5;
     else if (pixelRatio > 0.7) { pixelRatio = Math.max(0.7, pixelRatio - 0.15); renderer.setPixelRatio(pixelRatio); }
     else if (renderer.shadowMap.enabled) { renderer.shadowMap.enabled = false; }
   }
@@ -434,11 +481,13 @@ function frame(now: number) {
   }
   keyLight.position.copy(vcam.cam.position).add(new THREE.Vector3(0, 6, 0));
   keyLight.target.position.copy(vcam.target);
-  renderer.render(scene, vcam.cam);
+  const raging = !!match && match.fighters.some((f) => f.raging);
+  tint.style.opacity = raging ? String(0.38 + Math.sin(time * 10) * 0.08) : '0';
+  if (bloomOn) composer.render(); else renderer.render(scene, vcam.cam);
   adaptQuality(now);
   if (perfEl.style.display !== 'none') {
     const s = perfStats();
-    perfEl.textContent = `frame ms p50 ${s.p50.toFixed(1)} p95 ${s.p95.toFixed(1)} p99 ${s.p99.toFixed(1)} worst ${s.worst.toFixed(1)}\nfx ${fx.quality} dpr ${pixelRatio.toFixed(2)} shadows ${renderer.shadowMap.enabled} calls ${renderer.info.render.calls}`;
+    perfEl.textContent = `frame ms p50 ${s.p50.toFixed(1)} p95 ${s.p95.toFixed(1)} p99 ${s.p99.toFixed(1)} worst ${s.worst.toFixed(1)}\nbloom ${bloomOn} fx ${fx.quality} dpr ${pixelRatio.toFixed(2)} shadows ${renderer.shadowMap.enabled} calls ${renderer.info.render.calls}`;
   }
 }
 showScreen('title');
@@ -454,7 +503,7 @@ requestAnimationFrame(frame);
   TUNING,
   forced,
   cpus: () => cpus,
-  start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; startMatch(); },
+  start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal', arenaId: LayoutId = 'rooftop') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; setup.arena = arenaId; startMatch(); },
   rematch,
   act,
   get screen() { return screen; },

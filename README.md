@@ -41,6 +41,8 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
 ## What's in this build
 
 - **Modes:** Versus CPU (easy, normal or hard) and shared-screen Versus 2P. After a bout you can rematch, switch sides, return to character select or go to the main menu.
+- **Arena select** on the character screen.
+- **Route 9 Overpass:** a narrow elevated roadway at night. It has three stalled cars that are heavy and explode when thrown, concrete barrier blocks (medium), barrels and crates, and 26 breakable noise-barrier panels along exposed sides above a river. Wreck pile-ups close off both ends, and the light poles and sign gantry serve as swing anchors.
 - **Arena: Clarion Rooftop.** The roof is enclosed by 28 breakable fence segments. It has seven sign letters that can be knocked loose into throwable debris, three A/C units (medium), an explosive fuel tank (heavy), crates and panels (light), an access hut that serves as cover and a cling wall, corner masts that act as swing anchors, and a visible city drop. Broken fence opens ring-outs. Broken props leave rubble. A rematch restores the pristine arena.
 - **Fighters** (each has a move sheet on the *Controls & Move Sheets* screen):
   - **BASALT**: heavy lift class, ground recovery. Sprint, shoulder charge, a planted heavy throw, Thunderclap (a shockwave cone) and Ground Pound. He is the only fighter who can lift the A/C units and the fuel tank.
@@ -53,9 +55,17 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
 - **CPU:** it reacts with a delay and commits to short plans. It recovers from off-roof launches, steers away from open edges, and tries to push the opponent toward broken fence. Heavies go for props, Aerin flies and shoots, and Shunt flanks. It holds fire on a fighter who is down and limits itself to two projectiles in a row. Difficulty changes reaction time and decision quality, not damage.
 - **Performance:** fixed 60 Hz simulation. Debris and sparks use instanced meshes. Adaptive quality lowers particle density, then render scale, then shadows. It never changes simulation, collision or input.
 
-## Checks actually run (`tests/checks.cjs`, 20/20 passing)
+## Reference video notes
 
-These checks covered K.O. on depleted health, Danger from stamina with full health, leaving Danger before a finisher, a valid finisher, a failed finisher with too little energy, and a finisher during Rage. They covered Tether's aerial save from a launch off an open edge, Basalt's ring-out on the same trajectory, and Shunt's ring-out with no energy. They covered a clean rematch reset, the lift-class split (only Basalt lifts the tank), the planted heavy throw and tank explosion, catching a prop, an R+A chord on the same tick resolving once, X choosing between the opponent and an adjacent prop, a grab returning to a valid state after rematch, a thrown prop breaking the fence, super block deflecting a projectile, Rage turning on and back off, and four complete CPU-vs-CPU bouts with no errors.
+These come from 40 frames of the gameplay clip you supplied. They're genre conventions, and I adopted them without copying any assets:
+- compact corner HUD panels with a portrait square, segmented energy pips, a thin vitality bar, and DANGER/RAGE badges, plus an R+X prompt when a finisher is available
+- a low, close camera that pulls wide only as the fighters separate
+- bloom with a full-screen red wash during Rage
+- an elevated roadway arena full of throwable cars and barrels
+
+## Checks actually run (`tests/checks.cjs`, 22/22 passing)
+
+These checks covered K.O. on depleted health, Danger from stamina with full health, leaving Danger before a finisher, a valid finisher, a failed finisher with too little energy, and a finisher during Rage. They covered Tether's aerial save from a launch off an open edge, Basalt's ring-out on the same trajectory, and Shunt's ring-out with no energy. They covered a clean rematch reset, the lift-class split (only Basalt lifts the tank), the planted heavy throw and tank explosion, catching a prop, an R+A chord on the same tick resolving once, X choosing between the opponent and an adjacent prop, a grab returning to a valid state after rematch, a thrown prop breaking the fence, super block deflecting a projectile, Rage turning on and back off, Basalt lifting a car on the Overpass and the car exploding, CPU bouts on the Overpass, and four complete CPU-vs-CPU bouts with no errors.
 
 Also checked by hand in headless Chromium: the full keyboard menu flow (title → 2P → select → fight → pause/resume → K.O. → results → switch sides), and touch on an emulated Pixel 7 in landscape, steering with the stick while holding R and A at once.
 
@@ -63,16 +73,16 @@ Also checked by hand in headless Chromium: the full keyboard menu flow (title �
 
 ## Approximations and known gaps
 
-- The reference YouTube video could not be watched because this build environment blocks YouTube. The mechanics follow the written brief. All frame data, damage, thresholds (`TUNING` in `src/fighter.ts`) and collision sizes are tuning estimates, not measured values.
+- YouTube is blocked in this build environment, so the reference was a supplied MP4 clip, reviewed as 40 sampled frames. The clip had no captions. All frame data, damage, thresholds (`TUNING` in `src/fighter.ts`) and collision sizes are tuning estimates, not measured values.
 - Characters use procedural primitive rigs with pose-based animation, not skinned or mocapped models.
 - With the CPU on hard, bouts often end by finisher in 20–60 s. Ring-outs mostly happen after fence breaks. Pacing needs human playtesting.
 - Gamepad face buttons are mapped by label position on the browser's "standard" layout. Non-standard pads have not been tested.
 
 ## Next-session checklist
 
-1. Measure frame times on a real PC and phone (`?perf`), then tune `fx.quality` and the shadow map size.
+1. Measure frame times on a real PC and phone (`?perf`), then tune bloom, `fx.quality` and the shadow map size (`?nobloom` turns bloom off).
 2. Human playtest of Basalt vs Tether: compare a fight before and after the fence breaks, then tune `TUNING`, knockback and the Danger thresholds.
-3. More arenas, each needing a distinct layout: a narrow bridge deck, a street with liftable vehicles, a mansion interior with breakable columns, a two-level power plant with a cycling core, a station with columns and barriers, and a headquarters with force walls, mines and a healing chamber.
+3. More arenas, each needing a distinct layout (the overpass is done): a street with liftable vehicles, a mansion interior with breakable columns, a two-level power plant with a cycling core, a station with columns and barriers, and a headquarters with force walls, mines and a healing chamber.
 4. More original fighters for each recovery family (more swing, flight and teleport fighters, plus a magnetic object-controller).
 5. Story mode: reusable objectives (clear an area, destroy targets, defend objects, defeat a named opponent), a catch-and-return barrier mission, a two-dish defense mission, and an underdog duel. Add unlocks saved across reloads.
 6. A follow camera with player control for Story mode.

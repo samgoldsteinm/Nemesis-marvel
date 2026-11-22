@@ -24,8 +24,8 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     };
     window.T = {
       G,
-      setup(a, b) {
-        G.start(a, b, 'versus');
+      setup(a, b, arena = 'rooftop') {
+        G.start(a, b, 'versus', 'normal', arena);
         G.setManual(true);
         G.disableCPU();
         G.forced[0] = raw(); G.forced[1] = raw();
@@ -334,6 +334,35 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     a.energy = 50;
     T.hold(0, ['power', 'attack'], 1);
     return { pass: on && eDuring === 100 && off && Math.abs(a.energy - 38) < 0.6, info: `on=${on} eDuring=${eDuring} off=${off} after=${a.energy.toFixed(1)}` };
+  });
+
+  await check('Overpass: BASALT lifts a car and the thrown car explodes on impact', () => {
+    const m = T.setup('basalt', 'tether', 'overpass');
+    const [a, b] = m.fighters;
+    const car = m.arena.props.find((p) => p.kind === 'car');
+    T.place(a, car.pos.x + 2.2, car.pos.z, -Math.PI / 2);
+    T.place(b, car.pos.x + 9, car.pos.z, -Math.PI / 2);
+    T.hold(0, ['grab'], 1);
+    T.idle(30);
+    const held = a.heldProp?.kind;
+    a.yaw = Math.PI / 2;
+    T.hold(0, ['grab'], 1);
+    T.idle(70);
+    return { pass: held === 'car' && car.state === 'gone' && m.events.some((e) => e.includes('explosion')), info: `held=${held} car=${car.state} tetherHP=${b.health.toFixed(0)} events=${m.events.slice(-2).join('|')}` };
+  });
+
+  await check('Overpass: CPU vs CPU bouts resolve on the narrow deck', () => {
+    const outcomes = [];
+    for (const [p, q] of [['basalt', 'aerin'], ['tether', 'shunt']]) {
+      const m = T.setup(p, q, 'overpass');
+      T.G.forced[0] = null; T.G.forced[1] = null;
+      T.G.enableCPUs('hard');
+      let n = 0;
+      while (!m.ended && n < 60 * 150) { T.G.step(30); n += 30; }
+      outcomes.push(m.ended ? `${p}v${q}:${m.ended.how}:${m.ended.winner.def.id}@${(n / 60).toFixed(0)}s broken=${m.arena.walls.filter((w) => w.broken).length}` : `${p}v${q}:timeout`);
+      T.G.disableCPU();
+    }
+    return { pass: outcomes.every((o) => !o.includes('timeout')), info: outcomes.join(' ; ') };
   });
 
   await check('CPU vs CPU: 4 full bouts run to a single resolved winner without errors', () => {

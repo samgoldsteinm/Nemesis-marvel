@@ -6,8 +6,13 @@ import { sfx } from './audio';
 
 // The Clarion Building rooftop: an enclosed roof that becomes a ring-out arena as its fence breaks.
 
-export const HW = 18; // roof half-width (x)
-export const HD = 13; // roof half-depth (z)
+/** Playable deck half-extents for the current layout (x = width, z = depth). */
+export const BOUNDS = { hw: 18, hd: 13 };
+export type LayoutId = 'rooftop' | 'overpass';
+export const LAYOUTS: { id: LayoutId; name: string; blurb: string }[] = [
+  { id: 'rooftop', name: 'Clarion Rooftop', blurb: 'Enclosed roof that becomes a ring-out arena as its fence breaks.' },
+  { id: 'overpass', name: 'Route 9 Overpass', blurb: 'Narrow elevated roadway: stalled cars to throw, exposed sides, barriers that give way.' },
+];
 export const WALL_H = 3.0;
 export const WALL_T = 0.5;
 export const KILL_Y = -14;
@@ -27,7 +32,7 @@ export class WallSeg {
   group = new THREE.Group();
   base: THREE.Mesh;
   fence: THREE.Object3D;
-  constructor(public center: THREE.Vector3, public size: THREE.Vector3, public outward: THREE.Vector3, mats: ArenaMats) {
+  constructor(public center: THREE.Vector3, public size: THREE.Vector3, public outward: THREE.Vector3, mats: ArenaMats, style: 'fence' | 'noise' = 'fence') {
     this.solid = {
       min: new THREE.Vector3(center.x - size.x / 2, 0, center.z - size.z / 2),
       max: new THREE.Vector3(center.x + size.x / 2, WALL_H, center.z + size.z / 2),
@@ -43,7 +48,7 @@ export class WallSeg {
     const fence = new THREE.Group();
     const along = size.x > size.z ? 'x' : 'z';
     const len = Math.max(size.x, size.z);
-    const panel = new THREE.Mesh(new THREE.PlaneGeometry(len - 0.1, 2.0), mats.fence);
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(len - 0.1, 2.0), style === 'noise' ? mats.noise : mats.fence);
     panel.position.y = 2.0;
     if (along === 'z') panel.rotation.y = Math.PI / 2;
     fence.add(panel);
@@ -85,7 +90,7 @@ export class WallSeg {
   }
 }
 
-export type PropKind = 'panel' | 'crate' | 'letter' | 'ac' | 'tank' | 'rubble';
+export type PropKind = 'panel' | 'crate' | 'letter' | 'ac' | 'tank' | 'rubble' | 'car' | 'barrel' | 'barrier';
 export type PropState = 'rest' | 'held' | 'thrown' | 'falling' | 'gone';
 
 export class Prop {
@@ -114,7 +119,7 @@ export class Prop {
     return [8, 14, 22][this.cls] * this.power;
   }
   get label() {
-    return { panel: 'Sign panel', crate: 'Crate', letter: 'Sign letter', ac: 'A/C unit', tank: 'Fuel tank', rubble: 'Rubble' }[this.kind];
+    return { panel: 'Sign panel', crate: 'Crate', letter: 'Sign letter', ac: 'A/C unit', tank: 'Fuel tank', rubble: 'Rubble', car: 'Car', barrel: 'Barrel', barrier: 'Barrier block' }[this.kind];
   }
 }
 
@@ -131,6 +136,11 @@ interface ArenaMats {
   crate: THREE.MeshStandardMaterial;
   hut: THREE.MeshStandardMaterial;
   rubble: THREE.MeshStandardMaterial;
+  noise: THREE.MeshStandardMaterial;
+  asphalt: THREE.MeshStandardMaterial;
+  barrel: THREE.MeshStandardMaterial;
+  glass: THREE.MeshStandardMaterial;
+  tire: THREE.MeshStandardMaterial;
 }
 
 function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat?: [number, number]) {
@@ -196,6 +206,14 @@ export class Arena {
       crate: new THREE.MeshStandardMaterial({ color: 0x8a6a42, roughness: 0.9 }),
       hut: new THREE.MeshStandardMaterial({ color: 0x77706e, roughness: 0.9 }),
       rubble: new THREE.MeshStandardMaterial({ color: 0x7d7f86, roughness: 0.95, flatShading: true }),
+      noise: new THREE.MeshStandardMaterial({ color: 0x7fd8d0, transparent: true, opacity: 0.38, side: THREE.DoubleSide, roughness: 0.15, metalness: 0.1, depthWrite: false }),
+      asphalt: new THREE.MeshStandardMaterial({ map: canvasTex(256, 256, (g) => {
+        g.fillStyle = '#26282c'; g.fillRect(0, 0, 256, 256);
+        for (let i = 0; i < 4000; i++) { const v = 30 + Math.random() * 30; g.fillStyle = `rgb(${v},${v},${v + 4})`; g.fillRect(Math.random() * 256, Math.random() * 256, 2, 2); }
+      }, [12, 4]), roughness: 0.92 }),
+      barrel: new THREE.MeshStandardMaterial({ color: 0x2f6a9a, roughness: 0.5, metalness: 0.5 }),
+      glass: new THREE.MeshStandardMaterial({ color: 0x14202a, roughness: 0.1, metalness: 0.6 }),
+      tire: new THREE.MeshStandardMaterial({ color: 0x111114, roughness: 0.9 }),
     };
     for (const ch of new Set(LETTERS)) {
       this.letterTex.set(ch, canvasTex(128, 128, (g) => {
@@ -213,51 +231,40 @@ export class Arena {
         g.fillText(ch, 64, 70);
       }));
     }
-    this.buildStatic();
     scene.add(this.static, this.dyn);
+    this.setLayout('rooftop');
+  }
+
+  layout: LayoutId = 'rooftop';
+  /** Swap venues: rebuild static scenery, solids and anchors, then reset dynamic pieces. */
+  setLayout(id: LayoutId) {
+    this.layout = id;
+    this.name = LAYOUTS.find((l) => l.id === id)!.name;
+    for (const c of [...this.static.children]) this.static.remove(c);
+    this.fixedSolids = [];
+    this.anchors = [];
+    this.fadeables = [];
+    if (id === 'rooftop') {
+      BOUNDS.hw = 18; BOUNDS.hd = 13;
+      this.buildStatic();
+    } else {
+      BOUNDS.hw = 26; BOUNDS.hd = 7;
+      this.buildOverpass();
+    }
     this.reset();
   }
 
-  // ------------------------------------------------------------------ static scenery
-  private buildStatic() {
-    const s = this.static;
-    // Roof deck and the building under it.
-    const deck = new THREE.Mesh(new THREE.BoxGeometry(HW * 2, 0.6, HD * 2), this.mats.roof);
-    deck.position.y = -0.3;
-    deck.receiveShadow = true;
-    s.add(deck);
-    // Painted roof marking (original emblem: a split diamond).
-    const mark = new THREE.Mesh(new THREE.RingGeometry(3.2, 3.6, 4), new THREE.MeshBasicMaterial({ color: 0xc9b98a, transparent: true, opacity: 0.35 }));
-    mark.rotation.x = -Math.PI / 2;
-    mark.position.y = 0.02;
-    s.add(mark);
-    const winTex = canvasTex(64, 128, (g) => {
-      g.fillStyle = '#121019';
-      g.fillRect(0, 0, 64, 128);
-      for (let y = 4; y < 128; y += 10) for (let x = 3; x < 64; x += 8) {
-        const lit = Math.random() < 0.35;
-        g.fillStyle = lit ? (Math.random() < 0.5 ? '#ffcf7a' : '#ffe9b8') : '#1d1b26';
-        g.fillRect(x, y, 5, 6);
-      }
-    });
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8c8794, map: winTex, emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: 0.55, roughness: 0.9 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(HW * 2 - 0.2, 70, HD * 2 - 0.2), bodyMat);
-    body.position.y = -35.6;
-    s.add(body);
-    const cornice = new THREE.Mesh(new THREE.BoxGeometry(HW * 2 + 0.8, 0.5, HD * 2 + 0.8), this.mats.concrete);
-    cornice.position.y = -0.9;
-    s.add(cornice);
-
-    // Skyline: instanced towers at varied heights and distances, tops near and below roof level so the drop reads.
+  private buildCity(minR: number) {
+    const winTex = this.winTex;
     const n = 150;
     const towers = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6f6a7a, map: winTex, emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: 0.6, roughness: 0.9 }), n);
     const o = new THREE.Object3D();
     let k = 0;
     for (let i = 0; i < n * 4 && k < n; i++) {
       const a = Math.random() * Math.PI * 2;
-      const d = 34 + Math.random() * 110;
+      const d = minR + Math.random() * 110;
       const x = Math.cos(a) * d, z = Math.sin(a) * d * 0.9;
-      if (Math.abs(x) < HW + 10 && Math.abs(z) < HD + 10) continue;
+      if (Math.abs(x) < BOUNDS.hw + 10 && Math.abs(z) < BOUNDS.hd + 10) continue;
       const w = 6 + Math.random() * 12, dd = 6 + Math.random() * 12;
       const top = -30 + Math.random() * (d > 80 ? 70 : 38);
       const h = top + 90;
@@ -268,7 +275,140 @@ export class Arena {
       towers.setMatrixAt(k++, o.matrix);
     }
     towers.count = k;
-    s.add(towers);
+    this.static.add(towers);
+  }
+
+  private get winTex() {
+    if (!this._winTex) this._winTex = canvasTex(64, 128, (g) => {
+      g.fillStyle = '#121019';
+      g.fillRect(0, 0, 64, 128);
+      for (let y = 4; y < 128; y += 10) for (let x = 3; x < 64; x += 8) {
+        const lit = Math.random() < 0.35;
+        g.fillStyle = lit ? (Math.random() < 0.5 ? '#ffcf7a' : '#ffe9b8') : '#1d1b26';
+        g.fillRect(x, y, 5, 6);
+      }
+    });
+    return this._winTex;
+  }
+  private _winTex: THREE.Texture | null = null;
+
+  // ------------------------------------------------------------------ overpass
+  private buildOverpass() {
+    const s = this.static;
+    const hw = BOUNDS.hw, hd = BOUNDS.hd;
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(hw * 2 + 30, 1.2, hd * 2), this.mats.asphalt);
+    deck.position.y = -0.6;
+    deck.receiveShadow = true;
+    s.add(deck);
+    // Lane markings.
+    const dash = new THREE.MeshBasicMaterial({ color: 0xd8d2a0 });
+    for (let x = -hw - 14; x < hw + 14; x += 4) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(2, 0.15), dash);
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(x, 0.01, 0);
+      s.add(m);
+    }
+    for (const z of [-hd + 0.9, hd - 0.9]) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(hw * 2 + 28, 0.12), new THREE.MeshBasicMaterial({ color: 0xe0b030 }));
+      m.rotation.x = -Math.PI / 2;
+      m.position.set(0, 0.01, z);
+      s.add(m);
+    }
+    // Support piers dropping to the river far below.
+    for (const x of [-24, -8, 8, 24]) {
+      const p = new THREE.Mesh(new THREE.BoxGeometry(3, 40, 6), this.mats.concrete);
+      p.position.set(x, -21, 0);
+      s.add(p);
+    }
+    const river = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0x0a1a22, roughness: 0.2, metalness: 0.6 }));
+    river.rotation.x = -Math.PI / 2;
+    river.position.y = -40;
+    s.add(river);
+    // Wreck pile-ups close both ends of the fighting stretch (permanent cover).
+    for (const sx of [-1, 1]) {
+      const g = new THREE.Group();
+      for (let i = 0; i < 4; i++) {
+        const b = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2 + Math.random() * 1.4, 3.4), i % 2 ? this.mats.concrete : this.mats.acDark);
+        b.position.set((Math.random() - 0.5) * 0.6, 0.9, -hd + 2 + i * 3.4);
+        b.rotation.y = (Math.random() - 0.5) * 0.4;
+        b.castShadow = true;
+        addOutline(b, 1.03);
+        g.add(b);
+      }
+      const truck = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3.2, 6), new THREE.MeshStandardMaterial({ color: 0x8a3020, roughness: 0.6 }));
+      truck.position.set(sx * 0.6, 1.6, 0);
+      truck.rotation.y = 0.15 * sx;
+      truck.castShadow = true;
+      addOutline(truck, 1.02);
+      g.add(truck);
+      g.position.set(sx * (hw - 0.8), 0, 0);
+      s.add(g);
+      this.fixedSolids.push({ min: new THREE.Vector3(sx > 0 ? hw - 1.6 : -hw, 0, -hd), max: new THREE.Vector3(sx > 0 ? hw : -hw + 1.6, 3.2, hd), kind: 'hut', clingable: true });
+    }
+    // Light poles along both rails: swing anchors and the arena's warm sodium glow.
+    const lampMat = new THREE.MeshBasicMaterial({ color: 0xffc070 });
+    for (const z of [-hd - 0.3, hd + 0.3]) for (let x = -20; x <= 20; x += 10) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.14, 9, 8), this.mats.steel);
+      pole.position.set(x, 4.5, z);
+      s.add(pole);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 1.6), this.mats.steel);
+      arm.position.set(x, 9, z - Math.sign(z) * 0.8);
+      s.add(arm);
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.15, 0.6), lampMat);
+      lamp.position.set(x, 8.9, z - Math.sign(z) * 1.5);
+      s.add(lamp);
+      this.anchors.push(new THREE.Vector3(x, 9, z));
+    }
+    // Overhead sign gantry across the road.
+    const gantryMat = this.mats.steel;
+    for (const z of [-hd - 0.4, hd + 0.4]) {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.3, 7.5, 0.3), gantryMat);
+      leg.position.set(4, 3.75, z);
+      s.add(leg);
+    }
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.6, hd * 2 + 1), gantryMat);
+    beam.position.set(4, 7.4, 0);
+    s.add(beam);
+    const signTex = canvasTex(256, 64, (g) => {
+      g.fillStyle = '#0d5a34'; g.fillRect(0, 0, 256, 64);
+      g.strokeStyle = '#e8f0e8'; g.lineWidth = 3; g.strokeRect(4, 4, 248, 56);
+      g.fillStyle = '#e8f0e8'; g.font = 'bold 30px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText('ROUTE 9  ·  EXIT 14', 128, 34);
+    });
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.4, 6), new THREE.MeshStandardMaterial({ map: signTex, emissive: 0xffffff, emissiveMap: signTex, emissiveIntensity: 0.25 }));
+    sign.position.set(4.2, 6.5, -2);
+    s.add(sign);
+    for (const z of [-4, 0, 4]) this.anchors.push(new THREE.Vector3(4, 7.4, z));
+    // Distant skyline across the river.
+    this.buildCity(60);
+    this.spawns = [new THREE.Vector3(-7, 0, 0), new THREE.Vector3(7, 0, 0)];
+  }
+
+  // ------------------------------------------------------------------ static scenery
+  private buildStatic() {
+    const s = this.static;
+    const HW = BOUNDS.hw, HD = BOUNDS.hd;
+    // Roof deck and the building under it.
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(HW * 2, 0.6, HD * 2), this.mats.roof);
+    deck.position.y = -0.3;
+    deck.receiveShadow = true;
+    s.add(deck);
+    // Painted roof marking (original emblem: a split diamond).
+    const mark = new THREE.Mesh(new THREE.RingGeometry(3.2, 3.6, 4), new THREE.MeshBasicMaterial({ color: 0xc9b98a, transparent: true, opacity: 0.35 }));
+    mark.rotation.x = -Math.PI / 2;
+    mark.position.y = 0.02;
+    s.add(mark);
+    const winTex = this.winTex;
+    this.spawns = [new THREE.Vector3(-6, 0, 2), new THREE.Vector3(6, 0, 2)];
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8c8794, map: winTex, emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: 0.55, roughness: 0.9 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(HW * 2 - 0.2, 70, HD * 2 - 0.2), bodyMat);
+    body.position.y = -35.6;
+    s.add(body);
+    const cornice = new THREE.Mesh(new THREE.BoxGeometry(HW * 2 + 0.8, 0.5, HD * 2 + 0.8), this.mats.concrete);
+    cornice.position.y = -0.9;
+    s.add(cornice);
+
+    this.buildCity(34);
     // Street grid far below, with light streaks.
     const streetTex = canvasTex(256, 256, (g) => {
       g.fillStyle = '#0c0b10';
@@ -357,6 +497,37 @@ export class Arena {
     this.props = [];
     this.letters = [];
     const m = this.mats;
+    const HW = BOUNDS.hw, HD = BOUNDS.hd;
+    if (this.layout === 'overpass') {
+      // Noise-barrier segments along both long edges; the ends are closed by wreckage.
+      for (const zs of [-1, 1]) for (let i = 0; i < 13; i++) {
+        const c = new THREE.Vector3(-HW + 2 + i * 4, 0, zs * (HD - WALL_T / 2));
+        const w = new WallSeg(c, new THREE.Vector3(4, WALL_H, WALL_T), new THREE.Vector3(0, 0, zs), m, 'noise');
+        this.walls.push(w);
+        this.dyn.add(w.group);
+      }
+      const add = (p: Prop, x: number, z: number, ry = 0) => {
+        p.pos.set(x, 0, z);
+        p.mesh.position.copy(p.pos);
+        p.mesh.rotation.y = ry;
+        if (Math.abs(Math.sin(ry)) > 0.7) p.half.set(p.half.z, p.half.y, p.half.x);
+        p.updateSolid();
+        this.props.push(p);
+        this.dyn.add(p.mesh);
+      };
+      add(this.makeCar(0xd8b020), -13, -3.2, Math.PI / 2);
+      add(this.makeCar(0x8a9aa8), 11, 3.4, Math.PI / 2 + 0.1);
+      add(this.makeCar(0x6a1f24), 18, -3.0, Math.PI / 2);
+      add(this.makeBarrier(), -3, 4.4);
+      add(this.makeBarrier(), 3, -4.6);
+      add(this.makeBarrel(), -8, 4.5);
+      add(this.makeBarrel(), -7.2, 5.1);
+      add(this.makeBarrel(), 14.5, -1);
+      add(this.makeBarrel(), 0, -2);
+      add(this.makeCrate(), -18, 2.5);
+      add(this.makeCrate(), 6, 0.5);
+      return;
+    }
     // Fence: north/south edges in 4m segments, east/west in 5m segments.
     for (const zs of [-1, 1]) for (let i = 0; i < 9; i++) {
       const c = new THREE.Vector3(-HW + 2 + i * 4, 0, zs * (HD - WALL_T / 2));
@@ -400,6 +571,56 @@ export class Arena {
     add(this.makeCrate(), 3.5, 1.4);
   }
 
+  makeCar(color: number) {
+    const g = new THREE.Group();
+    const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.5 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.75, 4.2), paint);
+    body.position.y = 0.65;
+    addOutline(body, 1.02);
+    g.add(body);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.6, 2.1), this.mats.glass);
+    cab.position.set(0, 1.3, -0.2);
+    addOutline(cab, 1.03);
+    g.add(cab);
+    for (const [x, z] of [[-0.9, 1.3], [0.9, 1.3], [-0.9, -1.3], [0.9, -1.3]]) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.28, 12), this.mats.tire);
+      w.rotation.z = Math.PI / 2;
+      w.position.set(x, 0.36, z);
+      g.add(w);
+    }
+    for (const x of [-0.6, 0.6]) {
+      const l = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.15, 0.05), new THREE.MeshBasicMaterial({ color: 0xfff0c0 }));
+      l.position.set(x, 0.75, 2.12);
+      g.add(l);
+    }
+    return new Prop('car', 2, g, new THREE.Vector3(0.95, 0.8, 2.1), true);
+  }
+  makeBarrel() {
+    const g = new THREE.Group();
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.95, 14), this.mats.barrel);
+    b.position.y = 0.475;
+    addOutline(b, 1.05);
+    g.add(b);
+    for (const y of [0.25, 0.7]) {
+      const r = new THREE.Mesh(new THREE.TorusGeometry(0.345, 0.025, 6, 16), this.mats.steel);
+      r.rotation.x = Math.PI / 2;
+      r.position.y = y;
+      g.add(r);
+    }
+    return new Prop('barrel', 0, g, new THREE.Vector3(0.34, 0.475, 0.34));
+  }
+  makeBarrier() {
+    const g = new THREE.Group();
+    const shape = new THREE.Shape();
+    shape.moveTo(-0.4, 0); shape.lineTo(0.4, 0); shape.lineTo(0.18, 0.35); shape.lineTo(0.12, 0.9); shape.lineTo(-0.12, 0.9); shape.lineTo(-0.18, 0.35); shape.lineTo(-0.4, 0);
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: 2.2, bevelEnabled: false });
+    geo.translate(0, 0, -1.1);
+    geo.rotateY(Math.PI / 2);
+    const b = new THREE.Mesh(geo, this.mats.concrete);
+    addOutline(b, 1.03);
+    g.add(b);
+    return new Prop('barrier', 1, g, new THREE.Vector3(1.1, 0.45, 0.4));
+  }
   makeAC() {
     const g = new THREE.Group();
     const b = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.2, 1.2), this.mats.ac);
@@ -494,7 +715,7 @@ export class Arena {
 
   // ------------------------------------------------------------------ queries
   inside(x: number, z: number) {
-    return Math.abs(x) <= HW && Math.abs(z) <= HD;
+    return Math.abs(x) <= BOUNDS.hw && Math.abs(z) <= BOUNDS.hd;
   }
 
   solids(): Solid[] {
@@ -667,7 +888,7 @@ export class Arena {
         (o as THREE.Mesh).material = hide ? o.userData.fadeMat : o.userData.baseMat;
       });
     };
-    check(this.fadeables[0], new THREE.Vector3(9, 0, -7.1), new THREE.Vector3(13, 3.6, -3.9));
+    if (this.fadeables[0]) check(this.fadeables[0], new THREE.Vector3(9, 0, -7.1), new THREE.Vector3(13, 3.6, -3.9));
     for (const p of this.props) if (p.state === 'rest' && p.cls >= 1) check(p.mesh, p.solid.min, p.solid.max);
   }
 }

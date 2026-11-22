@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CharacterDef, MoveDef, HitSpec } from './characters';
 import { Rig, P, Pose } from './rig';
 import { InputFrame, emptyFrame } from './input';
-import { Prop, HW, HD, KILL_Y, WallSeg } from './arena';
+import { Prop, BOUNDS, KILL_Y, WallSeg } from './arena';
 import { sfx } from './audio';
 import type { Match } from './match';
 
@@ -526,8 +526,8 @@ export class Fighter {
 
   beginTeleport(target: THREE.Vector3, clampToRoof: boolean) {
     if (clampToRoof) {
-      target.x = THREE.MathUtils.clamp(target.x, -HW + 1, HW - 1);
-      target.z = THREE.MathUtils.clamp(target.z, -HD + 1, HD - 1);
+      target.x = THREE.MathUtils.clamp(target.x, -BOUNDS.hw + 1, BOUNDS.hw - 1);
+      target.z = THREE.MathUtils.clamp(target.z, -BOUNDS.hd + 1, BOUNDS.hd - 1);
     }
     const g = this.match.arena.groundAt(target.x, target.z, 50, 0);
     target.y = Number.isFinite(g) ? Math.max(g, Math.min(target.y, g + 3)) : target.y;
@@ -592,7 +592,7 @@ export class Fighter {
       const d = to.length();
       this.vel.lerp(to.normalize().multiplyScalar(17), 1 - Math.exp(-10 * dt));
       this.faceToward(this.vel.clone().setY(0), 10, dt);
-      const safelyInside = Math.abs(this.pos.x) < HW - 0.6 && Math.abs(this.pos.z) < HD - 0.6;
+      const safelyInside = Math.abs(this.pos.x) < BOUNDS.hw - 0.6 && Math.abs(this.pos.z) < BOUNDS.hd - 0.6;
       if (d < 1.6 || (safelyInside && this.t > 6) || this.t > 120) {
         this.recoverSwing = false;
         const toC = new THREE.Vector3(-this.pos.x, 0, -this.pos.z).normalize();
@@ -754,8 +754,8 @@ export class Fighter {
     if (m.special === 'blinkStrike' && t === 5) {
       const o = this.opp;
       const target = o.pos.clone().addScaledVector(o.forward, -1.6);
-      target.x = THREE.MathUtils.clamp(target.x, -HW + 0.8, HW - 0.8);
-      target.z = THREE.MathUtils.clamp(target.z, -HD + 0.8, HD - 0.8);
+      target.x = THREE.MathUtils.clamp(target.x, -BOUNDS.hw + 0.8, BOUNDS.hw - 0.8);
+      target.z = THREE.MathUtils.clamp(target.z, -BOUNDS.hd + 0.8, BOUNDS.hd - 0.8);
       this.match.fx.flash(this.center, 0.8, 0x37f2ff, 0.15);
       this.pos.copy(target);
       this.faceOpp(10);
@@ -1487,7 +1487,7 @@ export class Fighter {
     const charge = this.state === 'charge' ? 0.25 + Math.sin(time * 20) * 0.08 : 0;
     (this.aura.material as THREE.MeshBasicMaterial).opacity += (charge - (this.aura.material as THREE.MeshBasicMaterial).opacity) * 0.3;
     this.aura.rotation.y += dt * 4;
-    const ra = this.raging ? 0.18 + Math.sin(time * 14) * 0.06 : 0;
+    const ra = this.raging ? 0.06 + Math.sin(time * 14) * 0.03 : 0;
     (this.rageAura.material as THREE.MeshBasicMaterial).opacity += (ra - (this.rageAura.material as THREE.MeshBasicMaterial).opacity) * 0.3;
     this.rageAura.rotation.y -= dt * 6;
     for (const m of this.accents) {
