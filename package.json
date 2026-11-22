@@ -1,0 +1,31 @@
+{
+  "name": "breakline-brawl",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview --port 4173",
+    "typecheck": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/samgoldsteinm/Nemesis-marvel.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/samgoldsteinm/Nemesis-marvel/issues"
+  },
+  "homepage": "https://github.com/samgoldsteinm/Nemesis-marvel#readme",
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.170.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "private": true,
+  "type": "module"
+}
