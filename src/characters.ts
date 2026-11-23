@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Rig, Proportions, Pose, P, limb, box, sphere, addOutline, torso } from './rig';
+import type { SkinnedBody, BodyLook } from './skinned';
 
 export type RecoveryFamily = 'ground' | 'swing' | 'flight' | 'teleport';
 export type LiftClass = 0 | 1 | 2; // light, medium, heavy
@@ -75,6 +76,15 @@ export interface CharacterDef {
   powerGrapple: PowerGrapple; // R+X on an opponent not in Danger
   sheet: { mobility: string; power: string; grapple: string; finisher: string; weakness: string; moves: [string, string][] };
   build: (rig: Rig) => { accents: THREE.MeshStandardMaterial[] };
+  /** Rigged-body look and bone-attached decorations (used when the skinned model is loaded). */
+  look?: BodyLook;
+  adorn?: (b: SkinnedBody, rig: Rig) => THREE.MeshStandardMaterial[];
+}
+
+/** Material finishing shared by procedural and skinned bodies. */
+export function finishMaterial(m: THREE.MeshStandardMaterial, kind: 'body' | 'joints', _flat = false) {
+  // Skinned bodies are smooth sculpts: no bump noise (it moirés on their UVs), just the rim light.
+  addRim(m, kind === 'body' ? 0.3 : 0.15);
 }
 
 // ------------------------------------------------------------------ shared moves
@@ -539,6 +549,110 @@ const shunt: CharacterDef = {
     j.head.scale.setScalar(0.86);
     return { accents: [cyan] };
   },
+};
+
+// ------------------------------------------------------------------ rigged-body looks
+const deco = (obj: THREE.Mesh, outline = true) => { obj.castShadow = true; if (outline) addOutline(obj, 1.06); return obj; };
+const g = (geo: THREE.BufferGeometry, m: THREE.Material, pos: [number, number, number], rot?: [number, number, number], scl?: [number, number, number], outline = true) => {
+  const o = new THREE.Mesh(geo, m);
+  o.position.set(...pos);
+  if (rot) o.rotation.set(...rot);
+  if (scl) o.scale.set(...scl);
+  return deco(o, outline);
+};
+
+basalt.look = { height: 2.5, bulk: 1.22, body: 0x4e5c70, joints: 0x8a3a1a, jointGlow: 0.6, bodyRough: 0.95, bodyMetal: 0.05 };
+basalt.adorn = (b) => {
+  const rock = mat(0x4a586a, 0.95, 0.05, 0, 0, true);
+  const rock2 = mat(0x343e4c, 0.95, 0.05, 0, 0, true);
+  const magma = mat(0xff5a1a, 0.4, 0, 0xff4a10, 1.8);
+  const D = (r: number) => new THREE.DodecahedronGeometry(r, 0);
+  // Shoulder boulders, chest plate, back ridge, forearm and shin slabs, heavy fists.
+  for (const [j, sx] of [['lArm', 1], ['rArm', -1]] as const) {
+    b.attach(j, g(D(0.3), rock2, [sx * 0.02, 0.02, 0], [0.4, 0.3, 0.2], [1.3, 0.9, 1.1]));
+    b.attach(j, g(D(0.16), rock, [0, -0.3, 0.1], [1, 0.4, 0]));
+  }
+  for (const j of ['lFore', 'rFore'] as const) {
+    b.attach(j, g(new THREE.BoxGeometry(0.3, 0.42, 0.3), rock2, [0, -0.25, 0.02], [0.1, 0.3, 0.05]));
+    b.attach(j, g(D(0.2), rock, [0, -0.62, 0.04], [0.5, 0.2, 0.3], [1.1, 0.9, 1.1]));
+    b.attach(j, g(new THREE.BoxGeometry(0.04, 0.3, 0.04), magma, [0.1, -0.25, 0.17], undefined, undefined, false));
+  }
+  b.attach('spine', g(new THREE.BoxGeometry(0.75, 0.5, 0.2), rock2, [0, 0.05, 0.2], [0.1, 0, 0]));
+  b.attach('spine', g(new THREE.BoxGeometry(0.5, 0.05, 0.03), magma, [0, 0.0, 0.31], undefined, undefined, false));
+  for (const [x, y] of [[0.2, 0.1], [-0.22, 0.0], [0, -0.2]]) b.attach('spine', g(D(0.2), rock, [x, y, -0.22], [x, y, 0.4], [1.2, 0.9, 0.8]));
+  for (const j of ['lShin', 'rShin'] as const) b.attach(j, g(new THREE.BoxGeometry(0.28, 0.4, 0.22), rock2, [0, -0.2, 0.08], [0.1, 0, 0]));
+  // Boulders over the thighs, upper arms and hips so the whole body reads as stone.
+  for (const j of ['lThigh', 'rThigh'] as const) { b.attach(j, g(D(0.2), rock, [0, -0.15, 0.06], [0.3, 0.5, 0.1], [1.1, 1.3, 1])); b.attach(j, g(D(0.16), rock2, [0, -0.38, 0.05], [1.2, 0.2, 0.4])); }
+  for (const j of ['lArm', 'rArm'] as const) b.attach(j, g(D(0.15), rock2, [0, -0.18, -0.06], [0.7, 0.2, 1]));
+  b.attach('hips', g(new THREE.BoxGeometry(0.62, 0.22, 0.4), rock2, [0, 0.02, 0], [0, 0.1, 0]));
+  b.attach('spine', g(D(0.22), rock, [0, 0.3, 0.12], [0.2, 0.6, 0], [1.4, 0.8, 1]));
+  b.attach('head', g(new THREE.BoxGeometry(0.4, 0.12, 0.25), rock2, [0, 0.2, 0.1], [-0.2, 0, 0]));
+  b.attach('head', g(new THREE.BoxGeometry(0.22, 0.03, 0.02), magma, [0, 0.12, 0.18], undefined, undefined, false));
+  return [magma, b.jointMat];
+};
+
+tether.look = { height: 1.95, bulk: 0.98, body: 0x109c8e, joints: 0x14161c, jointGlow: 0, bodyRough: 0.45, bodyMetal: 0.15 };
+tether.adorn = (b) => {
+  const gold = mat(0xe8b520, 0.3, 0.8, 0x6a4800, 0.4);
+  const lens = mat(0xe8fbff, 0.2, 0, 0x9ff7ff, 1.6);
+  const dark = mat(0x12151c, 0.5, 0.2);
+  for (const j of ['lFore', 'rFore'] as const) {
+    b.attach(j, g(new THREE.BoxGeometry(0.1, 0.13, 0.12), gold, [0, -0.2, 0.05]));
+    b.attach(j, g(new THREE.CylinderGeometry(0.025, 0.025, 0.1, 8), dark, [0, -0.25, 0.12], [Math.PI / 2, 0, 0], undefined, false));
+  }
+  b.attach('head', g(new THREE.SphereGeometry(0.06, 12, 8), lens, [0.06, 0.1, 0.1], undefined, [1.2, 0.75, 0.5], false));
+  b.attach('head', g(new THREE.SphereGeometry(0.06, 12, 8), lens, [-0.06, 0.1, 0.1], undefined, [1.2, 0.75, 0.5], false));
+  const em = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.016, 6, 16, Math.PI * 1.4), gold);
+  em.position.set(0, 0.02, 0.15);
+  em.rotation.z = -0.6;
+  b.attach('spine', em);
+  b.attach('hips', g(new THREE.BoxGeometry(0.34, 0.06, 0.24), dark, [0, 0.02, 0]));
+  for (const x of [-0.12, -0.04, 0.04, 0.12]) b.attach('hips', g(new THREE.BoxGeometry(0.05, 0.07, 0.04), gold, [x, 0.02, 0.13], undefined, undefined, false));
+  return [lens, gold];
+};
+
+aerin.look = { height: 1.95, bulk: 0.9, body: 0xe6e4f2, joints: 0x8a4cff, jointGlow: 1.4, bodyRough: 0.38, bodyMetal: 0.2 };
+aerin.adorn = (b, rig) => {
+  const hair = mat(0xf1f1ff, 0.6, 0.1);
+  const glow = mat(0xc9a8ff, 0.2, 0, 0xa070ff, 1.8);
+  const tail = g(new THREE.ConeGeometry(0.07, 0.5, 8), hair, [0, 0.08, -0.16], [-2.5, 0, 0]);
+  b.attach('head', tail);
+  b.attach('head', g(new THREE.SphereGeometry(0.135, 14, 10), hair, [0, 0.13, -0.03], undefined, [1.02, 0.95, 1.05]));
+  b.attach('head', g(new THREE.BoxGeometry(0.18, 0.03, 0.03), glow, [0, 0.1, 0.12], undefined, undefined, false));
+  b.attach('hips', g(new THREE.BoxGeometry(0.33, 0.05, 0.23), glow, [0, 0.03, 0], undefined, undefined, false));
+  const wingShape = new THREE.Shape();
+  wingShape.moveTo(0, 0); wingShape.lineTo(1.15, 0.55); wingShape.lineTo(0.95, -0.15); wingShape.lineTo(1.25, -0.65); wingShape.lineTo(0.15, -0.35); wingShape.lineTo(0, 0);
+  const wingGeo = new THREE.ShapeGeometry(wingShape);
+  const wingMat = new THREE.MeshBasicMaterial({ color: 0xb48cff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false });
+  const lw = new THREE.Mesh(wingGeo, wingMat);
+  lw.position.set(0.08, 0.1, -0.14);
+  lw.scale.setScalar(0.72);
+  const rw = new THREE.Mesh(wingGeo, wingMat);
+  rw.scale.set(-0.72, 0.72, 0.72);
+  rw.position.set(-0.08, 0.1, -0.14);
+  b.attach('spine', lw);
+  b.attach('spine', rw);
+  (rig as any).wings = [lw, rw];
+  return [glow, b.jointMat];
+};
+
+shunt.look = { height: 2.0, bulk: 1.02, body: 0x2b303c, joints: 0x37f2ff, jointGlow: 1.5, bodyRough: 0.7, bodyMetal: 0.2 };
+shunt.adorn = (b) => {
+  const coat = mat(0x2b303c, 0.7, 0.2);
+  coat.side = THREE.DoubleSide;
+  const cyan = mat(0x37f2ff, 0.2, 0, 0x20e0ff, 1.6);
+  const plate = mat(0xb9c3cf, 0.35, 0.6);
+  const skirt = g(new THREE.CylinderGeometry(0.22, 0.42, 0.8, 12, 1, true), coat, [0, -0.32, 0], undefined, undefined, false);
+  b.attach('hips', skirt);
+  b.attach('head', g(new THREE.SphereGeometry(0.16, 14, 10), coat, [0, 0.12, -0.04], undefined, [1.05, 1.12, 1.08]));
+  b.attach('head', g(new THREE.BoxGeometry(0.2, 0.04, 0.05), cyan, [0, 0.1, 0.11], undefined, undefined, false));
+  for (const [j, sx] of [['lArm', 1], ['rArm', -1]] as const) {
+    b.attach(j, g(new THREE.BoxGeometry(0.2, 0.07, 0.22), plate, [sx * 0.03, 0.03, 0], [0, 0, sx * 0.35]));
+    b.attach(j, g(new THREE.BoxGeometry(0.12, 0.02, 0.18), cyan, [sx * 0.07, 0.075, 0], [0, 0, sx * 0.35], undefined, false));
+  }
+  b.attach('spine', g(new THREE.BoxGeometry(0.3, 0.38, 0.14), coat, [0, 0, -0.2]));
+  b.attach('spine', g(new THREE.SphereGeometry(0.07, 10, 8), cyan, [0, 0, -0.28], undefined, undefined, false));
+  return [cyan, b.jointMat];
 };
 
 export const ROSTER: CharacterDef[] = [basalt, tether, aerin, shunt];

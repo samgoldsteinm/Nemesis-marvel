@@ -76,7 +76,12 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
   - road cracks, skid marks, stains and reflective puddles, plus debris along the barriers
   - Rooftop: crowding neighbour buildings, a water tower, a billboard, and pipes and vents
   - cars explode into fireballs and smoke, leaving a burning wreck that still blocks and can be thrown again
-- **Characters:**
+- **Rigged bodies:**
+  - Every fighter uses the skinned humanoid model in `public/models/xbot.glb` (from the three.js examples, originally from Mixamo; see `public/models/README.md` for the licence).
+  - My animation system still authors every pose. Each frame its joints are retargeted onto the model's skeleton through a one-time T-pose calibration.
+  - Each fighter recolours the model, gets glowing joint trim, and carries original pieces attached to bones: Basalt's stone armour, Tether's wrist launchers and goggles, Aerin's wings and ponytail, Shunt's coat, hood and visor.
+  - If the model fails to load, the game falls back to the procedural bodies.
+- **Characters (procedural fallback):**
   - muscle-shaped limbs and shaped torsos
   - more realistic proportions: longer legs, smaller heads
   - a surface bump texture and a fresnel rim light on every body
@@ -105,7 +110,7 @@ Also checked by hand in headless Chromium: the full keyboard menu flow (title â†
 ## Approximations and known gaps
 
 - YouTube is blocked in this build environment, so the reference was a supplied MP4 clip, reviewed as 40 sampled frames. The clip had no captions. All frame data, damage, thresholds (`TUNING` in `src/fighter.ts`) and collision sizes are tuning estimates, not measured values.
-- Characters use procedural primitive rigs with pose-based animation, not skinned or mocapped models.
+- Bodies are skinned, but all motion is still authored procedurally, with no motion capture. A different look per fighter comes from colour and attachments on one shared base mesh.
 - With the CPU on hard, bouts often end by finisher in 20â€“60 s. Ring-outs mostly happen after fence breaks. Pacing needs human playtesting.
 - Gamepad face buttons are mapped by label position on the browser's "standard" layout. Non-standard pads have not been tested.
 

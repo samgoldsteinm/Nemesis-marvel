@@ -15,6 +15,7 @@ import { ROSTER, CharacterDef, charById } from './characters';
 import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, keyDown, endInputRead } from './input';
 import { initAudio, sfx, startMusic, stopMusic, setMuted, muted } from './audio';
 import { TUNING } from './fighter';
+import { loadBodyModel } from './skinned';
 
 // ============================================================ renderer & scene
 const container = document.getElementById('app')!;
@@ -564,12 +565,12 @@ function frame(now: number) {
   }
 }
 applyPalette('rooftop');
-showScreen('title');
+menu.innerHTML = '<div class="screen"><h1 class="logo">BREAK<span>LINE</span></h1><div class="tagline">Loading fighters…</div></div>';
 requestAnimationFrame(frame);
 
 // ============================================================ automation / test hooks
 (window as any).THREE = THREE;
-(window as any).__game = {
+const hooks = {
   get match() { return match; },
   setup,
   arena,
@@ -594,3 +595,11 @@ requestAnimationFrame(frame);
   renderer,
   vcam,
 };
+
+// Load the rigged body model, then open the menu. Falls back to procedural bodies if it fails.
+loadBodyModel('./models/xbot.glb')
+  .catch((e) => console.warn('Rigged body model unavailable, using procedural bodies:', e))
+  .finally(() => {
+    (window as any).__game = hooks;
+    showScreen('title');
+  });

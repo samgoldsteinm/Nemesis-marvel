@@ -11,7 +11,7 @@ const URL = process.argv[2] || 'http://localhost:5173/';
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(URL);
-  await page.waitForFunction(() => !!window.__game);
+  await page.waitForFunction(() => !!window.__game, null, { timeout: 60000 });
 
   // In-page helpers.
   await page.evaluate(() => {

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { CharacterDef, MoveDef, HitSpec, PROP_SWING } from './characters';
+import { CharacterDef, MoveDef, HitSpec, PROP_SWING, finishMaterial } from './characters';
+import { SkinnedBody, hasBodyModel } from './skinned';
 import { Rig, P, Pose } from './rig';
 import { InputFrame, emptyFrame } from './input';
 import { Prop, BOUNDS, KILL_Y, WallSeg } from './arena';
@@ -94,13 +95,22 @@ export class Fighter {
   hitSide = 1;
 
   ribbon: Ribbon;
+  skinned: SkinnedBody | null = null;
   private mats: THREE.MeshStandardMaterial[] = [];
   private flashOn = false;
   private lastStepPhase = 0;
   constructor(public def: CharacterDef, public idx: number, public match: Match) {
-    this.rig = new Rig(def.proportions);
-    const b = def.build(this.rig);
-    this.accents = b.accents;
+    // Rigged skinned body when the model is loaded; procedural body otherwise.
+    const sk = hasBodyModel() && def.look && def.adorn ? new SkinnedBody(def.look, (m, k) => finishMaterial(m, k, k === 'body' && !!def.look!.flat)) : null;
+    this.rig = new Rig(sk ? sk.proportions : def.proportions);
+    if (sk) {
+      sk.bind(this.rig);
+      this.accents = def.adorn!(sk, this.rig);
+      this.skinned = sk;
+    } else {
+      const b = def.build(this.rig);
+      this.accents = b.accents;
+    }
     for (const m of this.accents) m.userData.baseEI = m.emissiveIntensity;
     // All body materials, for the white impact flash.
     const seen = new Set<THREE.Material>();
@@ -1669,6 +1679,7 @@ export class Fighter {
     r.apply(pose, rate, dt);
     // Big launches tumble end over end.
     if ((this.state === 'launched' || this.state === 'ko' && !this.onGround) && this.lastLaunchSpeed > 11) r.body.rotation.x = -0.7 - this.t * 0.22;
+    this.skinned?.sync();
     // Strike swoosh along the attacking limb during the active window.
     const m = this.state === 'attack' ? this.move : null;
     if (m && m.hit && this.t >= m.startup - 1 && this.t <= m.startup + m.active + 1) {
