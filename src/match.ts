@@ -303,6 +303,18 @@ export class Match {
     this.fx.ring(c.clone().setY(Math.max(0, p.pos.y)), 7, 0xff6020, 0.6);
     this.fx.burstDebris(c, 30, 0x302820, 12, 0.3);
     this.fx.sparksAt(c, 40, 0xffb040, 14, 0.14, 4);
+    this.fx.fireball(c, p.kind === 'car' ? 3.6 : 3);
+    // Aftermath: a car leaves a burning wreck that still blocks and can be thrown again.
+    if (p.kind === 'car' && this.arena.inside(p.pos.x, p.pos.z) && p.pos.y > -1) {
+      const w = this.arena.makeWreck();
+      w.pos.set(p.pos.x, Math.max(0, p.pos.y), p.pos.z);
+      w.mesh.position.copy(w.pos);
+      w.mesh.rotation.y = p.mesh.rotation.y;
+      w.state = 'falling';
+      this.arena.props.push(w);
+      this.arena.dyn.add(w.mesh);
+      this.fx.burners.push({ p: w.pos, t: 9, size: 1.1 });
+    }
     this.fx.shake = 1.2;
     sfx.explosion();
     this.log('explosion');

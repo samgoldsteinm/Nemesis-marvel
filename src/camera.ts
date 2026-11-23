@@ -15,10 +15,12 @@ export class VersusCamera {
   fwd = new THREE.Vector3(0, 0, -1);
   /** Brief zoom-in on heavy impacts. */
   punch = 0;
+  /** Keep the camera inside a corridor (narrow venues): max |z|. */
+  zLimit = Infinity;
   right = new THREE.Vector3(1, 0, 0);
 
   constructor(aspect: number) {
-    this.cam = new THREE.PerspectiveCamera(50, aspect, 0.1, 600);
+    this.cam = new THREE.PerspectiveCamera(57, aspect, 0.1, 600);
   }
 
   snapTo(fs: Fighter[]) {
@@ -98,6 +100,17 @@ export class VersusCamera {
     const pd = this.dist * (1 - 0.14 * this.punch);
     const camPos = new THREE.Vector3(this.target.x + Math.sin(this.yaw) * pd, this.target.y + this.height * (1 - 0.1 * this.punch), this.target.z + Math.cos(this.yaw) * pd);
     if (camPos.y < 1.5) camPos.y = 1.5;
+    // Narrow venue: slide the camera back inside the roadway (along it) instead of filming through the girders.
+    if (Math.abs(camPos.z) > this.zLimit && !this.cinematic) {
+      const over = Math.abs(camPos.z) - this.zLimit;
+      camPos.z = Math.sign(camPos.z) * this.zLimit;
+      const along = Math.sign(camPos.x - this.target.x) || 1;
+      camPos.x += along * over * 0.9;
+      camPos.y += over * 0.25;
+      // Nudge the stored yaw toward an along-the-road view so it settles there.
+      const roadYaw = along > 0 ? Math.PI / 2 : -Math.PI / 2;
+      this.yaw = wrap(this.yaw + wrap(roadYaw - this.yaw) * Math.min(1, dt * 1.5));
+    }
     this.pos.copy(camPos);
     this.cam.position.copy(camPos);
     if (shake > 0) {
@@ -107,6 +120,8 @@ export class VersusCamera {
       this.cam.position.z += (Math.random() - 0.5) * s;
     }
     this.cam.lookAt(this.target.x, this.target.y - 0.15, this.target.z);
+    // A touch of dutch tilt on heavy impacts.
+    if (this.punch > 0) this.cam.rotateZ(Math.sin(this.punch * 9) * 0.035 * this.punch);
     this.fwd.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     this.right.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
   }

@@ -721,7 +721,7 @@ export class Fighter {
     this.accelTo(wish.clone().multiplyScalar(this.def.speed * 1.2), 6, dt);
     const vy = (b.jump.down ? 6 : 0) - (b.guard.down ? 6 : 0);
     this.vel.y += (vy - this.vel.y) * (1 - Math.exp(-6 * dt));
-    if (this.pos.y > 14) this.vel.y = Math.min(this.vel.y, 0);
+    if (this.pos.y > this.match.arena.ceiling) this.vel.y = Math.min(this.vel.y, 0);
     this.faceToward(wish.lengthSq() > 0.1 ? wish : this.opp.pos.clone().sub(this.pos).setY(0), 8, dt);
     this.match.fx.trail(this.pos.clone().add(new THREE.Vector3(0, 0.3, 0)), 0xa070ff, 0.12, 0.3);
     // Attacks in flight.
@@ -782,6 +782,8 @@ export class Fighter {
       if (m.special !== 'slingshot' && (this.onGround || m.id === 'flightDash' || m.id === 'stormDash' || m.id === 'swingKick' || m.id === 'shoulder')) { this.vel.x = f.x; this.vel.z = f.z; }
     } else if (this.onGround) this.friction(dt, 14);
     if (m.id === 'flightDash' || m.id === 'stormDash') this.vel.y = 0;
+    // Speed smear on dashes.
+    if (m.lunge && m.lunge >= 12 && t >= m.startup && t < activeEnd) this.match.fx.blur = Math.max(this.match.fx.blur, 0.45);
 
     if (t === activeStart) this.onActiveStart(m);
     if (m.special === 'blinkStrike' && t === 5) {
@@ -1453,7 +1455,7 @@ export class Fighter {
     this.yaw = Math.atan2(-dir.x, -dir.z);
     sfx.hit(!!spec.heavy);
     this.match.fx.hitstop = spec.heavy ? 0.085 : 0.045;
-    if (spec.heavy) this.match.camera.punch = 1;
+    if (spec.heavy) { this.match.camera.punch = 1; this.match.fx.blur = Math.max(this.match.fx.blur, 0.35); }
     this.match.fx.shake = Math.max(this.match.fx.shake, spec.heavy ? 0.45 : 0.15);
     this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.4), spec.heavy ? 16 : 8, spec.heavy ? 0xffc060 : 0xffffff, spec.heavy ? 9 : 6);
     if (spec.heavy) this.match.fx.flash(this.center, 0.7, 0xfff0d0, 0.1);
@@ -1569,7 +1571,7 @@ export class Fighter {
     } else if (id === 'basalt') {
       if (t < 70) o.pos.lerp(s.clone().add(new THREE.Vector3(0, this.def.height + 0.6, 0)), 0.15);
       else if (t < 82) o.pos.lerp(front(1.6, 0), 0.5);
-      if (t === 82) { fx.ring(front(1.6, 0), 6, 0xff7a3a, 0.6); fx.burstDebris(front(1.6, 0.2), 40, 0x6a6a72, 10, 0.4); fx.shake = 1.2; sfx.explosion(); }
+      if (t === 82) { fx.ring(front(1.6, 0), 6, 0xff7a3a, 0.6); fx.burstDebris(front(1.6, 0.2), 40, 0x6a6a72, 10, 0.4); fx.shake = 1.2; fx.screenFlash = 0.7; fx.blur = 0.6; sfx.explosion(); }
     } else if (id === 'tether') {
       const ang = (t - 30) * 0.25;
       const r = 2.2;
@@ -1580,7 +1582,7 @@ export class Fighter {
     } else if (id === 'aerin') {
       if (t < 75) { this.pos.lerp(s.clone().add(new THREE.Vector3(0, 7, 0)), 0.05); o.pos.lerp(this.pos.clone().addScaledVector(fwd, 0.9).add(new THREE.Vector3(0, 0.2, 0)), 0.3); if (t % 2 === 0) fx.trail(this.pos, 0xa070ff, 0.25, 0.5); }
       else if (t < 88) o.pos.lerp(front(2, 0), 0.4);
-      if (t === 88) { fx.flash(front(2, 1), 3, 0xc9a8ff, 0.35); fx.ring(front(2, 0), 6, 0xa070ff, 0.6); fx.shake = 1.1; sfx.explosion(); sfx.zap(); }
+      if (t === 88) { fx.flash(front(2, 1), 3, 0xc9a8ff, 0.35); fx.ring(front(2, 0), 6, 0xa070ff, 0.6); fx.shake = 1.1; fx.screenFlash = 0.7; fx.blur = 0.6; sfx.explosion(); sfx.zap(); }
       if (t > 95) this.pos.lerp(s, 0.08);
     } else {
       // Shunt: scatter strikes from every side.

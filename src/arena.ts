@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { LiftClass } from './characters';
 import { addOutline } from './rig';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { FX } from './fx';
 import { sfx } from './audio';
 
@@ -90,7 +91,7 @@ export class WallSeg {
   }
 }
 
-export type PropKind = 'panel' | 'crate' | 'letter' | 'ac' | 'tank' | 'rubble' | 'car' | 'barrel' | 'barrier';
+export type PropKind = 'panel' | 'crate' | 'letter' | 'ac' | 'tank' | 'rubble' | 'car' | 'barrel' | 'barrier' | 'wreck';
 export type PropState = 'rest' | 'held' | 'thrown' | 'falling' | 'gone';
 
 export class Prop {
@@ -120,7 +121,7 @@ export class Prop {
     return [8, 14, 22][this.cls] * this.power;
   }
   get label() {
-    return { panel: 'Sign panel', crate: 'Crate', letter: 'Sign letter', ac: 'A/C unit', tank: 'Fuel tank', rubble: 'Rubble', car: 'Car', barrel: 'Barrel', barrier: 'Barrier block' }[this.kind];
+    return { panel: 'Sign panel', crate: 'Crate', letter: 'Sign letter', ac: 'A/C unit', tank: 'Fuel tank', rubble: 'Rubble', car: 'Car', barrel: 'Barrel', barrier: 'Barrier block', wreck: 'Burnt wreck' }[this.kind];
   }
 }
 
@@ -237,6 +238,8 @@ export class Arena {
   }
 
   layout: LayoutId = 'rooftop';
+  /** Height limit for fliers (below overhead structure). */
+  ceiling = 14;
   /** Swap venues: rebuild static scenery, solids and anchors, then reset dynamic pieces. */
   setLayout(id: LayoutId) {
     this.layout = id;
@@ -245,6 +248,7 @@ export class Arena {
     this.fixedSolids = [];
     this.anchors = [];
     this.fadeables = [];
+    this.ceiling = 14;
     if (id === 'rooftop') {
       BOUNDS.hw = 18; BOUNDS.hd = 13;
       this.buildStatic();
@@ -293,6 +297,109 @@ export class Arena {
   }
   private _winTex: THREE.Texture | null = null;
 
+  /** Merge many boxes into one mesh (one draw call) — used for trusses, pipes and clutter. */
+  private boxes(list: [number, number, number, number, number, number, number?][], mat: THREE.Material, shadow = true) {
+    const geos = list.map(([w, h, d, x, y, z, ry]) => {
+      const g = new THREE.BoxGeometry(w, h, d);
+      if (ry) g.rotateY(ry);
+      g.translate(x, y, z);
+      return g;
+    });
+    const m = new THREE.Mesh(mergeGeometries(geos), mat);
+    m.castShadow = shadow;
+    m.receiveShadow = true;
+    this.static.add(m);
+    return m;
+  }
+
+  /** A flat decal on the deck: cracks, skid marks, stains, puddles. */
+  private decal(kind: 'crack' | 'skid' | 'stain' | 'puddle', x: number, z: number, size: number, rot = 0) {
+    const key = `decal_${kind}`;
+    let mat = this.decalMats.get(key);
+    if (!mat) {
+      if (kind === 'puddle') mat = new THREE.MeshStandardMaterial({ color: 0x7a9aa4, roughness: 0.04, metalness: 0.9, transparent: true, opacity: 0.55, depthWrite: false });
+      else {
+        const tex = canvasTex(128, 128, (g) => {
+          g.clearRect(0, 0, 128, 128);
+          if (kind === 'crack') {
+            g.strokeStyle = 'rgba(10,10,12,0.85)';
+            for (let k = 0; k < 4; k++) {
+              g.lineWidth = 2.5 - k * 0.5;
+              g.beginPath(); let px = 64, py = 64; g.moveTo(px, py);
+              for (let i = 0; i < 9; i++) { px += (Math.random() - 0.5) * 30; py += (Math.random() - 0.5) * 30; g.lineTo(px, py); }
+              g.stroke();
+            }
+          } else if (kind === 'skid') {
+            for (const y of [44, 84]) { const gr = g.createLinearGradient(0, 0, 128, 0); gr.addColorStop(0, 'rgba(8,8,8,0)'); gr.addColorStop(0.3, 'rgba(8,8,8,0.7)'); gr.addColorStop(1, 'rgba(8,8,8,0.15)'); g.fillStyle = gr; g.fillRect(0, y, 128, 10); }
+          } else {
+            const gr = g.createRadialGradient(64, 64, 4, 64, 64, 60); gr.addColorStop(0, 'rgba(20,16,12,0.6)'); gr.addColorStop(1, 'rgba(20,16,12,0)'); g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+          }
+        });
+        mat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, depthWrite: false, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 });
+      }
+      this.decalMats.set(key, mat);
+    }
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(size, kind === 'skid' ? size * 0.4 : kind === 'puddle' ? size * 0.6 : size), mat);
+    m.rotation.set(-Math.PI / 2, 0, rot);
+    m.position.set(x, 0.015 + Math.random() * 0.005, z);
+    m.receiveShadow = true;
+    this.static.add(m);
+  }
+  private decalMats = new Map<string, THREE.Material>();
+
+  /** Painted or lit storefront sign texture with a generic word. */
+  private signTex(word: string, bg: string, fg: string) {
+    return canvasTex(256, 64, (g) => {
+      g.fillStyle = bg; g.fillRect(0, 0, 256, 64);
+      g.strokeStyle = fg; g.lineWidth = 4; g.strokeRect(6, 6, 244, 52);
+      g.fillStyle = fg; g.font = 'bold 40px Impact, "Arial Black", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(word, 128, 35);
+    });
+  }
+
+  /** A close city block face: tall, windowed, with a storefront sign at the given height. */
+  private block(x: number, z: number, w: number, d: number, bottom: number, top: number, face: 1 | -1, sign?: [string, string, string], signY?: number) {
+    const h = top - bottom;
+    const tone = 0.55 + Math.random() * 0.35;
+    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(tone, tone * 0.98, tone * 1.02), map: this.winTex, emissive: 0xffffff, emissiveMap: this.winTex, emissiveIntensity: 0.15, roughness: 0.85 });
+    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    b.position.set(x, bottom + h / 2, z);
+    b.castShadow = true;
+    b.receiveShadow = true;
+    this.static.add(b);
+    // Cornice and rooftop clutter.
+    this.boxes([[w + 0.6, 0.5, d + 0.6, x, top + 0.1, z], [2, 1.4, 2, x - w * 0.25, top + 0.9, z], [1.2, 2.2, 1.2, x + w * 0.3, top + 1.2, z - d * 0.2]], this.mats.concrete);
+    if (sign) {
+      const tex = this.signTex(...sign);
+      const sm = new THREE.Mesh(new THREE.BoxGeometry(Math.min(w * 0.8, 9), 2, 0.3), new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.5 }));
+      sm.position.set(x, signY ?? bottom + 4, z + face * (d / 2 + 0.2));
+      this.static.add(sm);
+      // Awning under the sign.
+      const aw = new THREE.Mesh(new THREE.BoxGeometry(Math.min(w * 0.8, 9), 0.15, 1.6), new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(Math.random(), 0.45, 0.35), roughness: 0.8 }));
+      aw.position.set(x, (signY ?? bottom + 4) - 1.4, z + face * (d / 2 + 0.8));
+      aw.rotation.x = face * 0.25;
+      aw.castShadow = true;
+      this.static.add(aw);
+    }
+  }
+
+  makeWreck() {
+    const g = new THREE.Group();
+    const char = new THREE.MeshStandardMaterial({ color: 0x1c1a19, roughness: 0.95, metalness: 0.3 });
+    const rust = new THREE.MeshStandardMaterial({ color: 0x4a2a1a, roughness: 1 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.6, 4.1), char);
+    body.position.y = 0.5;
+    body.rotation.z = 0.06;
+    addOutline(body, 1.02);
+    g.add(body);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.45, 1.9), rust);
+    cab.position.set(0.05, 1.0, -0.3);
+    cab.rotation.set(0.05, 0.04, -0.1);
+    addOutline(cab, 1.03);
+    g.add(cab);
+    return new Prop('wreck', 2, g, new THREE.Vector3(0.95, 0.6, 2.05), false);
+  }
+
   // ------------------------------------------------------------------ overpass
   private buildOverpass() {
     const s = this.static;
@@ -315,16 +422,70 @@ export class Arena {
       m.position.set(0, 0.01, z);
       s.add(m);
     }
-    // Support piers dropping to the river far below.
-    for (const x of [-24, -8, 8, 24]) {
-      const p = new THREE.Mesh(new THREE.BoxGeometry(3, 40, 6), this.mats.concrete);
-      p.position.set(x, -21, 0);
-      s.add(p);
+    // Massive support piers down to the street below.
+    this.boxes([-24, -8, 8, 24].flatMap((x) => [[3.2, 22, 7, x, -11.2, 0], [5, 1.2, hd * 2 + 2, x, -1.6, 0]] as [number, number, number, number, number, number][]), this.mats.concrete);
+    const street = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), this.mats.asphalt.clone());
+    (street.material as THREE.MeshStandardMaterial).color.setHex(0x9a9a9a);
+    street.rotation.x = -Math.PI / 2;
+    street.position.y = -22;
+    street.receiveShadow = true;
+    s.add(street);
+    // Through-truss: side trusses and overhead cross beams. Their shadows stripe the deck.
+    const tz = hd + 0.7, top = 8.2;
+    const truss: [number, number, number, number, number, number, number?][] = [];
+    for (const z of [-tz, tz]) {
+      truss.push([hw * 2 + 24, 0.45, 0.45, 0, top, z]);
+      truss.push([hw * 2 + 24, 0.35, 0.35, 0, 3.3, z]);
+      for (let x = -hw - 12; x <= hw + 12; x += 4) {
+        truss.push([0.4, top - 3.3, 0.4, x, (top + 3.3) / 2, z]);
+        const len = Math.hypot(4, top - 3.3);
+        void len;
+      }
     }
-    const river = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), new THREE.MeshStandardMaterial({ color: 0x0a1a22, roughness: 0.2, metalness: 0.6 }));
-    river.rotation.x = -Math.PI / 2;
-    river.position.y = -40;
-    s.add(river);
+    for (let x = -hw - 12; x <= hw + 12; x += 4) truss.push([0.35, 0.5, tz * 2, x, top + 0.1, 0]);
+    for (let x = -hw - 10; x <= hw + 12; x += 8) truss.push([0.18, 0.18, Math.hypot(tz * 2, 4), x - 2, top + 0.1, 0, Math.atan2(4, tz * 2)]);
+    const trussMat = new THREE.MeshStandardMaterial({ color: 0x5f7a7e, roughness: 0.55, metalness: 0.6 });
+    const tm = this.boxes(truss, trussMat);
+    // Tilt the diagonals: rebuild them with rotation in their own geometry pass.
+    void tm;
+    const diag: THREE.BufferGeometry[] = [];
+    for (const z of [-tz, tz]) for (let x = -hw - 12; x <= hw + 12; x += 4) {
+      const len = Math.hypot(4, top - 3.3);
+      const g = new THREE.BoxGeometry(0.22, len, 0.22);
+      g.rotateZ(Math.atan2(4, top - 3.3) * ((x / 4) % 2 === 0 ? 1 : -1));
+      g.translate(x + 2, (top + 3.3) / 2, z);
+      diag.push(g);
+    }
+    const dm = new THREE.Mesh(mergeGeometries(diag), trussMat);
+    dm.castShadow = true;
+    s.add(dm);
+    for (const z of [-tz, tz]) for (let x = -24; x <= 24; x += 8) this.anchors.push(new THREE.Vector3(x, top, z));
+    for (let x = -20; x <= 20; x += 8) this.anchors.push(new THREE.Vector3(x, top, 0));
+    this.ceiling = top - 0.8;
+    // Close city blocks on both sides, with storefronts at deck level.
+    const signs: [string, string, string][] = [['DELI', '#f0e6c8', '#a02018'], ['HOTEL', '#1a2a3a', '#ffd070'], ['PAWN', '#f2c230', '#1a1a1a'], ['PARKING', '#1a4a8a', '#ffffff'], ['24 HR', '#202020', '#ff4040'], ['LAUNDRY', '#e8f0f0', '#206080'], ['DINER', '#c02a20', '#fff0d0'], ['SURPLUS', '#2a3a20', '#e8e0b0']];
+    let si = 0;
+    for (const face of [1, -1] as const) {
+      for (let x = -hw - 20; x < hw + 20; ) {
+        const w = 8 + Math.random() * 8;
+        const d = 10 + Math.random() * 6;
+        const z = -face * (hd + 9 + d / 2 + Math.random() * 4);
+        this.block(x + w / 2, z, w, d, -22, 6 + Math.random() * 26, face, signs[si++ % signs.length], 2.5 + Math.random() * 2);
+        x += w + 1 + Math.random() * 2;
+      }
+    }
+    // Road decals, puddles and clutter.
+    for (let i = 0; i < 16; i++) this.decal('crack', (Math.random() - 0.5) * hw * 1.8, (Math.random() - 0.5) * hd * 1.6, 2 + Math.random() * 3, Math.random() * 6);
+    for (let i = 0; i < 6; i++) this.decal('skid', (Math.random() - 0.5) * hw * 1.6, (Math.random() - 0.5) * hd, 5 + Math.random() * 4, (Math.random() - 0.5) * 0.4);
+    for (let i = 0; i < 7; i++) this.decal('puddle', (Math.random() - 0.5) * hw * 1.7, (Math.random() - 0.5) * hd * 1.5, 1.5 + Math.random() * 2.5, Math.random() * 3);
+    for (let i = 0; i < 8; i++) this.decal('stain', (Math.random() - 0.5) * hw * 1.8, (Math.random() - 0.5) * hd * 1.6, 2 + Math.random() * 2);
+    const junk: [number, number, number, number, number, number, number?][] = [];
+    for (let i = 0; i < 40; i++) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const sz = 0.12 + Math.random() * 0.35;
+      junk.push([sz, sz * 0.7, sz * 1.2, (Math.random() - 0.5) * hw * 1.9, sz * 0.35, side * (hd - 0.7 - Math.random() * 0.8), Math.random() * 3]);
+    }
+    this.boxes(junk, this.mats.rubble);
     // Wreck pile-ups close both ends of the fighting stretch (permanent cover).
     for (const sx of [-1, 1]) {
       const g = new THREE.Group();
@@ -380,8 +541,8 @@ export class Arena {
     sign.position.set(4.2, 6.5, -2);
     s.add(sign);
     for (const z of [-4, 0, 4]) this.anchors.push(new THREE.Vector3(4, 7.4, z));
-    // Distant skyline across the river.
-    this.buildCity(60);
+    // Skyline beyond the close blocks.
+    this.buildCity(70);
     this.spawns = [new THREE.Vector3(-7, 0, 0), new THREE.Vector3(7, 0, 0)];
   }
 
@@ -410,6 +571,36 @@ export class Arena {
     s.add(cornice);
 
     this.buildCity(34);
+    // Close neighbours: taller blocks crowd the roof, with signage and rooftop clutter.
+    const nsigns: [string, string, string][] = [['HOTEL', '#1a2a3a', '#ffd070'], ['FRESH 24/7', '#f0e6c8', '#c02a20'], ['RADIO', '#202028', '#7ad0ff'], ['GARAGE', '#e8d020', '#202020']];
+    this.block(0, -HD - 16, 30, 12, -60, 24, 1, nsigns[0], 9);
+    this.block(-HW - 14, -2, 12, 22, -60, 12, 1, nsigns[1], 6);
+    this.block(HW + 13, 4, 12, 18, -60, 30, 1, nsigns[2], 12);
+    this.block(-10, HD + 18, 18, 14, -60, 6, -1, nsigns[3], 2);
+    // Water tower on the neighbouring roof, billboard frame, rooftop pipes and vents.
+    const wt = new THREE.Group();
+    const tankM = new THREE.MeshStandardMaterial({ color: 0x6a4a34, roughness: 0.9 });
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, 3.4, 16), tankM);
+    tank.position.y = 6.2; tank.castShadow = true; wt.add(tank);
+    const roofCone = new THREE.Mesh(new THREE.ConeGeometry(2.4, 1.4, 16), tankM);
+    roofCone.position.y = 8.6; roofCone.castShadow = true; wt.add(roofCone);
+    for (const [lx, lz] of [[-1.5, -1.5], [1.5, -1.5], [-1.5, 1.5], [1.5, 1.5]]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.5, 0.2), this.mats.steel); leg.position.set(lx, 2.25, lz); leg.castShadow = true; wt.add(leg); }
+    wt.position.set(-HW - 12, 12, -6);
+    s.add(wt);
+    const bb = this.signTex('CITY PULSE 98.1', '#103048', '#9fe8ff');
+    const board = new THREE.Mesh(new THREE.BoxGeometry(12, 4, 0.3), new THREE.MeshStandardMaterial({ map: bb, emissive: 0xffffff, emissiveMap: bb, emissiveIntensity: 0.35 }));
+    board.position.set(HW + 7, 36, 4);
+    board.rotation.y = -Math.PI / 2;
+    board.castShadow = true;
+    s.add(board);
+    this.boxes([
+      [HW * 2 - 2, 0.25, 0.25, 0, 0.35, HD - 1.0], [HW * 2 - 2, 0.18, 0.18, 0, 0.65, HD - 1.0],
+      [0.25, 0.25, HD * 2 - 2, -HW + 1.0, 0.35, 0],
+      [0.8, 0.9, 0.8, -3, 0.45, HD - 1.6], [0.8, 0.9, 0.8, 7, 0.45, HD - 1.6], [0.6, 1.4, 0.6, -HW + 1.6, 0.7, -8],
+    ], this.mats.steel);
+    for (let i = 0; i < 10; i++) this.decal('stain', (Math.random() - 0.5) * HW * 1.8, (Math.random() - 0.5) * HD * 1.6, 2 + Math.random() * 3);
+    for (let i = 0; i < 5; i++) this.decal('puddle', (Math.random() - 0.5) * HW * 1.6, (Math.random() - 0.5) * HD * 1.4, 1.5 + Math.random() * 2, Math.random() * 3);
+    for (let i = 0; i < 8; i++) this.decal('crack', (Math.random() - 0.5) * HW * 1.8, (Math.random() - 0.5) * HD * 1.6, 2 + Math.random() * 2.5, Math.random() * 6);
     // Street grid far below, with light streaks.
     const streetTex = canvasTex(256, 256, (g) => {
       g.fillStyle = '#0c0b10';

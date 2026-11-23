@@ -67,12 +67,32 @@ export class Ribbon {
   }
 }
 
+function radialTex(stops: [number, string][]) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d')!;
+  const gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  for (const [o, col] of stops) gr.addColorStop(o, col);
+  g.fillStyle = gr;
+  g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+interface Billow { s: THREE.Sprite; v: THREE.Vector3; life: number; max: number; s0: number; s1: number; fire: boolean }
+
 export class FX {
   quality = 1;
   private debris: THREE.InstancedMesh;
   private sparks: THREE.InstancedMesh;
   private dParts: Particle[] = [];
   private sParts: Particle[] = [];
+  private billows: Billow[] = [];
+  private firePool: THREE.Sprite[] = [];
+  private smokePool: THREE.Sprite[] = [];
+  /** Lingering flames (e.g. on a burnt wreck): position and remaining seconds. */
+  burners: { p: THREE.Vector3; t: number; size: number }[] = [];
   private puffs: THREE.InstancedMesh;
   private pParts: Particle[] = [];
   private maxP = 120;
@@ -83,6 +103,10 @@ export class FX {
   private maxS = 320;
   shake = 0;
   hitstop = 0;
+  /** Motion-blur amount (afterimage damp) and full-screen flash, decaying. */
+  blur = 0;
+  blurAllowed = true;
+  screenFlash = 0;
 
   constructor(public scene: THREE.Scene) {
     this.debris = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }), this.maxD);
@@ -101,6 +125,14 @@ export class FX {
     this.puffs.frustumCulled = false;
     this.puffs.count = 0;
     scene.add(this.puffs);
+    const fireTex = radialTex([[0, 'rgba(255,255,230,1)'], [0.25, 'rgba(255,200,90,0.95)'], [0.55, 'rgba(255,90,20,0.6)'], [1, 'rgba(120,20,0,0)']]);
+    const smokeTex = radialTex([[0, 'rgba(70,66,64,0.85)'], [0.5, 'rgba(60,58,58,0.5)'], [1, 'rgba(40,40,40,0)']]);
+    for (let i = 0; i < 70; i++) {
+      const f = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireTex, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+      f.visible = false; scene.add(f); this.firePool.push(f);
+      const sm = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, depthWrite: false }));
+      sm.visible = false; scene.add(sm); this.smokePool.push(sm);
+    }
     const ringGeo = new THREE.RingGeometry(0.85, 1, 40);
     ringGeo.rotateX(-Math.PI / 2);
     for (let i = 0; i < 8; i++) {
@@ -121,11 +153,16 @@ export class FX {
   clear() {
     this.dParts.length = 0;
     this.pParts.length = 0;
+    for (const b of this.billows) b.s.visible = false;
+    this.billows.length = 0;
+    this.burners.length = 0;
     this.sParts.length = 0;
     for (const r of this.rings) { r.life = 0; r.m.visible = false; }
     for (const f of this.flashes) { f.life = 0; f.m.visible = false; }
     this.shake = 0;
     this.hitstop = 0;
+    this.blur = 0;
+    this.screenFlash = 0;
   }
 
   burstDebris(pos: THREE.Vector3, count: number, color: number, speed = 6, size = 0.25, dir?: THREE.Vector3) {
@@ -147,6 +184,31 @@ export class FX {
       const life = 0.25 + Math.random() * 0.35;
       this.sParts.push({ p: pos.clone(), v, r: new THREE.Euler(), rv: new THREE.Vector3(), life, max: life, size: size * (0.6 + Math.random()), grav, color: new THREE.Color(color) });
     }
+  }
+
+  private billow(pos: THREE.Vector3, fire: boolean, size: number, v: THREE.Vector3, life: number) {
+    const pool = fire ? this.firePool : this.smokePool;
+    const s = pool.find((x) => !x.visible);
+    if (!s) return;
+    s.visible = true;
+    s.position.copy(pos);
+    s.material.rotation = Math.random() * Math.PI * 2;
+    this.billows.push({ s, v, life, max: life, s0: size * 0.5, s1: size * (fire ? 1.4 : 2.4), fire });
+  }
+
+  /** A fiery explosion: core flash, rolling fireballs, then smoke that rises and spreads. */
+  fireball(pos: THREE.Vector3, size = 3) {
+    const n = Math.max(4, Math.round(14 * this.quality));
+    for (let i = 0; i < n; i++) {
+      const d = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.7 + 0.1, Math.random() - 0.5).normalize();
+      this.billow(pos.clone().addScaledVector(d, size * 0.25), true, size * (0.6 + Math.random() * 0.6), d.multiplyScalar(size * (1 + Math.random() * 1.5)), 0.45 + Math.random() * 0.35);
+    }
+    for (let i = 0; i < n; i++) {
+      const d = new THREE.Vector3(Math.random() - 0.5, Math.random() * 0.8 + 0.4, Math.random() - 0.5).normalize();
+      this.billow(pos.clone().addScaledVector(d, size * 0.3), false, size * (0.8 + Math.random() * 0.6), d.multiplyScalar(size * 0.6).add(new THREE.Vector3(0, 1.5, 0)), 1.6 + Math.random() * 1.2);
+    }
+    this.screenFlash = Math.max(this.screenFlash, 0.55);
+    this.blur = Math.max(this.blur, 0.55);
   }
 
   /** Soft dust from landings, footsteps and slides. */
@@ -259,6 +321,26 @@ export class FX {
     this.puffs.count = i;
     this.puffs.instanceMatrix.needsUpdate = true;
 
+    for (let k = this.billows.length - 1; k >= 0; k--) {
+      const b = this.billows[k];
+      b.life -= dt;
+      if (b.life <= 0) { b.s.visible = false; this.billows.splice(k, 1); continue; }
+      const f = 1 - b.life / b.max;
+      b.v.multiplyScalar(Math.exp(-(b.fire ? 3 : 1.2) * dt));
+      if (!b.fire) b.v.y += 0.8 * dt;
+      b.s.position.addScaledVector(b.v, dt);
+      const sc = b.s0 + (b.s1 - b.s0) * (1 - (1 - f) * (1 - f));
+      b.s.scale.set(sc, sc, 1);
+      b.s.material.opacity = b.fire ? Math.max(0, 1 - f * 1.15) : Math.max(0, Math.min(1, f * 4) * (1 - f)) * 0.9;
+      b.s.material.rotation += dt * 0.4;
+    }
+    for (const bn of this.burners) {
+      bn.t -= dt;
+      if (Math.random() < dt * 14 * this.quality) this.billow(bn.p.clone().add(new THREE.Vector3((Math.random() - 0.5) * bn.size, 0, (Math.random() - 0.5) * bn.size)), true, bn.size * (0.5 + Math.random() * 0.4), new THREE.Vector3(0, 2 + Math.random() * 1.5, 0), 0.5);
+      if (Math.random() < dt * 6 * this.quality) this.billow(bn.p.clone().add(new THREE.Vector3(0, bn.size, 0)), false, bn.size, new THREE.Vector3((Math.random() - 0.5) * 0.5, 2, (Math.random() - 0.5) * 0.5), 2.2);
+    }
+    this.burners = this.burners.filter((b) => b.t > 0);
+
     for (const r of this.rings) {
       if (r.life <= 0) continue;
       r.life -= dt;
@@ -277,5 +359,7 @@ export class FX {
       if (fl.life <= 0) fl.m.visible = false;
     }
     this.shake = Math.max(0, this.shake - dt * 2.5);
+    this.blur = Math.max(0, this.blur - dt * 2.2);
+    this.screenFlash = Math.max(0, this.screenFlash - dt * 4);
   }
 }

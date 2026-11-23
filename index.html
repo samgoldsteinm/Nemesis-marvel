@@ -71,14 +71,14 @@
   .meters { flex: 1; min-width: 0; }
   .pips { display: flex; gap: 3px; align-items: center; height: 10px; }
   .p1 .pips { flex-direction: row-reverse; }
-  .pips b { position: relative; flex: 0 0 18%; height: 8px; background: #050508; border: 1px solid #000; box-shadow: 0 0 0 1px rgba(110,220,255,0.25); transform: skew(-20deg); overflow: hidden; }
+  .pips b { position: relative; flex: 0 0 18%; height: 6px; background: #050508; border: 1px solid #000; box-shadow: 0 0 0 1px rgba(110,220,255,0.25); transform: skew(-20deg); overflow: hidden; }
   .pips b i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(180deg, #c8f4ff, #39b4e8); }
   .p1 .pips b i { left: auto; right: 0; }
   .pips.unlimited b i { background: linear-gradient(180deg, #fff0b0, #ff5a1c); }
   .pips.flash b { box-shadow: 0 0 0 1px #ff3030; background: #400; }
   .pips .nm { margin: 0 6px; font-size: 12px; letter-spacing: 0.06em; white-space: nowrap; text-shadow: 1px 1px 0 #000; }
-  .bar { position: relative; height: 10px; background: #050508; margin-top: 4px; overflow: hidden; border: 1px solid #000; transform: skew(-20deg); box-shadow: 1px 1px 0 rgba(0,0,0,0.6); }
-  .bar.vit { height: 11px; }
+  .bar { position: relative; height: 8px; background: #050508; margin-top: 4px; overflow: hidden; border: 1px solid #000; transform: skew(-20deg); box-shadow: 1px 1px 0 rgba(0,0,0,0.6); }
+  .bar.vit { height: 8px; }
   .bar > div, .bar .fill { position: absolute; top: 0; bottom: 0; left: 0; transition: width .12s linear; }
   .hud-p.p1 .bar > div, .hud-p.p1 .bar .fill { right: 0; left: auto; }
   .bar .hp { background: linear-gradient(180deg, #ff6a6a, var(--hp)); }

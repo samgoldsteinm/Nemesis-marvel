@@ -4,6 +4,8 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { AfterimagePass } from 'three/examples/jsm/postprocessing/AfterimagePass.js';
 import { FX } from './fx';
 import { VersusCamera } from './camera';
 import { Match } from './match';
@@ -23,7 +25,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.2;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 container.appendChild(renderer.domElement);
 
@@ -63,7 +65,7 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffb27a, 2.6);
 sun.position.set(-28, 22, 14);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.mapSize.set(2048, 2048);
 const sc = sun.shadow.camera as THREE.OrthographicCamera;
 sc.left = -24; sc.right = 24; sc.top = 20; sc.bottom = -20; sc.near = 1; sc.far = 80;
 sun.shadow.bias = -0.0008;
@@ -76,10 +78,27 @@ scene.add(rim);
 const keyLight = new THREE.DirectionalLight(0xfff0e0, 0.9);
 scene.add(keyLight, keyLight.target);
 
-// Per-venue palette: each arena has its own hour and light.
-const PALETTES: Record<LayoutId, { sky: [number, string][]; fog: number; fogNear: number; fogFar: number; hemi: [number, number, number]; sun: [number, number]; sunPos: [number, number, number]; rim: [number, number] }> = {
-  rooftop: { sky: [[0, '#120a24'], [0.45, '#3a1c48'], [0.7, '#a0405a'], [0.85, '#ff9a5a'], [1, '#2a1622']], fog: 0x4a2a48, fogNear: 70, fogFar: 230, hemi: [0x9a86c8, 0x2a1e30, 0.75], sun: [0xffb27a, 2.6], sunPos: [-28, 22, 14], rim: [0x6c7cff, 0.9] },
-  overpass: { sky: [[0, '#03060c'], [0.5, '#0a1c28'], [0.78, '#1d4a58'], [0.9, '#3a7a84'], [1, '#081014']], fog: 0x173842, fogNear: 45, fogFar: 170, hemi: [0x6a9ab0, 0x0c1418, 0.85], sun: [0xa8dcff, 1.5], sunPos: [18, 30, -12], rim: [0xffa040, 1.3] },
+// Per-venue palette: each arena has its own hour, light and colour grade.
+interface Palette {
+  sky: [number, string][]; fog: number; fogNear: number; fogFar: number;
+  hemi: [number, number, number]; sun: [number, number]; sunPos: [number, number, number]; rim: [number, number];
+  shadow: [number, number]; // half-extents of the sun's shadow box (x, z)
+  grade: { sat: number; lift: [number, number, number]; shadowTint: [number, number, number]; highTint: [number, number, number]; gamma: number };
+  bloom: [number, number, number]; // strength, radius, threshold
+}
+const PALETTES: Record<LayoutId, Palette> = {
+  // Hazy late-day roof: warm key light, lifted lilac shadows.
+  rooftop: {
+    sky: [[0, '#2a2140'], [0.45, '#6a4a70'], [0.7, '#d07a70'], [0.86, '#ffc890'], [1, '#5a4050']], fog: 0x8a7088, fogNear: 45, fogFar: 200,
+    hemi: [0xb8a8d8, 0x3a3040, 1.0], sun: [0xffd0a0, 3.2], sunPos: [-22, 26, 12], rim: [0x8aa0ff, 1.2], shadow: [26, 22],
+    grade: { sat: 0.72, lift: [0.07, 0.06, 0.09], shadowTint: [0.85, 0.9, 1.15], highTint: [1.0, 0.95, 0.85], gamma: 0.9 }, bloom: [0.75, 0.5, 0.62],
+  },
+  // Overcast, washed teal daylight: blown highlights, hard girder shadows across the deck.
+  overpass: {
+    sky: [[0, '#8fb4bc'], [0.5, '#b8d4d6'], [0.8, '#d8e8e4'], [1, '#9ab4b4']], fog: 0x9fbcbc, fogNear: 30, fogFar: 150,
+    hemi: [0xcfe8ec, 0x3a4a4c, 1.15], sun: [0xf4fbff, 3.4], sunPos: [10, 34, 14], rim: [0x9fe0ff, 0.9], shadow: [34, 14],
+    grade: { sat: 0.6, lift: [0.06, 0.09, 0.1], shadowTint: [0.82, 1.0, 1.12], highTint: [0.95, 1.0, 1.0], gamma: 0.86 }, bloom: [0.85, 0.55, 0.58],
+  },
 };
 function applyPalette(id: LayoutId) {
   const p = PALETTES[id];
@@ -88,6 +107,15 @@ function applyPalette(id: LayoutId) {
   hemi.color.setHex(p.hemi[0]); hemi.groundColor.setHex(p.hemi[1]); hemi.intensity = p.hemi[2];
   sun.color.setHex(p.sun[0]); sun.intensity = p.sun[1]; sun.position.set(...p.sunPos);
   rim.color.setHex(p.rim[0]); rim.intensity = p.rim[1];
+  sc.left = -p.shadow[0]; sc.right = p.shadow[0]; sc.top = p.shadow[1]; sc.bottom = -p.shadow[1];
+  sc.updateProjectionMatrix();
+  const u = grade.uniforms;
+  u.sat.value = p.grade.sat;
+  u.lift.value.set(...p.grade.lift);
+  u.shadowTint.value.set(...p.grade.shadowTint);
+  u.highTint.value.set(...p.grade.highTint);
+  u.gamma.value = p.grade.gamma;
+  bloom.strength = p.bloom[0]; bloom.radius = p.bloom[1]; bloom.threshold = p.bloom[2];
 }
 
 const fx = new FX(scene);
@@ -96,10 +124,42 @@ const vcam = new VersusCamera(window.innerWidth / window.innerHeight);
 // Bloom: hazy highlights on lamps, sparks, explosions and power effects. First thing dropped when slow.
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, vcam.cam));
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.45, 0.8);
+// Motion blur (afterimage) only switches on for fast moves and big impacts.
+const blurPass = new AfterimagePass(0);
+blurPass.enabled = false;
+composer.addPass(blurPass);
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.75, 0.5, 0.62);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
+// Colour grade in display space: desaturate, split-tone, lift blacks, vignette, grain.
+const grade = new ShaderPass({
+  uniforms: {
+    tDiffuse: { value: null }, time: { value: 0 }, sat: { value: 0.7 }, gamma: { value: 0.9 },
+    lift: { value: new THREE.Vector3(0.06, 0.08, 0.09) }, shadowTint: { value: new THREE.Vector3(0.85, 1, 1.1) }, highTint: { value: new THREE.Vector3(1, 1, 1) },
+    flash: { value: 0 },
+  },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float time, sat, gamma, flash; uniform vec3 lift, shadowTint, highTint; varying vec2 vUv;
+    void main(){
+      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      float l = dot(c, vec3(0.299, 0.587, 0.114));
+      c = mix(vec3(l), c, sat);
+      c *= mix(shadowTint, vec3(1.0), smoothstep(0.0, 0.55, l));
+      c = mix(c, c * highTint, smoothstep(0.55, 1.0, l));
+      c = lift + c * (1.0 - lift);
+      c = pow(max(c, 0.0), vec3(gamma));
+      vec2 d = vUv - 0.5;
+      c *= 1.0 - dot(d, d) * 0.6;
+      float n = fract(sin(dot(vUv * vec2(1731.0, 977.0) + time * 61.0, vec2(12.9898, 78.233))) * 43758.5453);
+      c += (n - 0.5) * 0.03;
+      c = mix(c, vec3(1.0), flash);
+      gl_FragColor = vec4(c, 1.0);
+    }`,
+});
+composer.addPass(grade);
 let bloomOn = !new URLSearchParams(location.search).has('nobloom');
+let postOn = !new URLSearchParams(location.search).has('nopost');
 // Full-screen Rage wash.
 const tint = document.createElement('div');
 tint.id = 'tint';
@@ -159,6 +219,7 @@ function startMatch() {
   const d: [CharacterDef, CharacterDef] = [charById(setup.p1), charById(setup.p2)];
   if (arena.layout !== setup.arena) arena.setLayout(setup.arena);
   applyPalette(setup.arena);
+  vcam.zLimit = setup.arena === 'overpass' ? 5.8 : Infinity;
   match = new Match(scene, arena, fx, vcam, d);
   cpus = [null, setup.mode === 'cpu' ? new CPU(match.fighters[1], match, setup.diff) : null];
   trackers.forEach((t) => t.reset());
@@ -422,6 +483,7 @@ function adaptQuality(now: number) {
   // Lower particle density and render scale first; simulation and collision are never touched.
   if (p95 > 19) {
     if (bloomOn) bloomOn = false;
+    else if (fx.blurAllowed) fx.blurAllowed = false;
     else if (fx.quality > 0.5) fx.quality = 0.5;
     else if (pixelRatio > 0.7) { pixelRatio = Math.max(0.7, pixelRatio - 0.15); renderer.setPixelRatio(pixelRatio); }
     else if (renderer.shadowMap.enabled) { renderer.shadowMap.enabled = false; }
@@ -487,13 +549,21 @@ function frame(now: number) {
   keyLight.target.position.copy(vcam.target);
   const raging = !!match && match.fighters.some((f) => f.raging);
   tint.style.opacity = raging ? String(0.38 + Math.sin(time * 10) * 0.08) : '0';
-  if (bloomOn) composer.render(); else renderer.render(scene, vcam.cam);
+  // Post stack: grade always (cheap); bloom and motion blur only when affordable.
+  bloom.enabled = bloomOn;
+  const blurAmt = fx.blurAllowed ? Math.min(0.82, fx.blur) : 0;
+  blurPass.enabled = blurAmt > 0.05;
+  blurPass.uniforms['damp'].value = blurAmt;
+  grade.uniforms.time.value = time;
+  grade.uniforms.flash.value = Math.min(0.85, fx.screenFlash);
+  if (postOn) composer.render(); else renderer.render(scene, vcam.cam);
   adaptQuality(now);
   if (perfEl.style.display !== 'none') {
     const s = perfStats();
-    perfEl.textContent = `frame ms p50 ${s.p50.toFixed(1)} p95 ${s.p95.toFixed(1)} p99 ${s.p99.toFixed(1)} worst ${s.worst.toFixed(1)}\nbloom ${bloomOn} fx ${fx.quality} dpr ${pixelRatio.toFixed(2)} shadows ${renderer.shadowMap.enabled} calls ${renderer.info.render.calls}`;
+    perfEl.textContent = `frame ms p50 ${s.p50.toFixed(1)} p95 ${s.p95.toFixed(1)} p99 ${s.p99.toFixed(1)} worst ${s.worst.toFixed(1)}\nbloom ${bloomOn} post ${postOn} blur ${blurPass.enabled} fx ${fx.quality} dpr ${pixelRatio.toFixed(2)} shadows ${renderer.shadowMap.enabled} calls ${renderer.info.render.calls}`;
   }
 }
+applyPalette('rooftop');
 showScreen('title');
 requestAnimationFrame(frame);
 

@@ -64,6 +64,22 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
   - swoosh ribbons along the striking limb, plus a white flash on the victim when hit
   - hit-stop, and a camera punch-in on heavy impacts
   - dust from landings, footfalls and slides, and tumbling launches
+- **Look (matched to the reference clip):**
+  - a display-space colour grade: desaturated, split-toned, with lifted teal blacks, a vignette and film grain
+  - stronger bloom
+  - motion blur on dashes, heavy hits and explosions, plus a full-screen flash
+  - a wider field of view, with a little dutch tilt on big impacts
+  - per-venue lighting: an overcast, washed-out teal day on the Overpass and a hazy late afternoon on the roof
+- **Environments:**
+  - Overpass: a through-truss bridge whose girders cast striped shadows across the deck, and a camera kept inside the roadway
+  - close city blocks with storefront signs and awnings
+  - road cracks, skid marks, stains and reflective puddles, plus debris along the barriers
+  - Rooftop: crowding neighbour buildings, a water tower, a billboard, and pipes and vents
+  - cars explode into fireballs and smoke, leaving a burning wreck that still blocks and can be thrown again
+- **Characters:**
+  - muscle-shaped limbs and shaped torsos
+  - more realistic proportions: longer legs, smaller heads
+  - a surface bump texture and a fresnel rim light on every body
 - **Resources:** yellow recoverable stamina is drawn over red lasting health. Powered hits, throws, props and explosions cut health. Energy shows quarter ticks. Rage builds from dealing damage, and a neutral tap of R gives 8 seconds of unlimited energy. **Danger** starts at health ≤ 25 or stamina ≤ 10. **Finisher** is R+X on a fighter in Danger, with at least a quarter of the energy meter or during Rage. Each fighter has its own cinematic finisher. Without enough energy, R+X becomes an ordinary grab and shows "NEED 1/4 POWER". A bout ends by K.O., RING OUT or FINISHER, and the results screen says which one ended it.
 - **Feel:** startup, active and recovery frames per move. Hit-stop and screen shake on heavy impacts. Directional knockback. Launched bodies break the fence. A diamond marker shows the current X target. Synthesized audio gives a distinct sound for hits, blocks, catches, wall breaks, explosions, Rage on and off, and Danger.
 - **Camera:** one shared camera sits perpendicular to the fighters. It holds its angle when one fighter is directly above the other, leaves room in the direction of a launch, and rate-limits rotation so fast side swaps don't whip the view. Props and the hut fade when they block the view. Finishers and victories get cinematic framing.
@@ -95,7 +111,7 @@ Also checked by hand in headless Chromium: the full keyboard menu flow (title �
 
 ## Next-session checklist
 
-1. Measure frame times on a real PC and phone (`?perf`), then tune bloom, `fx.quality` and the shadow map size (`?nobloom` turns bloom off).
+1. Measure frame times on a real PC and phone (`?perf`), then tune bloom, `fx.quality` and the shadow map size. `?nobloom` turns off bloom, and `?nopost` turns off the whole post stack.
 2. Human playtest of Basalt vs Tether: compare a fight before and after the fence breaks, then tune `TUNING`, knockback and the Danger thresholds.
 3. More arenas, each needing a distinct layout (the overpass is done): a street with liftable vehicles, a mansion interior with breakable columns, a two-level power plant with a cycling core, a station with columns and barriers, and a headquarters with force walls, mines and a healing chamber.
 4. More original fighters for each recovery family (more swing, flight and teleport fighters, plus a magnetic object-controller).

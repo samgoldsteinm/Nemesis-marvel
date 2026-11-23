@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Rig, Proportions, Pose, P, limb, box, sphere, addOutline } from './rig';
+import { Rig, Proportions, Pose, P, limb, box, sphere, addOutline, torso } from './rig';
 
 export type RecoveryFamily = 'ground' | 'swing' | 'flight' | 'teleport';
 export type LiftClass = 0 | 1 | 2; // light, medium, heavy
@@ -111,8 +111,42 @@ export const PROP_SWING: MoveDef = {
 };
 
 // ------------------------------------------------------------------ materials
+// Shared surface detail: a fine noise bump map (cloth weave / rock grain) for every body material.
+let bumpTex: THREE.Texture | null = null;
+function bump() {
+  if (bumpTex) return bumpTex;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d')!;
+  const img = g.createImageData(128, 128);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const x = (i / 4) % 128, y = Math.floor(i / 4 / 128);
+    const v = 128 + 50 * Math.sin(x * 0.9) * Math.sin(y * 0.9) + (Math.random() - 0.5) * 90;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+    img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  bumpTex = new THREE.CanvasTexture(c);
+  bumpTex.wrapS = bumpTex.wrapT = THREE.RepeatWrapping;
+  bumpTex.repeat.set(3, 3);
+  return bumpTex;
+}
+
+/** Fresnel rim light so silhouettes separate from busy backgrounds. */
+function addRim(m: THREE.MeshStandardMaterial, strength = 0.5) {
+  m.onBeforeCompile = (sh) => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>
+      { float rimF = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 2.6);
+        gl_FragColor.rgb += vec3(0.62, 0.78, 0.9) * rimF * ${strength.toFixed(2)}; }`);
+  };
+  m.customProgramCacheKey = () => `rim${strength}`;
+}
+
 function mat(color: number, rough = 0.6, metal = 0.1, emissive = 0x000000, ei = 0, flat = false) {
-  return new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, emissive, emissiveIntensity: ei, flatShading: flat });
+  const m = new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal, emissive, emissiveIntensity: ei, flatShading: flat });
+  if (ei === 0) { m.bumpMap = bump(); m.bumpScale = flat ? 3 : 1.2; }
+  addRim(m, flat ? 0.22 : 0.28);
+  return m;
 }
 
 // ------------------------------------------------------------------ BASALT — heavy, ground recovery
@@ -225,9 +259,9 @@ const tether: CharacterDef = {
   weight: 0.85,
   heavy: 0,
   radius: 0.45,
-  height: 1.85,
+  height: 1.95,
   durability: 0.9,
-  proportions: { thigh: 0.46, shin: 0.46, torso: 0.62, shoulderW: 0.56, hipW: 0.26, upperArm: 0.33, foreArm: 0.32, neck: 0.1 },
+  proportions: { thigh: 0.5, shin: 0.5, torso: 0.64, shoulderW: 0.6, hipW: 0.26, upperArm: 0.35, foreArm: 0.33, neck: 0.1 },
   moves: {
     chain: [jab(4, 0.9), cross(5, 0.95), launcher(8, 1.0, 7, 10, { id: 'flipkick', wind: P.upperW, strike: P.kickS, startup: 8 })],
     airRise: airRise(6),
@@ -269,8 +303,7 @@ const tether: CharacterDef = {
     const lens = mat(0xe8fbff, 0.2, 0, 0x9ff7ff, 1.4);
     const j = rig.joints;
     box(j.hips, 0.34, 0.22, 0.24, dark, [0, 0.02, 0]);
-    sphere(j.spine, 0.22, suit, [0, 0.22, 0], [1.05, 1.2, 0.8]);
-    sphere(j.spine, 0.26, suit, [0, 0.48, 0.0], [1.25, 0.9, 0.8]);
+    torso(j.spine, 0.15, 0.22, 0.66, suit, 1.3, 0.78);
     box(j.spine, 0.08, 0.55, 0.02, dark, [0, 0.35, 0.2], undefined, false);
     box(j.spine, 0.5, 0.06, 0.02, dark, [0, 0.5, 0.21], undefined, false);
     sphere(j.head, 0.17, suit, [0, 0.12, 0], [1, 1.15, 1.05]);
@@ -298,6 +331,7 @@ const tether: CharacterDef = {
     for (const sh of [j.lShin, j.rShin]) box(sh, 0.13, 0.2, 0.15, dark, [0, -0.33, 0.01]);
     box(j.head, 0.02, 0.24, 0.02, dark, [0, 0.16, 0.17], [0.3, 0, 0], false);
     for (const a of [j.lArm, j.rArm]) box(a, 0.15, 0.08, 0.15, dark, [0, -0.02, 0]);
+    j.head.scale.setScalar(0.86);
     return { accents: [lens, gold] };
   },
 };
@@ -316,9 +350,9 @@ const aerin: CharacterDef = {
   weight: 0.9,
   heavy: 0,
   radius: 0.45,
-  height: 1.9,
+  height: 1.95,
   durability: 1.0,
-  proportions: { thigh: 0.48, shin: 0.47, torso: 0.62, shoulderW: 0.52, hipW: 0.27, upperArm: 0.33, foreArm: 0.31, neck: 0.11 },
+  proportions: { thigh: 0.52, shin: 0.5, torso: 0.6, shoulderW: 0.5, hipW: 0.28, upperArm: 0.33, foreArm: 0.31, neck: 0.11 },
   moves: {
     chain: [jab(4, 0.9), cross(5, 0.95), launcher(8, 1.0, 8, 9)],
     airRise: airRise(6),
@@ -357,8 +391,8 @@ const aerin: CharacterDef = {
     const glow = mat(0xc9a8ff, 0.2, 0, 0xa070ff, 1.8);
     const j = rig.joints;
     box(j.hips, 0.32, 0.2, 0.22, violet, [0, 0.02, 0]);
-    sphere(j.spine, 0.2, violet, [0, 0.22, 0], [1.0, 1.25, 0.75]);
-    sphere(j.spine, 0.23, white, [0, 0.48, 0], [1.2, 0.85, 0.78]);
+    torso(j.spine, 0.13, 0.19, 0.62, violet, 1.25, 0.8);
+    torso(j.spine, 0.12, 0.2, 0.3, white, 1.22, 0.86, 0.34);
     box(j.spine, 0.04, 0.4, 0.02, glow, [0, 0.33, 0.18], [0, 0, 0.5], false);
     sphere(j.head, 0.15, skin, [0, 0.12, 0.01], [0.95, 1.12, 1.0]);
     sphere(j.head, 0.18, hair, [0, 0.18, -0.05], [1.05, 1.0, 1.05]);
@@ -404,6 +438,7 @@ const aerin: CharacterDef = {
     }
     box(j.hips, 0.36, 0.06, 0.25, glow, [0, 0.12, 0], undefined, false);
     for (const sh of [j.lShin, j.rShin]) { box(sh, 0.12, 0.22, 0.14, white, [0, -0.33, 0.01]); box(sh, 0.11, 0.06, 0.22, white, [0, -0.45, 0.05]); }
+    j.head.scale.setScalar(0.86);
     return { accents: [glow] };
   },
 };
@@ -422,9 +457,9 @@ const shunt: CharacterDef = {
   weight: 0.95,
   heavy: 0.2,
   radius: 0.5,
-  height: 1.95,
+  height: 2.0,
   durability: 0.95,
-  proportions: { thigh: 0.5, shin: 0.48, torso: 0.66, shoulderW: 0.62, hipW: 0.3, upperArm: 0.35, foreArm: 0.34, neck: 0.1 },
+  proportions: { thigh: 0.53, shin: 0.51, torso: 0.68, shoulderW: 0.64, hipW: 0.3, upperArm: 0.36, foreArm: 0.35, neck: 0.1 },
   moves: {
     chain: [jab(5, 0.95), cross(5, 1.0), launcher(9, 1.05, 9, 8)],
     airRise: airRise(6),
@@ -462,8 +497,8 @@ const shunt: CharacterDef = {
     moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Phase Elbow'], ['R+A', 'Displacement pulse'], ['R+A (running)', 'Phase Lunge — blink behind and strike'], ['Hold R+A', 'Pulse Mines — three proximity charges'], ['L + dir / L', 'Hop / flank teleport'], ['L+A', 'Blink strike'], ['R+X', 'Displace — teleports the victim away (off an edge!)'], ['Grab, A', 'Knee pummel']],
   },
   build(rig) {
-    const coat = mat(0x4b5468, 0.65, 0.2);
-    const under = mat(0x252a36, 0.55, 0.25);
+    const coat = mat(0x2b303c, 0.7, 0.2);
+    const under = mat(0x171a22, 0.6, 0.25);
     const cyan = mat(0x37f2ff, 0.2, 0, 0x20e0ff, 1.6);
     const mask = mat(0xb9c3cf, 0.35, 0.6);
     const j = rig.joints;
@@ -473,8 +508,7 @@ const shunt: CharacterDef = {
     skirt.position.y = -0.3;
     skirt.castShadow = true;
     j.hips.add(skirt);
-    sphere(j.spine, 0.22, coat, [0, 0.25, 0], [1.05, 1.3, 0.8]);
-    sphere(j.spine, 0.26, coat, [0, 0.5, 0], [1.25, 0.9, 0.85]);
+    torso(j.spine, 0.16, 0.24, 0.7, coat, 1.3, 0.8);
     box(j.spine, 0.05, 0.5, 0.03, cyan, [0.09, 0.35, 0.2], undefined, false);
     box(j.spine, 0.05, 0.5, 0.03, cyan, [-0.09, 0.35, 0.2], undefined, false);
     sphere(j.head, 0.17, mask, [0, 0.12, 0], [0.95, 1.15, 1.0]);
@@ -502,6 +536,7 @@ const shunt: CharacterDef = {
     for (const y of [0.3, 0.54]) box(j.spine, 0.26, 0.02, 0.02, cyan, [0, y, -0.33], undefined, false);
     box(j.hips, 0.44, 0.07, 0.3, mask, [0, 0.12, 0]);
     for (const sh of [j.lShin, j.rShin]) box(sh, 0.13, 0.22, 0.15, under, [0, -0.33, 0.01]);
+    j.head.scale.setScalar(0.86);
     return { accents: [cyan] };
   },
 };

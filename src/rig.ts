@@ -146,11 +146,21 @@ export function addOutline(mesh: THREE.Mesh, thickness = 1.06) {
   return mesh;
 }
 
-/** A tapered limb that hangs down -Y from its joint. */
+/** A muscle-shaped limb that hangs down -Y from its joint: swells near the top, tapers to the next joint. */
 export function limb(parent: THREE.Object3D, len: number, r0: number, r1: number, mat: THREE.Material, outline = true) {
   const geo = cached(`limb${len.toFixed(3)}_${r0.toFixed(3)}_${r1.toFixed(3)}`, () => {
-    const g = new THREE.CylinderGeometry(r0, r1, len, 10, 1);
-    g.translate(0, -len / 2, 0);
+    const pts: THREE.Vector2[] = [];
+    const bulge = Math.max(r0, r1) * 1.14;
+    const N = 10;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N;
+      // Smooth profile: r0 at the joint, peak at ~30%, r1 at the end.
+      const peak = Math.exp(-((t - 0.3) * (t - 0.3)) / 0.06);
+      const r = THREE.MathUtils.lerp(r0, r1, t) * (1 - peak) + bulge * peak;
+      pts.push(new THREE.Vector2(Math.max(0.01, r), -t * len));
+    }
+    const g = new THREE.LatheGeometry(pts, 12);
+    g.computeVertexNormals();
     return g;
   });
   const m = new THREE.Mesh(geo, mat);
@@ -161,6 +171,26 @@ export function limb(parent: THREE.Object3D, len: number, r0: number, r1: number
   const jm = new THREE.Mesh(jGeo, mat);
   jm.castShadow = true;
   parent.add(jm);
+  return m;
+}
+
+/** A shaped torso: narrow waist rising to a broad chest, flattened front-to-back. */
+export function torso(parent: THREE.Object3D, waist: number, chest: number, height: number, mat: THREE.Material, sx = 1.25, sz = 0.78, y0 = 0.02) {
+  const geo = cached(`torso${waist}_${chest}_${height}`, () => {
+    const prof: [number, number][] = [[0.0, waist * 0.95], [0.12, waist * 1.04], [0.3, waist], [0.55, chest * 0.9], [0.78, chest], [0.92, chest * 0.88], [1.0, chest * 0.45]];
+    const pts = prof.map(([t, r]) => new THREE.Vector2(r, t * height));
+    pts.unshift(new THREE.Vector2(0.001, 0));
+    pts.push(new THREE.Vector2(0.001, height));
+    const g = new THREE.LatheGeometry(pts, 16);
+    g.computeVertexNormals();
+    return g;
+  });
+  const m = new THREE.Mesh(geo, mat);
+  m.position.y = y0;
+  m.scale.set(sx, 1, sz);
+  m.castShadow = true;
+  addOutline(m, 1.05);
+  parent.add(m);
   return m;
 }
 
