@@ -258,13 +258,14 @@ export class Match {
       for (const f of this.fighters) {
         if (f === p.owner || !this.sphereVsFighter(p.pos, 0.25, f)) continue;
         const dir = p.vel.clone().setY(0).normalize();
-        if (f.state === 'sblock' && f.forward.dot(dir) < 0) {
+        if ((f.state === 'sblock' || (f.state === 'guard' && f.def.id === 'rift')) && f.forward.dot(dir) < 0) {
           // Super block deflects projectiles back at the shooter.
           p.vel.multiplyScalar(-1.1);
           p.owner = f;
           p.life = 1.2;
           sfx.superBlock();
-          this.fx.sparksAt(p.pos, 12, 0x9ff7ff, 6);
+          this.fx.sparksAt(p.pos, 12, f.def.id === 'rift' && f.state === 'guard' ? 0x7dff6a : 0x9ff7ff, 6);
+          if (f.def.id === 'rift' && f.state === 'guard') { this.fx.ring(p.pos.clone(), 1.0, 0x7dff6a, 0.3); f.say('PORTAL GUARD'); }
           this.log(`${f.def.id} deflects ${p.kind}`);
           break;
         }

@@ -20,6 +20,7 @@ export const TUNING = {
   dangerHealth: 25,
   dangerStamina: 10,
   staminaScale: 0.75, // global multiplier on ordinary (recoverable) damage
+  healthScale: 0.5, // global multiplier on lasting health damage (longer bouts)
   finisherCost: 25,
   rageDuration: 8, // seconds
   recoveryCost: 20,
@@ -227,6 +228,9 @@ export class Fighter {
     this.outcome = null;
     this.dangerPrev = false;
     this.burnT = 0;
+    this.bleedT = 0;
+    this.airJumped = false;
+    this.staticCount = 0;
     this.lineTarget = null;
     this.finisherData = null;
     this.lastAttacker = null;
@@ -317,6 +321,9 @@ export class Fighter {
   }
 
   burnT = 0;
+  bleedT = 0;
+  airJumped = false;
+  staticCount = 0;
   private updateResources(dt: number) {
     if (this.burnT > 0 && this.alive) {
       this.burnT--;
@@ -329,6 +336,17 @@ export class Fighter {
         const p = this.center.add(new THREE.Vector3((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 0.6));
         this.match.fx.wisp(p, new THREE.Color(Math.random() < 0.5 ? 0xff5a10 : 0xffb030).multiplyScalar(0.8), 0.4);
       }
+    }
+    if (this.bleedT > 0 && this.alive) {
+      this.bleedT--;
+      this.stamina = Math.max(0, this.stamina - 3 * dt);
+      this.lastHit = 0;
+      if (this.tick % 5 === 0) this.match.fx.sparksAt(this.center.add(new THREE.Vector3((Math.random() - 0.5) * 0.5, (Math.random() - 0.3) * 0.8, (Math.random() - 0.5) * 0.5)), 2, 0xc0102a, 1.5, 0.05, 9);
+    }
+    // Ember's Heat Up: a permanent flame aura below half health.
+    if (this.def.id === 'ember' && this.health < 50 && this.alive && this.tick % 2 === 0 && this.rig.root.visible) {
+      const p = this.center.add(new THREE.Vector3((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 1.6, (Math.random() - 0.5) * 0.8));
+      this.match.fx.wisp(p, new THREE.Color(Math.random() < 0.5 ? 0xff4a10 : 0xffa030).multiplyScalar(0.7), 0.5);
     }
     if (this.lastHit > TUNING.staminaRegenDelay && this.alive && this.stamina < this.health) {
       this.stamina = Math.min(this.health, this.stamina + TUNING.staminaRegen * this.def.durability * dt);
@@ -447,7 +465,7 @@ export class Fighter {
     if (impact > 4) this.match.fx.dust(this.pos, this.def.heavy ? 8 : 4, this.def.heavy ? 0.55 : 0.35, impact * 0.15);
     if (impact > 8 && this.def.heavy) this.match.fx.shake = Math.max(this.match.fx.shake, 0.25);
     switch (this.state) {
-      case 'air': this.setState('ground'); this.landT = 12; this.landSerial++; break;
+      case 'air': this.setState('ground'); this.landT = 12; this.landSerial++; this.airJumped = false; break;
       case 'launched':
         if (this.health <= 0) { this.setState('ko'); break; }
         this.match.fx.burstDebris(this.pos.clone(), 6, 0x777777, 3, 0.15);
@@ -559,6 +577,15 @@ export class Fighter {
     }
     // X: grapple, pick up, or throw.
     if (b.grab.pressed) { this.grabAction(); return true; }
+    // Tether's Web Flip: one extra jump in the air.
+    if (b.jump.pressed && !ground && this.def.id === 'tether' && !this.airJumped && this.state === 'air') {
+      this.airJumped = true;
+      this.vel.y = this.def.jumpV * 0.95;
+      this.jumpSerial++;
+      this.match.fx.ring(this.pos.clone(), 1.2, 0xeaffff, 0.25);
+      sfx.line();
+      return true;
+    }
     // B: jump.
     if (b.jump.pressed && ground) {
       this.vel.y = this.def.jumpV;
@@ -1095,8 +1122,9 @@ export class Fighter {
       // Guard + direction: evade.
       if (this.stickMag() > 0.6 && this.t > 1 && this.onGround) {
         const d = this.wishDir().normalize();
-        this.vel.copy(d.multiplyScalar(this.def.heavy ? 9 : 12));
-        this.invuln = 10;
+        this.vel.copy(d.multiplyScalar(this.def.heavy ? 9 : this.def.id === 'shunt' ? 17 : 12));
+        this.invuln = this.def.id === 'shunt' ? 22 : 10;
+        if (this.def.id === 'shunt') { this.match.fx.flash(this.center, 0.6, this.tpColor, 0.15); this.match.fx.sparksAt(this.center, 10, this.tpColor, 4); sfx.teleport(); }
         this.setState('evade');
         this.evadeSerial++;
         sfx.jump();
@@ -1113,7 +1141,12 @@ export class Fighter {
       return;
     }
     this.friction(dt, this.t < 12 ? 2.5 : 10);
-    if (this.t > 26) this.setState(this.onGround ? 'ground' : 'air');
+    if (this.def.id === 'shunt') {
+      this.rig.root.visible = this.t >= 13;
+      if (this.t < 13 && this.t % 2 === 0) this.match.fx.trail(this.center, this.tpColor, 0.12, 0.3);
+      if (this.t === 13) { this.match.fx.flash(this.center, 0.6, this.tpColor, 0.15); this.match.fx.sparksAt(this.center, 10, this.tpColor, 4); }
+    }
+    if (this.t > 26) { this.rig.root.visible = true; this.setState(this.onGround ? 'ground' : 'air'); }
   }
 
   private stCharge(dt: number) {
@@ -1357,6 +1390,63 @@ export class Fighter {
           fx.ring(o.pos.clone().setY(o.pos.y + 1.5), 2.2, c, 0.5);
           fx.flash(o.center, 0.9, c, 0.2);
           release(fwd, { fwd: 0, up: 0, radius: 0, stamina: 12, health: 16, kbF: 3, kbU: 0, stun: 46, launch: true, heavy: true }, () => { o.vel.set(fwd.x * 2, -28, fwd.z * 2); });
+        }
+        break;
+      }
+      case 'shadowShred': {
+        // Pin them low, rake four times, then a launching kick.
+        o.pos.lerp(this.pos.clone().addScaledVector(fwd, 1.1), 0.4);
+        o.yaw = this.yaw + Math.PI;
+        if (t >= 6 && t <= 30 && (t - 6) % 8 === 0) {
+          const side = ((t - 6) / 8) % 2 ? 1 : -1;
+          this.yaw = d.yaw0 + side * 0.35;
+          fx.sparksAt(o.center, 10, 0xe8c040, 7);
+          fx.trail(o.center.add(new THREE.Vector3(side * 0.4, 0.3, 0)), 0xe8c040, 0.16, 0.3);
+          o.applyDamage(3, 1.5);
+          o.hitFlash = 4;
+          sfx.hit(false);
+        }
+        if (t === 38) {
+          this.yaw = d.yaw0;
+          fx.blur = Math.max(fx.blur, 0.5);
+          o.bleedT = 160;
+          release(fwd, { fwd: 0, up: 0, radius: 0, stamina: 8, health: 8, kbF: 15, kbU: 8, stun: 40, launch: true, heavy: true, breaksWalls: 60 });
+        }
+        break;
+      }
+      case 'ironMaiden': {
+        // Lift them in a magnetic field, crush them, then hurl them in the stick direction.
+        const hold = this.pos.clone().addScaledVector(fwd, 2).add(new THREE.Vector3(0, 1.6 + Math.min(t, 24) * 0.04, 0));
+        o.pos.lerp(hold, 0.2);
+        o.yaw += 0.15;
+        if (t % 2 === 0) {
+          const a = t * 0.5;
+          fx.trail(o.center.add(new THREE.Vector3(Math.cos(a) * 1.1, Math.sin(a * 1.3) * 0.6, Math.sin(a) * 1.1)), 0xff5a7a, 0.14, 0.3);
+        }
+        if (t === 28) { fx.flash(o.center, 1.0, 0xff5a7a, 0.15); fx.ring(o.center, 1.8, 0xff5a7a, 0.3); o.applyDamage(6, 4); o.hitFlash = 8; sfx.shock(); fx.shake = 0.6; }
+        if (t === 40) {
+          const wish = this.wishDir();
+          const dir = wish.lengthSq() > 0.2 ? wish.normalize() : fwd;
+          sfx.zap();
+          release(dir, { fwd: 0, up: 0, radius: 0, stamina: 8, health: 8, kbF: 18, kbU: 6, stun: 40, launch: true, heavy: true, breaksWalls: 80 });
+        }
+        break;
+      }
+      case 'furnaceSlam': {
+        // Belly-to-back suplex over the shoulder, landing in a pillar of fire.
+        const k = Math.min(1, t / 22);
+        const ang = k * Math.PI;
+        o.pos.copy(this.pos).addScaledVector(fwd, Math.cos(ang) * 1.2).add(new THREE.Vector3(0, 0.3 + Math.sin(ang) * (this.def.height * 0.8), 0));
+        o.yaw = this.yaw;
+        if (t % 2 === 0 && t < 24) fx.wisp(o.center, new THREE.Color(0xff6a1a).multiplyScalar(0.8), 0.6);
+        if (t === 24) {
+          const at = this.pos.clone().addScaledVector(fwd, -1.2);
+          fx.fireball(at.clone(), 1.6);
+          fx.ring(at, 4, 0xff7a3a, 0.5);
+          fx.shake = 1;
+          sfx.explosion();
+          o.burnT = 180;
+          release(fwd.clone().negate(), { fwd: 0, up: 0, radius: 0, stamina: 12, health: 14, kbF: 6, kbU: 10, stun: 46, launch: true, heavy: true, breaksWalls: 40 });
         }
         break;
       }
@@ -1685,9 +1775,9 @@ export class Fighter {
   // ======================================================================== taking hits
   applyDamage(stamina: number, health: number) {
     this.stamina -= stamina;
-    this.health -= health;
+    this.health -= health * TUNING.healthScale;
     if (this.stamina < 0) {
-      this.health += this.stamina * 0.5; // overflow spills into lasting health
+      this.health += this.stamina * 0.5 * TUNING.healthScale; // overflow spills into lasting health
       this.stamina = 0;
     }
     this.health = Math.max(0, this.health);
@@ -1708,6 +1798,15 @@ export class Fighter {
       this.applyDamage(spec.stamina * 0.2, 0);
       this.vel.addScaledVector(dir, spec.kbF * 0.35 / this.def.weight);
       sfx.block();
+      if (this.def.id === 'magna' && opts.source === 'melee' && att.state === 'attack') {
+        // Repulse: the magnetic guard hurls the attacker back.
+        att.move = null; att.setState('hitstun'); att.stun = 22;
+        att.vel.copy(dir).multiplyScalar(13); att.vel.y = 0;
+        att.applyDamage(3, 0);
+        this.match.fx.ring(this.pos.clone(), 2.4, 0xff5a7a, 0.3);
+        this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.6), 14, 0xff5a7a, 8);
+        sfx.zap();
+      }
       this.blockT = 14; this.blockSerial++;
       this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.5), 6, 0xffffff, 4);
       att.rage = Math.min(100, att.rage + 2);
@@ -1716,8 +1815,17 @@ export class Fighter {
     // Hit.
     if (this.heldProp) this.dropProp();
     if (this.grabbed) this.releaseGrabbed();
-    const vuln = this.state === 'charge' ? 1.25 : 1;
+    const vuln = (this.state === 'charge' ? 1.25 : 1) * (this.def.id === 'basalt' ? 0.85 : 1) * (att.def.id === 'ember' && att.health < 50 ? 1.25 : 1);
     const rageMul = att.raging ? 1.2 : 1;
+    // Basalt's Bedrock: light hits don't interrupt his power moves.
+    if (this.def.id === 'basalt' && this.state === 'attack' && this.move?.energy && !spec.heavy && !spec.launch) {
+      this.applyDamage(spec.stamina * TUNING.staminaScale * vuln * rageMul, spec.health * vuln * rageMul);
+      this.hitFlash = 6;
+      this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.4), 10, 0xff7a3a, 5);
+      sfx.block();
+      if (this.health <= 0) this.match.declare(att, this, 'ko');
+      return 'hit';
+    }
     const staminaBefore = this.stamina;
     this.applyDamage(spec.stamina * TUNING.staminaScale * vuln * rageMul / Math.sqrt(this.def.durability), spec.health * vuln * rageMul);
     att.rage = Math.min(100, att.rage + (spec.stamina + spec.health * 2) * TUNING.rageGain);
@@ -1748,6 +1856,18 @@ export class Fighter {
     sfx.hit(!!spec.heavy);
     this.match.fx.hitstop = spec.heavy ? 0.085 : 0.045;
     if (att.def.burns && spec.heavy && this.health > 0) { this.burnT = 150; this.say('BURNING'); }
+    if (att.def.id === 'vanta' && opts.source === 'melee' && this.health > 0) { if (this.bleedT <= 0) this.say('BLEEDING'); this.bleedT = 140; }
+    if (att.def.id === 'aerin' && (opts.source === 'melee' || opts.source === 'projectile')) {
+      att.staticCount++;
+      if (att.staticCount % 3 === 0) {
+        this.applyDamage(6, 1);
+        if (this.state === 'hitstun') this.stun += 16;
+        this.match.fx.sparksAt(this.center, 18, 0xc9a8ff, 9, 0.06, 2);
+        this.match.fx.flash(this.center, 0.8, 0xb48cff, 0.15);
+        sfx.zap();
+        this.say('STATIC');
+      }
+    }
     if (spec.heavy) { this.match.camera.punch = 1; this.match.fx.blur = Math.max(this.match.fx.blur, 0.35); }
     this.match.fx.shake = Math.max(this.match.fx.shake, spec.heavy ? 0.45 : 0.15);
     this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.4), spec.heavy ? 16 : 8, spec.heavy ? 0xffc060 : 0xffffff, spec.heavy ? 9 : 6);
@@ -1861,7 +1981,47 @@ export class Fighter {
     const id = this.def.id;
     if (t < 30) {
       o.pos.lerp(front(this.def.radius + o.def.radius + 0.2, 0.3), 0.3);
-    } else if (id === 'basalt' || id === 'ember') {
+    } else if (id === 'ember') {
+      // Inferno: hoist them overhead, then spike them into a rising pillar of fire.
+      if (t < 60) o.pos.lerp(s.clone().add(new THREE.Vector3(0, this.def.height + 0.6, 0)), 0.15);
+      else if (t < 70) o.pos.lerp(front(1.6, 0), 0.5);
+      if (t < 60 && t % 2 === 0) fx.wisp(o.center, new THREE.Color(0xff5a10).multiplyScalar(0.8), 0.7);
+      if (t === 70) { fx.fireball(front(1.6, 0.2), 2.4); fx.ring(front(1.6, 0), 6, 0xff7a3a, 0.6); fx.shake = 1.2; fx.screenFlash = 0.6; sfx.explosion(); }
+      if (t > 70 && t < 100 && t % 2 === 0) for (let i = 0; i < 2; i++) fx.wisp(front(1.6, (t - 70) * 0.12 + Math.random() * 0.6), new THREE.Color(Math.random() < 0.5 ? 0xff4a10 : 0xffb030).multiplyScalar(0.8), 1.0);
+    } else if (id === 'magna') {
+      // Crush Field: float them up inside a spinning shell of shards, compress, and drop.
+      const c = front(2, 2.4);
+      if (t < 85) { o.pos.lerp(c, 0.08); o.yaw += 0.2; }
+      const r = Math.max(0.6, 2.4 - (t - 30) * 0.03);
+      for (let i = 0; i < 3; i++) { const a = t * 0.4 + (i / 3) * Math.PI * 2; fx.trail(o.center.add(new THREE.Vector3(Math.cos(a) * r, Math.sin(a * 0.7) * r * 0.6, Math.sin(a) * r)), 0xff5a7a, 0.16, 0.3); }
+      if (t === 85) { fx.flash(o.center, 1.6, 0xff5a7a, 0.3); fx.ring(o.center, 4, 0xff5a7a, 0.5); fx.shake = 1.1; fx.screenFlash = 0.5; sfx.explosion(); sfx.zap(); }
+      if (t > 85) o.pos.lerp(front(2, 0), 0.35);
+    } else if (id === 'vanta') {
+      // Thousand Cuts: dart through them from every angle in gold streaks.
+      if (t < 98 && t % 7 === 0) {
+        const a = Math.random() * Math.PI * 2;
+        const from = this.pos.clone();
+        this.pos.copy(o.pos).add(new THREE.Vector3(Math.sin(a) * 1.8, 0, Math.cos(a) * 1.8));
+        this.yaw = Math.atan2(o.pos.x - this.pos.x, o.pos.z - this.pos.z);
+        for (let i = 0; i <= 6; i++) fx.trail(from.clone().lerp(this.pos, i / 6).setY(s.y + 1.1), 0xe8c040, 0.14, 0.3);
+        fx.sparksAt(o.center, 8, 0xe8c040, 7);
+        o.hitFlash = 4;
+        sfx.hit(false);
+      }
+      this.rig.root.visible = t % 7 > 1;
+      if (t === 100) { this.rig.root.visible = true; this.pos.copy(s); fx.flash(o.center, 1.4, 0xe8c040, 0.3); fx.ring(o.pos.clone(), 5, 0xe8c040, 0.5); fx.blur = 0.6; sfx.explosion(); }
+    } else if (id === 'rift') {
+      // Gate Barrage: drop them through a chain of portals, falling faster each time, then slam.
+      const cycle = 16;
+      const k = t - 30;
+      if (k < cycle * 4) {
+        const ph = k % cycle;
+        o.pos.copy(front(2.2, 9 - ph * 0.55));
+        if (ph === 0) { fx.ring(front(2.2, 9), 1.8, 0x7dff6a, 0.3); fx.ring(front(2.2, 0.1), 1.8, 0x7dff6a, 0.3); sfx.teleport(); }
+        if (ph === cycle - 1) { fx.flash(front(2.2, 0.6), 0.7, 0x7dff6a, 0.12); }
+      } else if (k < cycle * 4 + 8) o.pos.lerp(front(2.2, 0), 0.6);
+      if (k === cycle * 4 + 8) { fx.flash(front(2.2, 0.8), 1.6, 0x7dff6a, 0.3); fx.ring(front(2.2, 0), 6, 0x7dff6a, 0.6); fx.shake = 1.2; fx.screenFlash = 0.5; sfx.explosion(); }
+    } else if (id === 'basalt') {
       if (t < 70) o.pos.lerp(s.clone().add(new THREE.Vector3(0, this.def.height + 0.6, 0)), 0.15);
       else if (t < 82) o.pos.lerp(front(1.6, 0), 0.5);
       if (t === 82) { fx.ring(front(1.6, 0), 6, 0xff7a3a, 0.6); fx.burstDebris(front(1.6, 0.2), 40, 0x6a6a72, 10, 0.4); fx.shake = 1.2; fx.screenFlash = 0.7; fx.blur = 0.6; sfx.explosion(); }
@@ -1872,7 +2032,7 @@ export class Fighter {
       if (t < 90) { o.pos.copy(s).add(new THREE.Vector3(Math.sin(this.yaw) * r, 1.2 + Math.sin(t * 0.2) * 0.3, Math.cos(this.yaw) * r)); if (t % 4 === 0) fx.trail(o.center, 0xeaffff, 0.2, 0.6); }
       if (t === 90) { o.vel.copy(fwd).multiplyScalar(14); o.vel.y = 8; fx.flash(o.center, 1.2, 0xffffff, 0.2); sfx.hit(true); }
       if (t > 90 && t < 120) { o.pos.addScaledVector(o.vel, 1 / 60); o.vel.y -= 0.5; if (o.pos.y < s.y) { o.pos.y = s.y; o.vel.set(0, 0, 0); } }
-    } else if (id === 'aerin' || id === 'magna') {
+    } else if (id === 'aerin') {
       if (t < 75) { this.pos.lerp(s.clone().add(new THREE.Vector3(0, 7, 0)), 0.05); o.pos.lerp(this.pos.clone().addScaledVector(fwd, 0.9).add(new THREE.Vector3(0, 0.2, 0)), 0.3); if (t % 2 === 0) fx.trail(this.pos, 0xa070ff, 0.25, 0.5); }
       else if (t < 88) o.pos.lerp(front(2, 0), 0.4);
       if (t === 88) { fx.flash(front(2, 1), 3, 0xc9a8ff, 0.35); fx.ring(front(2, 0), 6, 0xa070ff, 0.6); fx.shake = 1.1; fx.screenFlash = 0.7; fx.blur = 0.6; sfx.explosion(); sfx.zap(); }
@@ -1951,7 +2111,7 @@ export class Fighter {
       case 'recover': pose = P.air(2); break;
       case 'finisher': pose = this.t < 30 ? P.grab() : this.t < 80 ? P.holdOver() : P.slamS(); rate = 20; break;
       case 'powerCharge': pose = this.t < 18 ? P.charge(time) : P.clapW(); rate = 14; break;
-      case 'pgrapple': pose = this.def.powerGrapple === 'piledriver' ? (this.t < 22 ? P.holdOver() : P.slamS()) : this.def.powerGrapple === 'webSpin' ? P.swing(time) : this.def.powerGrapple === 'skyDrop' ? P.fly(4) : this.def.powerGrapple === 'portalDrop' ? P.shoot() : P.teleport(); rate = 20; break;
+      case 'pgrapple': pose = this.def.powerGrapple === 'piledriver' ? (this.t < 22 ? P.holdOver() : P.slamS()) : this.def.powerGrapple === 'webSpin' ? P.swing(time) : this.def.powerGrapple === 'skyDrop' ? P.fly(4) : this.def.powerGrapple === 'portalDrop' ? P.shoot() : this.def.powerGrapple === 'furnaceSlam' ? (this.t < 24 ? P.holdOver() : P.slamS()) : this.def.powerGrapple === 'ironMaiden' ? P.shoot() : this.def.powerGrapple === 'shadowShred' ? P.crossS() : P.teleport(); rate = 20; break;
       case 'finished': pose = P.launched(); break;
       case 'ko': pose = this.onGround ? P.down() : P.launched(); rate = 10; break;
       case 'victory': pose = P.victory(time); break;

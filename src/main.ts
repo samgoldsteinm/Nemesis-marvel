@@ -1,3 +1,4 @@
+import { TRAITS } from './traits';
 import * as THREE from 'three';
 import { Arena, LAYOUTS, LayoutId } from './arena';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -349,6 +350,7 @@ function sidePanel(side: 0 | 1) {
       <div class="side-name">${def.name}</div>
       <div class="side-title">${def.title}</div>
       <div class="stats">${bars(id)}</div>
+      ${TRAITS[id] ? `<div class="trait" title="${TRAITS[id].desc}"><b>✦ ${TRAITS[id].name}</b> ${TRAITS[id].desc}</div>` : ''}
       <div class="chips"><span class="chip">${ICON[def.recovery]} ${def.recovery} recovery</span><span class="chip">💪 ${LIFT[def.lift]}</span><span class="chip">★ ${RATINGS[id].difficulty}</span></div>
     </div>`;
 }
@@ -464,7 +466,7 @@ function render(s: Screen): string {
       : `<div class="fcards">${ROSTER.map((c) => `
         <div class="fcard" style="--c:${c.color}">
           <div class="fhead">${por(c, 'mini')}<div><b>${c.name}</b><span>${c.title}</span></div></div>
-          <table class="mlist">${c.sheet.moves.map(([kk, v]) => `<tr><td>${kk}</td><td>${v}</td></tr>`).join('')}<tr><td>Finisher</td><td>${c.sheet.finisher}</td></tr><tr><td>Weakness</td><td>${c.sheet.weakness}</td></tr></table>
+          <table class="mlist">${c.sheet.moves.map(([kk, v]) => `<tr><td>${kk}</td><td>${v}</td></tr>`).join('')}${TRAITS[c.id] ? `<tr><td>Trait</td><td><b>${TRAITS[c.id].name}:</b> ${TRAITS[c.id].desc}</td></tr>` : ''}<tr><td>Finisher</td><td>${c.sheet.finisher}</td></tr><tr><td>Weakness</td><td>${c.sheet.weakness}</td></tr></table>
         </div>`).join('')}</div>`;
     return `
     <div class="screen how-screen">

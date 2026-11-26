@@ -44,7 +44,7 @@ export interface MoveDef {
   name?: string; // display name for the move sheet
 }
 
-export type PowerGrapple = 'piledriver' | 'webSpin' | 'skyDrop' | 'displace' | 'portalDrop';
+export type PowerGrapple = 'piledriver' | 'webSpin' | 'skyDrop' | 'displace' | 'portalDrop' | 'shadowShred' | 'ironMaiden' | 'furnaceSlam';
 
 export interface CharacterDef {
   id: string;
@@ -730,14 +730,14 @@ const vanta: CharacterDef = {
       hit: { fwd: 0, up: 1.0, radius: 1.0, stamina: 10, health: 8, kbF: 13, kbU: 8, stun: 36, launch: true, heavy: true, breaksWalls: 40 },
     },
   },
-  powerGrapple: 'webSpin',
+  powerGrapple: 'shadowShred',
   sheet: {
     mobility: 'L: Sprint · L+A Pounce',
     power: 'R+A: Claw Frenzy · running R+A: Shadow Rush · hold R+A: Shade Rend (phases through you three times)',
-    grapple: 'Lifts light and medium props. R+X: Spiral Toss.',
-    finisher: 'Nightfall — a blur of claw strikes from every side',
+    grapple: 'Lifts light and medium props. R+X: Shadow Shred.',
+    finisher: 'Thousand Cuts — darts through the opponent from every angle in golden streaks',
     weakness: 'Light and fragile: big hits send her flying, and ground recovery is short.',
-    moves: [['A A A A', 'Four-hit claw combo'], ['A (running)', 'Running Slash'], ['R+A', 'Claw Frenzy'], ['R+A (running)', 'Shadow Rush'], ['Hold R+A', 'Shade Rend — phases through the opponent three times'], ['L+A', 'Pounce'], ['R+X', 'Spiral Toss — fling for a ring-out'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A A', 'Four-hit claw combo'], ['A (running)', 'Running Slash'], ['R+A', 'Claw Frenzy'], ['R+A (running)', 'Shadow Rush'], ['Hold R+A', 'Shade Rend — phases through the opponent three times'], ['L+A', 'Pounce'], ['R+X', 'Shadow Shred — pins them and rakes, then kicks them away'], ['Grab, A', 'Knee pummel']],
   },
   build: genericBuild(0x15151a, 0xc8a030, 0xffd050),
 };
@@ -785,14 +785,14 @@ const magna: CharacterDef = {
       hit: { fwd: 0, up: 1.0, radius: 3.4, stamina: 12, health: 10, kbF: 14, kbU: 9, stun: 34, launch: true, heavy: true, breaksWalls: 50 },
     },
   },
-  powerGrapple: 'skyDrop',
+  powerGrapple: 'ironMaiden',
   sheet: {
     mobility: 'L: Magnetic flight (B up, Y down) · L+A Magnet Ram',
     power: 'R+A: Shard Volley · running R+A: Polar Charge · hold R+A: Implosion (drags you in, then blasts)',
     grapple: 'X at range pulls opponents and ANY object to his hands — cars included.',
-    finisher: 'Crush Field — lifts the opponent and slams them down',
+    finisher: 'Crush Field — floats the opponent in a shell of spinning shards, compresses it and drops them',
     weakness: 'Slow on foot; flight burns energy.',
-    moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Iron Elbow'], ['R+A', 'Shard Volley'], ['R+A (running)', 'Polar Charge'], ['Hold R+A', 'Implosion — drags the opponent in, then blasts'], ['X (range)', 'Magnetic pull: fighters and objects'], ['L', 'Flight'], ['R+X', 'Skyfall Drop'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Iron Elbow'], ['R+A', 'Shard Volley'], ['R+A (running)', 'Polar Charge'], ['Hold R+A', 'Implosion — drags the opponent in, then blasts'], ['X (range)', 'Magnetic pull: fighters and objects'], ['L', 'Flight'], ['R+X', 'Iron Maiden — crushes them in a magnetic field and hurls them'], ['Grab, A', 'Knee pummel']],
   },
   build: genericBuild(0x8a9098, 0x8a1a28, 0xff4a6a),
 };
@@ -845,14 +845,14 @@ const ember: CharacterDef = {
       hit: { fwd: 0, up: 0.5, radius: 4.2, stamina: 14, health: 12, kbF: 11, kbU: 11, stun: 38, launch: true, heavy: true, breaksWalls: 60 },
     },
   },
-  powerGrapple: 'piledriver',
+  powerGrapple: 'furnaceSlam',
   sheet: {
     mobility: 'L: Sprint · L+A Blaze Shoulder',
     power: 'R+A: Fireball (explodes and burns) · running R+A: Flame Rush · hold R+A: Eruption · air: Meteor Drop',
     grapple: 'Lifts light and medium props. R+X: Furnace Slam.',
     finisher: 'Inferno — lifts and spikes the opponent in a pillar of fire',
     weakness: 'Big and readable; no way back from a long launch.',
-    moves: [['A A A', 'Jab, cross, rising hook'], ['A (running)', 'Searing Hook'], ['R+A', 'Fireball — explodes and burns'], ['R+A (running)', 'Flame Rush'], ['Hold R+A', 'Eruption — burns'], ['R+A (air)', 'Meteor Drop'], ['L+A', 'Blaze Shoulder'], ['R+X', 'Furnace Slam'], ['Passive', 'Heavy hits set the target burning']],
+    moves: [['A A A', 'Jab, cross, rising hook'], ['A (running)', 'Searing Hook'], ['R+A', 'Fireball — explodes and burns'], ['R+A (running)', 'Flame Rush'], ['Hold R+A', 'Eruption — burns'], ['R+A (air)', 'Meteor Drop'], ['L+A', 'Blaze Shoulder'], ['R+X', 'Furnace Slam — suplex into a pillar of fire'], ['Passive', 'Heavy hits set the target burning']],
   },
   build: genericBuild(0x2a2420, 0x6a2a10, 0xff6a1a, true),
 };
@@ -954,7 +954,7 @@ const rift: CharacterDef = {
     mobility: 'L+direction: Portal hop · L neutral: step out behind the opponent · L+A Rift Step kick',
     power: 'R+A: Swap Gate (trade places) · running R+A: Portal Punch · hold R+A: Rift Storm',
     grapple: 'Lifts light and medium props. R+X: Portal Drop.',
-    finisher: 'Gate Barrage — strikes from portals on every side',
+    finisher: 'Gate Barrage — drops the opponent through a chain of portals, faster each time, then slams them',
     weakness: 'Every portal costs energy; with an empty meter she has no way back from a launch.',
     moves: [['A A A', 'Jab, cross, gate kick'], ['A (running)', 'Gate Elbow'], ['R+A', 'Swap Gate — swap places (use it near an edge!)'], ['R+A (running)', 'Portal Punch — hits from behind at range, pulls them in'], ['Hold R+A', 'Rift Storm — three gates fire on the opponent'], ['L + dir / L', 'Portal hop / step behind'], ['L+A', 'Rift Step kick'], ['R+X', 'Portal Drop — drops them from the sky'], ['Grab, A', 'Knee pummel']],
   },
