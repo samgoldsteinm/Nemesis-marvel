@@ -1,3 +1,4 @@
+import { updatePadCursor, hidePadCursor } from './padcursor';
 import { VFX } from './vfx';
 import { TRAITS } from './traits';
 import * as THREE from 'three';
@@ -540,9 +541,17 @@ function act(a: string, arg?: string) {
 // Menu navigation from keyboard / pads.
 const menuTrack = [new EdgeTracker(), new EdgeTracker()];
 let navCooldown = 0; // ms
+function menuBack() {
+  if (screen === 'select') { if (selectSide === 1) { selectSide = 0; rerender(); } else act('title'); }
+  else if (screen === 'moves') act('back');
+  else if (screen === 'pause') act('resume');
+}
 function menuInput(dtMs: number) {
-  const binds: DeviceBinding[] = [{ keyboard: [0, 1], gamepad: 0, touch: false }, { keyboard: [], gamepad: 1, touch: false }];
-  for (let i = 0; i < 2; i++) {
+  // Controllers drive an on-screen arrow cursor; the keyboard keeps step-by-step focus navigation.
+  const padUsed = updatePadCursor(menu, screen, dtMs, () => { if (navCooldown <= 0) { navCooldown = 180; sfx.menu(); menuBack(); } });
+  if (padUsed) initAudio();
+  const binds: DeviceBinding[] = [{ keyboard: [0, 1], gamepad: null, touch: false }];
+  for (let i = 0; i < binds.length; i++) {
     const raw = readDevices(binds[i]);
     if (keyDown('Enter') || keyDown('Space')) raw.down.attack = true;
     if (keyDown('Escape')) raw.down.jump = true;
@@ -552,12 +561,7 @@ function menuInput(dtMs: number) {
     const step = fr.my > 0.5 || fr.mx < -0.5 ? -1 : fr.my < -0.5 || fr.mx > 0.5 ? 1 : 0;
     if (step) { setFocus(focusIdx + step); navCooldown = 150; sfx.menu(); }
     if (fr.b.attack.pressed) { const el = focusables()[focusIdx]; if (el) { initAudio(); el.click(); } navCooldown = 180; }
-    if (fr.b.jump.pressed) {
-      navCooldown = 180;
-      if (screen === 'select') { if (selectSide === 1) { selectSide = 0; rerender(); } else act('title'); }
-      else if (screen === 'moves') act('back');
-      else if (screen === 'pause') act('resume');
-    }
+    if (fr.b.jump.pressed) { navCooldown = 180; menuBack(); }
   }
   if (navCooldown > 0) navCooldown -= dtMs;
   endInputRead();
@@ -644,6 +648,7 @@ function frame(now: number) {
   time += rawDt;
 
   if (screen !== 'none') menuInput(rawDt * 1000);
+  else hidePadCursor();
   if (match && !paused && screen === 'none' && !manualStep) {
     if (fx.hitstop > 0) fx.hitstop -= rawDt; // brief impact emphasis: sim holds, rendering continues
     else {
