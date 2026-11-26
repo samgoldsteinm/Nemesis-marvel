@@ -6,7 +6,6 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { AfterimagePass } from 'three/examples/jsm/postprocessing/AfterimagePass.js';
-import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js';
 import { FX } from './fx';
 import { VersusCamera } from './camera';
 import { Match } from './match';
@@ -16,6 +15,7 @@ import { ROSTER, CharacterDef, charById } from './characters';
 import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, keyDown, endInputRead } from './input';
 import { initAudio, sfx, startMusic, stopMusic, setMuted, muted } from './audio';
 import { TUNING } from './fighter';
+import { RIM_COLOR } from './characters';
 import { renderPortraits, portraitOf } from './portraits';
 import { loadBodyModels, loadPropModels } from './skinned';
 import { PROP_MODELS } from './arena';
@@ -73,7 +73,9 @@ sun.shadow.mapSize.set(2048, 2048);
 const sc = sun.shadow.camera as THREE.OrthographicCamera;
 sc.left = -24; sc.right = 24; sc.top = 20; sc.bottom = -20; sc.near = 1; sc.far = 80;
 sun.shadow.bias = -0.0008;
-sun.shadow.normalBias = 0.03;
+sun.shadow.normalBias = 0.035;
+sun.shadow.radius = 3;
+scene.add(sun.target);
 scene.add(sun);
 const rim = new THREE.DirectionalLight(0x6c7cff, 0.9);
 rim.position.set(25, 12, -20);
@@ -82,6 +84,8 @@ scene.add(rim);
 const keyLight = new THREE.DirectionalLight(0xfff0e0, 0.9);
 scene.add(keyLight, keyLight.target);
 
+const SHADOW_HALF = 17;
+const sunDir = new THREE.Vector3(-22, 26, 12).normalize();
 // Per-venue palette: each arena has its own hour, light and colour grade.
 interface Palette {
   sky: [number, string][]; fog: number; fogNear: number; fogFar: number;
@@ -132,8 +136,12 @@ function applyPalette(id: LayoutId) {
   hemi.color.setHex(p.hemi[0]); hemi.groundColor.setHex(p.hemi[1]); hemi.intensity = p.hemi[2];
   sun.color.setHex(p.sun[0]); sun.intensity = p.sun[1]; sun.position.set(...p.sunPos);
   rim.color.setHex(p.rim[0]); rim.intensity = p.rim[1];
-  sc.left = -p.shadow[0]; sc.right = p.shadow[0]; sc.top = p.shadow[1]; sc.bottom = -p.shadow[1];
+  // Tight shadow box that follows the action (see frame loop): crisp, soft shadows where it matters.
+  sc.left = -SHADOW_HALF; sc.right = SHADOW_HALF; sc.top = SHADOW_HALF; sc.bottom = -SHADOW_HALF;
+  sc.near = 1; sc.far = 120;
   sc.updateProjectionMatrix();
+  sunDir.set(...p.sunPos).normalize();
+  RIM_COLOR.value.setHex(p.rim[0]).lerp(new THREE.Color(0xffffff), 0.35);
   const u = grade.uniforms;
   u.sat.value = p.grade.sat;
   u.lift.value.set(...p.grade.lift);
@@ -151,13 +159,8 @@ const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, vcam.cam));
 // Contact shadows (ambient occlusion): grounds props, fighters and buildings. Desktop by default;
 // the adaptive quality step turns it off first when frames run long.
-const gtao = new GTAOPass(scene, vcam.cam, window.innerWidth, window.innerHeight);
-gtao.blendIntensity = 0.85;
-gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1.5, scale: 1.2 });
-composer.addPass(gtao);
 const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-let aoOn = !isTouch && !new URLSearchParams(location.search).has('noao');
-if (new URLSearchParams(location.search).has('ao')) aoOn = true;
+if (isTouch) sun.shadow.mapSize.set(1536, 1536);
 // Motion blur (afterimage) only switches on for fast moves and big impacts.
 const blurPass = new AfterimagePass(0);
 blurPass.enabled = false;
@@ -224,7 +227,6 @@ const markers = [0x3aa0ff, 0xff4a4a].map((c) => {
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
-  gtao.setSize(window.innerWidth, window.innerHeight);
   vcam.cam.aspect = window.innerWidth / window.innerHeight;
   vcam.cam.updateProjectionMatrix();
 });
@@ -581,8 +583,7 @@ function adaptQuality(now: number) {
   const { p95 } = perfStats();
   // Lower particle density and render scale first; simulation and collision are never touched.
   if (p95 > 19) {
-    if (aoOn) aoOn = false;
-    else if (bloomOn) bloomOn = false;
+    if (bloomOn) bloomOn = false;
     else if (fx.blurAllowed) fx.blurAllowed = false;
     else if (fx.quality > 0.5) fx.quality = 0.5;
     else if (pixelRatio > 0.7) { pixelRatio = Math.max(0.7, pixelRatio - 0.15); renderer.setPixelRatio(pixelRatio); }
@@ -647,11 +648,18 @@ function frame(now: number) {
   }
   keyLight.position.copy(vcam.cam.position).add(new THREE.Vector3(0, 6, 0));
   keyLight.target.position.copy(vcam.target);
+  // Sun shadow frustum centred on the action, snapped to texels to stop shimmer.
+  {
+    const c = match ? vcam.target : new THREE.Vector3(0, 0, 0);
+    const texel = (SHADOW_HALF * 2) / sun.shadow.mapSize.x;
+    const tx = Math.round(c.x / texel) * texel, tz = Math.round(c.z / texel) * texel;
+    sun.target.position.set(tx, 0, tz);
+    sun.position.set(tx + sunDir.x * 60, sunDir.y * 60, tz + sunDir.z * 60);
+  }
   const raging = !!match && match.fighters.some((f) => f.raging);
   tint.style.opacity = raging ? String(0.38 + Math.sin(time * 10) * 0.08) : '0';
   // Post stack: grade always (cheap); bloom and motion blur only when affordable.
   bloom.enabled = bloomOn;
-  gtao.enabled = aoOn;
   const blurAmt = fx.blurAllowed ? Math.min(0.82, fx.blur) : 0;
   blurPass.enabled = blurAmt > 0.05;
   blurPass.uniforms['damp'].value = blurAmt;
@@ -661,7 +669,7 @@ function frame(now: number) {
   adaptQuality(now);
   if (perfEl.style.display !== 'none') {
     const s = perfStats();
-    perfEl.textContent = `frame ms p50 ${s.p50.toFixed(1)} p95 ${s.p95.toFixed(1)} p99 ${s.p99.toFixed(1)} worst ${s.worst.toFixed(1)}\nao ${aoOn} bloom ${bloomOn} post ${postOn} blur ${blurPass.enabled} fx ${fx.quality} dpr ${pixelRatio.toFixed(2)} shadows ${renderer.shadowMap.enabled} calls ${renderer.info.render.calls}`;
+    perfEl.textContent = `frame ms p50 ${s.p50.toFixed(1)} p95 ${s.p95.toFixed(1)} p99 ${s.p99.toFixed(1)} worst ${s.worst.toFixed(1)}\nbloom ${bloomOn} post ${postOn} blur ${blurPass.enabled} fx ${fx.quality} dpr ${pixelRatio.toFixed(2)} shadows ${renderer.shadowMap.enabled} calls ${renderer.info.render.calls}`;
   }
 }
 applyPalette('rooftop');

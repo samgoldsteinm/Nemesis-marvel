@@ -67,6 +67,32 @@ export class Ribbon {
   }
 }
 
+/** Soft additive glow: 'shell' brightens toward the silhouette (auras), 'ball' toward the centre (flashes).
+ *  Exposes .color and .level, so callers can animate it the same way. */
+export class GlowMaterial extends THREE.ShaderMaterial {
+  constructor(color: number, mode: 'shell' | 'ball') {
+    super({
+      uniforms: { gColor: { value: new THREE.Color(color) }, gOpacity: { value: 0 } },
+      vertexShader: `varying vec3 vN; varying vec3 vV; varying float vY;
+        void main(){ vY = uv.y; vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix*normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix*mv; }`,
+      fragmentShader: `uniform vec3 gColor; uniform float gOpacity; varying vec3 vN; varying vec3 vV; varying float vY;
+        void main(){
+          float d = abs(dot(vN, vV));
+          ${mode === 'shell'
+            ? 'float a = pow(d, 0.9) * pow(1.0 - d, 1.6) * smoothstep(0.0, 0.35, vY) * smoothstep(1.0, 0.45, vY) * 3.2;'
+            : 'float a = pow(d, 2.0) * 1.4;'}
+          gl_FragColor = vec4(gColor * a * gOpacity, 1.0);
+        }`,
+      transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: mode === 'shell' ? THREE.DoubleSide : THREE.FrontSide,
+    });
+  }
+  get color() { return this.uniforms?.gColor.value as THREE.Color; }
+  set color(_c: THREE.Color) { /* fixed reference; use .color.setHex */ }
+  /** Glow strength (0 = invisible). */
+  get level() { return this.uniforms.gOpacity.value as number; }
+  set level(v: number) { this.uniforms.gOpacity.value = v; }
+}
+
 function radialTex(stops: [number, string][]) {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
@@ -91,8 +117,11 @@ export class FX {
   private billows: Billow[] = [];
   private firePool: THREE.Sprite[] = [];
   private smokePool: THREE.Sprite[] = [];
+  private dustPool: THREE.Sprite[] = [];
   /** Lingering flames (e.g. on a burnt wreck): position and remaining seconds. */
   burners: { p: THREE.Vector3; t: number; size: number }[] = [];
+  /** A small fixed pool of point lights for hits, explosions and power effects (fixed count: no shader recompiles). */
+  private lights: { l: THREE.PointLight; life: number; max: number; peak: number; follow?: () => THREE.Vector3 | null }[] = [];
   private puffs: THREE.InstancedMesh;
   private pParts: Particle[] = [];
   private maxP = 120;
@@ -127,11 +156,21 @@ export class FX {
     scene.add(this.puffs);
     const fireTex = radialTex([[0, 'rgba(255,255,230,1)'], [0.25, 'rgba(255,200,90,0.95)'], [0.55, 'rgba(255,90,20,0.6)'], [1, 'rgba(120,20,0,0)']]);
     const smokeTex = radialTex([[0, 'rgba(70,66,64,0.85)'], [0.5, 'rgba(60,58,58,0.5)'], [1, 'rgba(40,40,40,0)']]);
+    const dustTex = radialTex([[0, 'rgba(225,215,200,0.55)'], [0.5, 'rgba(210,200,185,0.28)'], [1, 'rgba(200,190,175,0)']]);
+    for (let i = 0; i < 90; i++) {
+      const d = new THREE.Sprite(new THREE.SpriteMaterial({ map: dustTex, transparent: true, depthWrite: false }));
+      d.visible = false; scene.add(d); this.dustPool.push(d);
+    }
     for (let i = 0; i < 70; i++) {
       const f = new THREE.Sprite(new THREE.SpriteMaterial({ map: fireTex, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
       f.visible = false; scene.add(f); this.firePool.push(f);
       const sm = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, transparent: true, depthWrite: false }));
       sm.visible = false; scene.add(sm); this.smokePool.push(sm);
+    }
+    for (let i = 0; i < 3; i++) {
+      const l = new THREE.PointLight(0xffffff, 0, 9, 2);
+      scene.add(l);
+      this.lights.push({ l, life: 0, max: 1, peak: 0 });
     }
     const ringGeo = new THREE.RingGeometry(0.85, 1, 40);
     ringGeo.rotateX(-Math.PI / 2);
@@ -143,7 +182,7 @@ export class FX {
     }
     const flashGeo = new THREE.SphereGeometry(1, 16, 12);
     for (let i = 0; i < 10; i++) {
-      const m = new THREE.Mesh(flashGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+      const m = new THREE.Mesh(flashGeo, new GlowMaterial(0xffffff, 'ball'));
       m.visible = false;
       scene.add(m);
       this.flashes.push({ m, life: 0, max: 1, s: 1 });
@@ -156,6 +195,7 @@ export class FX {
     for (const b of this.billows) b.s.visible = false;
     this.billows.length = 0;
     this.burners.length = 0;
+    for (const s of this.lights) { s.life = 0; s.l.intensity = 0; }
     this.sParts.length = 0;
     for (const r of this.rings) { r.life = 0; r.m.visible = false; }
     for (const f of this.flashes) { f.life = 0; f.m.visible = false; }
@@ -177,6 +217,7 @@ export class FX {
   }
 
   sparksAt(pos: THREE.Vector3, count: number, color: number, speed = 8, size = 0.08, grav = 6) {
+    if (count >= 12) this.light(pos, color, 6 + count * 0.4, 0.14, 5);
     const n = Math.round(count * this.quality);
     for (let i = 0; i < n; i++) {
       if (this.sParts.length >= this.maxS) this.sParts.shift();
@@ -186,14 +227,14 @@ export class FX {
     }
   }
 
-  private billow(pos: THREE.Vector3, fire: boolean, size: number, v: THREE.Vector3, life: number) {
-    const pool = fire ? this.firePool : this.smokePool;
+  private billow(pos: THREE.Vector3, fire: boolean, size: number, v: THREE.Vector3, life: number, dust = false) {
+    const pool = dust ? this.dustPool : fire ? this.firePool : this.smokePool;
     const s = pool.find((x) => !x.visible);
     if (!s) return;
     s.visible = true;
     s.position.copy(pos);
     s.material.rotation = Math.random() * Math.PI * 2;
-    this.billows.push({ s, v, life, max: life, s0: size * 0.5, s1: size * (fire ? 1.4 : 2.4), fire });
+    this.billows.push({ s, v, life, max: life, s0: size * 0.5, s1: size * (fire ? 1.4 : dust ? 3 : 2.4), fire });
   }
 
   /** A fiery explosion: core flash, rolling fireballs, then smoke that rises and spreads. */
@@ -209,17 +250,17 @@ export class FX {
     }
     this.screenFlash = Math.max(this.screenFlash, 0.55);
     this.blur = Math.max(this.blur, 0.55);
+    this.light(pos.clone().setY(pos.y + 1), 0xff8a30, 90, 0.9, 16);
   }
 
   /** Soft dust from landings, footsteps and slides. */
   dust(pos: THREE.Vector3, count: number, size = 0.35, spread = 1.5) {
+    // Soft billboard puffs (no hard-edged meshes).
     const n = Math.max(1, Math.round(count * this.quality));
     for (let i = 0; i < n; i++) {
-      if (this.pParts.length >= this.maxP) this.pParts.shift();
       const a = Math.random() * Math.PI * 2;
-      const v = new THREE.Vector3(Math.cos(a) * spread * (0.5 + Math.random()), 0.6 + Math.random() * 0.8, Math.sin(a) * spread * (0.5 + Math.random()));
-      const life = 0.45 + Math.random() * 0.35;
-      this.pParts.push({ p: pos.clone().add(new THREE.Vector3(0, 0.15, 0)), v, r: new THREE.Euler(), rv: new THREE.Vector3(), life, max: life, size: size * (0.6 + Math.random() * 0.8), grav: 0.5, color: new THREE.Color() });
+      const v = new THREE.Vector3(Math.cos(a) * spread * (0.5 + Math.random()), 0.4 + Math.random() * 0.6, Math.sin(a) * spread * (0.5 + Math.random()));
+      this.billow(pos.clone().add(new THREE.Vector3(0, 0.12 + size * 0.3, 0)), false, size * 1.6 * (0.6 + Math.random() * 0.8), v, 0.5 + Math.random() * 0.4, true);
     }
   }
 
@@ -241,13 +282,24 @@ export class FX {
     r.m.visible = true;
   }
 
+  /** Light the surroundings briefly: hits, explosions, casts. Optionally follow a moving source. */
+  light(pos: THREE.Vector3, color: number, intensity: number, dur: number, range = 8, follow?: () => THREE.Vector3 | null) {
+    if (this.quality < 0.5 && intensity < 20) return;
+    const s = this.lights.reduce((a, b) => (b.life <= 0 ? b : a.life <= 0 ? a : b.life < a.life ? b : a));
+    s.l.position.copy(pos);
+    s.l.color.setHex(color);
+    s.l.distance = range;
+    s.life = dur; s.max = dur; s.peak = intensity; s.follow = follow;
+  }
+
   flash(pos: THREE.Vector3, size: number, color: number, dur = 0.18) {
+    this.light(pos, color, 9 * size, Math.max(0.12, dur * 1.3), 4 + size * 3);
     const f = this.flashes.find((x) => x.life <= 0) ?? this.flashes[0];
     f.life = dur;
     f.max = dur;
     f.s = size;
     f.m.position.copy(pos);
-    (f.m.material as THREE.MeshBasicMaterial).color.setHex(color);
+    (f.m.material as GlowMaterial).color.setHex(color);
     f.m.visible = true;
   }
 
@@ -327,7 +379,7 @@ export class FX {
       if (b.life <= 0) { b.s.visible = false; this.billows.splice(k, 1); continue; }
       const f = 1 - b.life / b.max;
       b.v.multiplyScalar(Math.exp(-(b.fire ? 3 : 1.2) * dt));
-      if (!b.fire) b.v.y += 0.8 * dt;
+      if (!b.fire && b.s1 / Math.max(1e-3, b.s0) < 5.5) b.v.y += 0.8 * dt;
       b.s.position.addScaledVector(b.v, dt);
       const sc = b.s0 + (b.s1 - b.s0) * (1 - (1 - f) * (1 - f));
       b.s.scale.set(sc, sc, 1);
@@ -355,11 +407,19 @@ export class FX {
       fl.life -= dt;
       const f = 1 - fl.life / fl.max;
       fl.m.scale.setScalar(fl.s * (0.5 + f));
-      (fl.m.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 1 - f);
+      (fl.m.material as GlowMaterial).level = Math.max(0, 1 - f);
       if (fl.life <= 0) fl.m.visible = false;
     }
     this.shake = Math.max(0, this.shake - dt * 2.5);
     this.blur = Math.max(0, this.blur - dt * 2.2);
+    for (const s of this.lights) {
+      if (s.life <= 0) { s.l.intensity = 0; continue; }
+      s.life -= dt;
+      const f = Math.max(0, s.life / s.max);
+      s.l.intensity = s.peak * f * f;
+      const p = s.follow?.();
+      if (p) s.l.position.copy(p);
+    }
     this.screenFlash = Math.max(0, this.screenFlash - dt * 4);
   }
 }

@@ -590,6 +590,7 @@ export class Arena {
     // The Clarion building itself: a stone facade at true window scale.
     void bodyMat;
     const fac = facadeMaterial('stone').clone();
+    fac.vertexColors = false;
     fac.map = fac.map!.clone(); fac.map.repeat.set((HW * 2) / 24, 70 / 27.2); fac.map.needsUpdate = true;
     fac.emissiveMap = fac.emissiveMap!.clone(); fac.emissiveMap.repeat.copy(fac.map.repeat); fac.emissiveMap.needsUpdate = true;
     fac.bumpMap = fac.bumpMap!.clone(); fac.bumpMap.repeat.copy(fac.map.repeat); fac.bumpMap.needsUpdate = true;

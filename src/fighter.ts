@@ -5,7 +5,7 @@ import { Rig, P, Pose } from './rig';
 import { InputFrame, emptyFrame } from './input';
 import { Prop, BOUNDS, KILL_Y, WallSeg } from './arena';
 import { sfx } from './audio';
-import { Ribbon } from './fx';
+import { Ribbon, GlowMaterial } from './fx';
 import type { Match } from './match';
 
 export type FState =
@@ -95,6 +95,9 @@ export class Fighter {
   hitSide = 1;
 
   ribbon: Ribbon;
+  /** The fighter's own glow: accent colour normally, red in Rage, pulsing blue while charging. */
+  glow: THREE.PointLight;
+  contact: THREE.Mesh;
   private limbPrev = new Map<string, THREE.Vector3>();
   /** Playback speed that fits a clip's length to a number of gameplay ticks. */
   private fitSpeed(name: string, ticks: number) {
@@ -128,12 +131,18 @@ export class Fighter {
       if (m.userData.baseEI === undefined) m.userData.baseEI = m.emissiveIntensity;
       this.mats.push(m);
     });
+    this.glow = new THREE.PointLight(def.color, 0, 5.5, 2);
+    match.scene.add(this.glow);
+    this.contact = new THREE.Mesh(new THREE.CircleGeometry(def.radius * 1.9, 24), contactMat());
+    this.contact.rotation.x = -Math.PI / 2;
+    this.contact.renderOrder = 1;
+    match.scene.add(this.contact);
     this.ribbon = new Ribbon(match.scene, new THREE.Color(def.color).lerp(new THREE.Color(0xffffff), 0.45).getHex());
     // Charge aura and rage aura.
-    const auraGeo = new THREE.CylinderGeometry(def.radius * 1.6, def.radius * 1.9, def.height * 1.15, 18, 1, true);
+    const auraGeo = new THREE.CylinderGeometry(def.radius * 1.4, def.radius * 2.1, def.height * 1.25, 32, 1, true);
     auraGeo.translate(0, def.height * 0.55, 0);
-    this.aura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: 0x6fc8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
-    this.rageAura = new THREE.Mesh(auraGeo, new THREE.MeshBasicMaterial({ color: 0xff3a20, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    this.aura = new THREE.Mesh(auraGeo, new GlowMaterial(0x6fc8ff, 'shell'));
+    this.rageAura = new THREE.Mesh(auraGeo, new GlowMaterial(0xff3a20, 'shell'));
     this.rig.root.add(this.aura, this.rageAura);
     // Player ring marker on the ground.
     const ring = new THREE.Mesh(new THREE.RingGeometry(def.radius + 0.15, def.radius + 0.32, 32), new THREE.MeshBasicMaterial({ color: idx === 0 ? 0x3aa0ff : 0xff4a4a, transparent: true, opacity: 0.75, depthWrite: false }));
@@ -150,7 +159,7 @@ export class Fighter {
   }
 
   dispose() {
-    this.match.scene.remove(this.rig.root, this.shadowBlob, this.line);
+    this.match.scene.remove(this.rig.root, this.shadowBlob, this.line, this.glow, this.contact);
     this.ribbon.dispose(this.match.scene);
   }
 
@@ -1798,14 +1807,28 @@ export class Fighter {
     }
     // Rage and charge feedback.
     const charge = this.state === 'charge' ? 0.25 + Math.sin(time * 20) * 0.08 : 0;
-    (this.aura.material as THREE.MeshBasicMaterial).opacity += (charge - (this.aura.material as THREE.MeshBasicMaterial).opacity) * 0.3;
+    (this.aura.material as GlowMaterial).level += (charge * 2.2 - (this.aura.material as GlowMaterial).level) * 0.3;
     this.aura.rotation.y += dt * 4;
+    const upright = !['down', 'launched', 'ko', 'getup', 'finished', 'grabbed', 'yanked'].includes(this.state);
+    this.aura.visible = this.rageAura.visible = upright;
     const ra = this.raging ? 0.06 + Math.sin(time * 14) * 0.03 : 0;
-    (this.rageAura.material as THREE.MeshBasicMaterial).opacity += (ra - (this.rageAura.material as THREE.MeshBasicMaterial).opacity) * 0.3;
+    (this.rageAura.material as GlowMaterial).level += (ra * 5 - (this.rageAura.material as GlowMaterial).level) * 0.3;
     this.rageAura.rotation.y -= dt * 6;
     for (const m of this.accents) {
       const base = m.userData.baseEI ?? 1;
       m.emissiveIntensity = base * (this.raging ? 2.2 + Math.sin(time * 18) * 0.5 : 1) + (this.hitFlash > 0 ? 1 : 0);
+    }
+    // Character glow light.
+    {
+      const base = new THREE.Color(this.def.color);
+      let inten = 2.2, col = base;
+      if (this.raging) { col = new THREE.Color(0xff3a14); inten = 7 + Math.sin(time * 14) * 2; }
+      else if (this.state === 'charge' || this.state === 'powerCharge') { col = new THREE.Color(0x6fc8ff); inten = 5 + Math.sin(time * 18) * 2; }
+      if (this.hitFlash > 4) { col = new THREE.Color(0xffffff); inten = 9; }
+      if (!this.rig.root.visible || this.state === 'out') inten = 0;
+      this.glow.color.lerp(col, 0.35);
+      this.glow.intensity += (inten - this.glow.intensity) * 0.3;
+      this.glow.position.copy(this.center).add(new THREE.Vector3(0, 0.1, 0)).addScaledVector(this.forward, 0.35);
     }
     // White impact flash across the whole body.
     const flash = this.hitFlash > 4;
@@ -1819,8 +1842,15 @@ export class Fighter {
     // Ground marker: projected onto the surface below.
     const g = this.match.arena.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.1);
     this.shadowBlob.visible = Number.isFinite(g) && this.state !== 'out' && this.rig.root.visible;
+    this.contact.visible = false;
     if (this.shadowBlob.visible) {
       this.shadowBlob.position.set(this.pos.x, g + 0.03, this.pos.z);
+      // Soft contact shadow: darker and tighter the closer the body is to the ground.
+      const hh = Math.max(0, this.pos.y - g);
+      this.contact.visible = true;
+      this.contact.position.set(this.pos.x, g + 0.02, this.pos.z);
+      this.contact.scale.setScalar(1 + hh * 0.15);
+      (this.contact.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.55 - hh * 0.12);
       const hgt = this.pos.y - g;
       this.shadowBlob.scale.setScalar(Math.max(0.5, 1 - hgt * 0.05));
     }
@@ -1839,3 +1869,17 @@ export class Fighter {
 }
 
 export { tmpV };
+
+let _contact: THREE.MeshBasicMaterial | null = null;
+function contactMat() {
+  if (!_contact) {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d')!;
+    const gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(0.55, 'rgba(0,0,0,0.45)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    _contact = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, opacity: 0.5, polygonOffset: true, polygonOffsetFactor: -1 });
+  }
+  return _contact.clone();
+}

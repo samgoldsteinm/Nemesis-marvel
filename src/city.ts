@@ -101,6 +101,7 @@ export function facadeMaterial(style: FacadeStyle) {
     m = new THREE.MeshStandardMaterial({
       map: t.map, emissive: 0xffffff, emissiveMap: t.emissiveMap, emissiveIntensity: 0.85, bumpMap: t.bumpMap, bumpScale: 2.2,
       roughness: style === 'glass' ? 0.25 : 0.88, metalness: style === 'glass' ? 0.55 : 0.05,
+      vertexColors: true,
     });
     facadeCache.set(style, m);
   }
@@ -121,11 +122,22 @@ function roofMaterial() {
   return roofMat;
 }
 
-/** A plane for one side of a volume, with UVs in facade-tile units so windows keep their real size. */
-function sidePlane(w: number, h: number, u0: number) {
-  const g = new THREE.PlaneGeometry(w, h);
+/** A plane for one side of a volume, with UVs in facade-tile units so windows keep their real size,
+ *  and vertex colours that fake ambient occlusion: darker toward street level and under the cornice. */
+function sidePlane(w: number, h: number, u0: number, groundAbove: number) {
+  const segs = Math.max(1, Math.ceil(h / 3.4));
+  const g = new THREE.PlaneGeometry(w, h, 1, segs);
   const uv = g.attributes.uv as THREE.BufferAttribute;
-  for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + (uv.getX(i) * w) / TILE_W, (uv.getY(i) * h) / TILE_H);
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  const col = new Float32Array(pos.count * 3);
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, u0 + (uv.getX(i) * w) / TILE_W, (uv.getY(i) * h) / TILE_H);
+    const yFromBase = pos.getY(i) + h / 2 + groundAbove;
+    const yFromTop = h / 2 - pos.getY(i);
+    const ao = (0.42 + 0.58 * THREE.MathUtils.smoothstep(yFromBase, 0, 16)) * (0.82 + 0.18 * THREE.MathUtils.smoothstep(yFromTop, 0, 1.4));
+    col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = ao;
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return g;
 }
 
@@ -144,7 +156,7 @@ export class CityBuilder {
     let l = this.buckets.get(mat);
     if (!l) { l = []; this.buckets.set(mat, l); }
     // Normalise attributes so everything merges: drop extras, ensure uv exists.
-    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(k)) g.deleteAttribute(k);
+    for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(k)) g.deleteAttribute(k);
     if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
     l.push(g.index ? g.toNonIndexed() : g);
   }
@@ -165,13 +177,13 @@ export class CityBuilder {
   }
 
   /** One rectangular volume: four facade sides, a roof, a cornice and parapet. */
-  private volume(style: FacadeStyle, x: number, z: number, w: number, d: number, y0: number, y1: number, detail: number) {
+  private volume(style: FacadeStyle, x: number, z: number, w: number, d: number, y0: number, y1: number, detail: number, base = y0) {
     const h = y1 - y0;
     const fm = facadeMaterial(style);
     const u0 = Math.random() * 8;
     const sides: [number, number, number, number][] = [[w, 0, d / 2, 0], [w, 0, -d / 2, Math.PI], [d, w / 2, 0, Math.PI / 2], [d, -w / 2, 0, -Math.PI / 2]];
     for (const [len, ox, oz, ry] of sides) {
-      const g = sidePlane(len, h, u0);
+      const g = sidePlane(len, h, u0, y0 - base);
       g.rotateY(ry);
       g.translate(x + ox, y0 + h / 2, z + oz);
       this.add(fm, g);
@@ -201,7 +213,7 @@ export class CityBuilder {
     for (let t = 0; t < tiers; t++) {
       const frac = tiers === 1 ? 1 : t === 0 ? rand(0.55, 0.7) : t === tiers - 1 ? 1 : rand(0.75, 0.88);
       const yTop = t === tiers - 1 ? o.top : o.bottom + h * frac;
-      this.volume(style, o.x, o.z, w, d, y, yTop, o.detail);
+      this.volume(style, o.x, o.z, w, d, y, yTop, o.detail, o.bottom);
       y = yTop;
       w *= rand(0.62, 0.8);
       d *= rand(0.62, 0.8);
@@ -337,35 +349,37 @@ export function farPanorama(radius: number, baseY: number, height: number, tint:
   return m;
 }
 
-/** Soft sun shafts: crossed additive planes with a fading gradient. */
+/** Soft volumetric sun shafts: open cones whose silhouettes and ends fade out (no hard plane edges). */
 export function lightShafts(parent: THREE.Object3D, spots: [number, number, number][], sunDir: THREE.Vector3, color: number, opacity = 0.08) {
-  const c = document.createElement('canvas');
-  c.width = 64; c.height = 256;
-  const g = c.getContext('2d')!;
-  const gr = g.createLinearGradient(0, 0, 0, 256);
-  gr.addColorStop(0, 'rgba(255,255,255,0.0)');
-  gr.addColorStop(0.25, 'rgba(255,255,255,0.9)');
-  gr.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = gr;
-  g.fillRect(0, 0, 64, 256);
-  const side = g.createLinearGradient(0, 0, 64, 0);
-  side.addColorStop(0, 'rgba(0,0,0,1)'); side.addColorStop(0.5, 'rgba(0,0,0,0)'); side.addColorStop(1, 'rgba(0,0,0,1)');
-  g.globalCompositeOperation = 'destination-out';
-  g.fillStyle = side;
-  g.fillRect(0, 0, 64, 256);
-  const t = new THREE.CanvasTexture(c);
-  const mat = new THREE.MeshBasicMaterial({ map: t, color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { color: { value: new THREE.Color(color) }, opacity: { value: opacity * 2.2 } },
+    vertexShader: `
+      varying float vY; varying vec3 vN; varying vec3 vV;
+      void main() {
+        vY = uv.y;
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vN = normalize(normalMatrix * normal);
+        vV = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform vec3 color; uniform float opacity;
+      varying float vY; varying vec3 vN; varying vec3 vV;
+      void main() {
+        float edge = pow(abs(dot(vN, vV)), 2.0);          // fade at the cone silhouette
+        float along = smoothstep(0.0, 0.35, vY) * smoothstep(1.0, 0.6, vY); // fade both ends
+        gl_FragColor = vec4(color * opacity * edge * along, 1.0);
+      }`,
+    transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+  });
   const dir = sunDir.clone().normalize();
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
   for (const [x, y, z] of spots) {
-    for (const rot of [0, Math.PI / 2]) {
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(5 + Math.random() * 4, 46), mat);
-      p.position.set(x, y, z);
-      // Lean the shaft along the sun direction.
-      p.lookAt(p.position.clone().add(new THREE.Vector3(dir.z, 0, -dir.x)));
-      p.rotateY(rot);
-      p.rotateZ(Math.atan2(dir.x, dir.y) * 0.6);
-      p.renderOrder = 2;
-      parent.add(p);
-    }
+    const r = 2 + Math.random() * 2;
+    const cone = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.55, r * 1.6, 50, 24, 1, true), mat);
+    cone.position.set(x, y, z);
+    cone.quaternion.copy(q);
+    cone.renderOrder = 2;
+    parent.add(cone);
   }
 }

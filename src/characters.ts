@@ -143,11 +143,15 @@ function bump() {
 }
 
 /** Fresnel rim light so silhouettes separate from busy backgrounds. */
+/** Rim light colour shared by every fighter; each venue tints it (warm roof, teal overpass). */
+export const RIM_COLOR = { value: new THREE.Color(0.62, 0.78, 0.9) };
 function addRim(m: THREE.MeshStandardMaterial, strength = 0.5) {
   m.onBeforeCompile = (sh) => {
-    sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>
-      { float rimF = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 2.6);
-        gl_FragColor.rgb += vec3(0.62, 0.78, 0.9) * rimF * ${strength.toFixed(2)}; }`);
+    sh.uniforms.rimColor = RIM_COLOR;
+    sh.fragmentShader = 'uniform vec3 rimColor;\n' + sh.fragmentShader.replace('#include <opaque_fragment>', `#include <opaque_fragment>
+      { float ndv = clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);
+        float rimF = smoothstep(0.0, 1.0, pow(1.0 - ndv, 2.2));
+        gl_FragColor.rgb += rimColor * rimF * ${strength.toFixed(2)}; }`);
   };
   m.customProgramCacheKey = () => `rim${strength}`;
 }

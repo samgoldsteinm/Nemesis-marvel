@@ -81,7 +81,14 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
   - **Building detail:** belt-course ledges, cornices and parapets, stepped-back upper floors, pilasters, fire escapes on buildings facing the fight, and rooftop clutter (water towers, AC units, antennas, stair huts). Everything is merged per material, so the whole city costs only a few draw calls.
   - **Skyline:** a mid-distance ring of varied towers plus a painted far panorama with lit windows that fades into each venue's haze. Soft light shafts hang between the buildings.
   - **Props:** sculpted car bodies with glass, rims, bumpers and lights; slatted crates; AC units with grilles and fans; ribbed, labelled barrels; a domed fuel tank; and jersey barriers with reflectors. Overpass pile-ups are built from a box truck, burnt cars and barriers.
-  - **Lighting:** an environment map built from each venue's sky gives car paint, glass, metal and puddles real reflections. Ambient occlusion adds contact shadows on desktop, and is the first effect dropped when frames run long (`?noao` / `?ao`).
+  - **Lighting:** an environment map built from each venue's sky gives car paint, glass, metal and puddles real reflections. Contact shading comes from the lighting features described above.
+- **Lighting:**
+  - The sun's shadow map follows the action with a tight, texel-snapped box, so shadows are sharp and soft near the fighters.
+  - Each fighter carries a glow light in their own colour that lights the floor and the opponent. It turns red in Rage, pulses blue while charging, and flashes white on hits.
+  - Effect lights come from a small fixed pool: explosions, sparks, flashes and projectiles light their surroundings.
+  - Each fighter has a soft contact shadow, building walls darken toward street level and under cornices, and the rim light is tinted per venue.
+  - Light shafts are soft volumetric cones, and the Rage and charge auras and impact flashes use soft glow shaders. Dust uses soft billboard puffs.
+  - The screen-space AO pass was removed because it produced artefacts.
 - **Animated bodies (CC0):**
   - Fighters use the Quaternius *Universal Animation Library* mannequins, male and female (Aerin), from `public/models`.
   - Authored clips drive idle, walk, jog and sprint, jumps, jab, cross and hook, guard, roll, hit reactions, getting up off the ground, throws and pick-ups, dashes, slides, projectile casts, carrying and victory. One-shot clips are time-fitted to each move's gameplay frames.

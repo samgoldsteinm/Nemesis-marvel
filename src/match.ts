@@ -228,7 +228,9 @@ export class Match {
     mesh.scale.setScalar(kind === 'bolt' ? 1.1 : kind === 'bigbolt' ? 2.6 : 1.4);
     mesh.visible = true;
     mesh.position.copy(origin);
-    this.projectiles.push({ kind, owner, pos: origin.clone(), vel: dir.multiplyScalar(speed), life: 1.3, mesh, alive: true });
+    const proj = { kind, owner, pos: origin.clone(), vel: dir.multiplyScalar(speed), life: 1.3, mesh, alive: true };
+    this.projectiles.push(proj);
+    if (kind !== 'snare') this.fx.light(origin, 0xb48cff, kind === 'bigbolt' ? 14 : 6, 1.2, 6, () => (proj.alive ? proj.pos : null));
     sfx.zap();
   }
 
