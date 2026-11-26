@@ -256,6 +256,8 @@ export class FX {
     s.visible = true;
     s.position.copy(pos);
     s.material.rotation = Math.random() * Math.PI * 2;
+    s.scale.setScalar(size * 0.5); // fresh size now, not the previous owner's for a frame
+    s.material.opacity = 0;
     this.billows.push({ s, v, life, max: life, s0: size * 0.5, s1: size * (fire ? 1.4 : dust ? 3 : 2.4), fire });
   }
 
@@ -282,6 +284,9 @@ export class FX {
     s.visible = true;
     s.position.copy(pos);
     s.material.color.copy(color);
+    // Set the size now: a recycled sprite would otherwise render one frame at its previous owner's scale.
+    s.scale.set(size * 0.55, size, 1);
+    s.material.opacity = 0;
     const life = 0.3 + Math.random() * 0.3;
     this.wisps.push({ s, v: new THREE.Vector3((Math.random() - 0.5) * 0.4, 1.4 + Math.random() * 1.4, (Math.random() - 0.5) * 0.4), life, max: life, size, sway: Math.random() * 6.28 });
   }
