@@ -1935,7 +1935,7 @@ export class Fighter {
     const hitCol = new THREE.Color(att.def.color).lerp(new THREE.Color(0xffd080), 0.35).getHex();
     if (vfx) {
       vfx.hit(contact, dir.clone().negate(), hitCol, spec.heavy ? 0.9 : Math.min(0.6, spec.stamina / 14));
-      if (spec.heavy && launch) vfx.bigImpact(contact, hitCol, 0.8);
+      if (spec.heavy && launch) vfx.bigImpact(contact, hitCol, 0.5);
     } else {
       this.match.fx.sparksAt(contact, spec.heavy ? 16 : 8, spec.heavy ? 0xffc060 : 0xffffff, spec.heavy ? 9 : 6);
       if (spec.heavy) this.match.fx.flash(this.center, 0.7, 0xfff0d0, 0.1);
@@ -2266,11 +2266,11 @@ export class Fighter {
     this.aura.rotation.y += dt * 4;
     // Ember: hands always smoulder. Magna: shards orbit the waist.
     if (this.def.embers && this.rig.root.visible && this.state !== 'out') {
-      this.emberAcc += 24 * dt * this.match.fx.quality;
+      this.emberAcc += 14 * dt * this.match.fx.quality;
       while (this.emberAcc >= 1) {
         this.emberAcc -= 1;
         const hp = this.skinned ? this.skinned.boneWorld(Math.random() < 0.5 ? 'hand_l' : 'hand_r') : this.hand();
-        this.match.fx.wisp(hp, new THREE.Color(Math.random() < 0.6 ? 0xff5a10 : 0xffb040).multiplyScalar(0.75), 0.28);
+        this.match.fx.wisp(hp, new THREE.Color(Math.random() < 0.6 ? 0xff5a10 : 0xffb040).multiplyScalar(0.6), 0.14);
       }
     }
     const orbit = (r as any).orbit as THREE.Group | undefined;
@@ -2302,20 +2302,20 @@ export class Fighter {
     // Character glow light.
     {
       const base = new THREE.Color(this.def.color);
-      let inten = 2.2, col = base;
-      if (this.raging) { col = new THREE.Color(0xff4a1c); inten = 4 + Math.sin(time * 11) * 1.2; }
-      else if (this.state === 'charge' || this.state === 'powerCharge') { col = new THREE.Color(0x6fc8ff); inten = 5 + Math.sin(time * 18) * 2; }
-      if (this.hitFlash > 4) { col = new THREE.Color(0xffffff); inten = 6; }
+      let inten = 0.6, col = base;
+      if (this.raging) { col = new THREE.Color(0xff4a1c); inten = 2.4 + Math.sin(time * 11) * 0.8; }
+      else if (this.state === 'charge' || this.state === 'powerCharge') { col = new THREE.Color(0x6fc8ff); inten = 2.6 + Math.sin(time * 18) * 1; }
+      if (this.hitFlash > 5) { col = new THREE.Color(0xfff0e0); inten = 1.6; }
       if (!this.rig.root.visible || this.state === 'out') inten = 0;
       this.glow.color.lerp(col, 0.35);
       this.glow.intensity += (inten - this.glow.intensity) * 0.3;
-      this.glow.position.copy(this.center).add(new THREE.Vector3(0, 0.1, 0)).addScaledVector(this.forward, 0.35);
+      this.glow.position.copy(this.center).add(new THREE.Vector3(0, 0.9, 0)).addScaledVector(this.forward, 1.0);
     }
     // White impact flash across the whole body.
-    const flash = this.hitFlash > 4;
+    const flash = this.hitFlash > 5;
     if (flash || this.flashOn) {
       for (const mt of this.mats) {
-        if (flash) { mt.emissive.setRGB(1, 1, 1); mt.emissiveIntensity = 0.85; }
+        if (flash) { mt.emissive.setRGB(1, 0.9, 0.8); mt.emissiveIntensity = 0.3; }
         else { mt.emissive.copy(mt.userData.baseEmissive); if (!this.accents.includes(mt)) mt.emissiveIntensity = mt.userData.baseEI; }
       }
       this.flashOn = flash;
@@ -2375,7 +2375,7 @@ const STYLE: Record<string, AnimStyle> = {
   default: { idle: 'Idle_Loop', chain: ['Punch_Jab', 'Punch_Cross', 'Melee_Hook'], victory: 'Yes' },
   basalt: { idle: 'Idle_Loop', idleSpeed: 0.7, chain: ['M_BodyPunch', 'Melee_Hook', 'Sword_Attack'], run: 'M_Knee', dash: 'Shield_Dash', victory: 'Idle_FoldArms_Loop', locoScale: 0.85,
     moves: { tectonic: 'M_Stomp', thunderclap: 'Shield_OneShot', counter: 'M_Elbow' } },
-  tether: { idle: 'NinjaJump_Idle_Loop', chain: ['Punch_Jab', 'M_Roundhouse_R', 'M_SpinKick'], run: 'M_Sweep', dash: '', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land', dodge: true,
+  tether: { idle: 'M_GuardStance', idleSpeed: 1.2, chain: ['Punch_Jab', 'M_Roundhouse_R', 'M_SpinKick'], run: 'M_Sweep', dash: '', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land', dodge: true,
     moves: { counter: 'M_HeelKick', snare: 'Spell_Simple_Shoot', tripleSnare: 'Spell_Simple_Shoot' } },
   aerin: { idle: 'Spell_Simple_Idle_Loop', chain: ['Spell_Simple_Shoot', 'M_Teep', 'M_HighKick'], run: 'M_MTRoundhouse', victory: 'Yes', dodge: true,
     moves: { counter: 'M_SpinKick' } },

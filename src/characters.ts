@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Rig, Proportions, Pose, P, limb, box, sphere, addOutline, torso } from './rig';
 import type { SkinnedBody, BodyLook } from './skinned';
+import { LOOKS } from './looks';
 
 export type RecoveryFamily = 'ground' | 'swing' | 'flight' | 'teleport';
 export type LiftClass = 0 | 1 | 2; // light, medium, heavy
@@ -227,7 +228,7 @@ const basalt: CharacterDef = {
     grapple: 'Lifts every prop class, including the fuel tank. Planted heavy throw.',
     finisher: 'Quarry Drop — lifts and spikes the opponent through the roof deck',
     weakness: 'Ground recovery barely changes his trajectory; off an open edge he falls.',
-    moves: [['A A A', 'Jab, cross, hammer launcher'], ['A (running)', 'Lariat'], ['R+A', 'Thunderclap cone'], ['R+A (running)', 'Avalanche Charge — smashes barriers'], ['Hold R+A', 'Tectonic Slam — huge quake'], ['R+A (air)', 'Ground Pound'], ['L+A', 'Shoulder charge'], ['R+X', 'Piledriver'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A', 'Body punch, hook, hammer launcher'], ['A (running)', 'Lariat'], ['R+A', 'Thunderclap cone'], ['R+A (running)', 'Avalanche Charge — smashes barriers'], ['Hold R+A', 'Tectonic Slam — huge quake'], ['R+A (air)', 'Ground Pound'], ['L+A', 'Shoulder charge'], ['R+X', 'Piledriver'], ['Grab, A', 'Knee pummel']],
   },
   build(rig) {
     const rock = mat(0x5a6a80, 0.9, 0.05, 0x000000, 0, true);
@@ -319,7 +320,7 @@ const tether: CharacterDef = {
     grapple: 'X at range: line-yank opponent or light prop. Lifts light props only.',
     finisher: 'Cocoon Spin — binds, spins and flings',
     weakness: 'Cannot lift medium or heavy props; low weight means long launches.',
-    moves: [['A A A', 'Jab, cross, flip kick'], ['A (running)', 'Slide Trip'], ['R+A', 'Snare bolt'], ['R+A (running)', 'Line Slingshot — pulls in with a kick'], ['Hold R+A', 'Snare Spread — three bolts'], ['L+A', 'Swing kick'], ['X (range)', 'Line yank'], ['R+X', 'Line Spin — fling for a ring-out'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A', 'Jab, roundhouse, spinning kick'], ['A (running)', 'Slide Trip'], ['R+A', 'Snare bolt'], ['R+A (running)', 'Line Slingshot — pulls in with a kick'], ['Hold R+A', 'Snare Spread — three bolts'], ['L+A', 'Swing kick'], ['X (range)', 'Line yank'], ['R+X', 'Line Spin — fling for a ring-out'], ['Grab, A', 'Knee pummel']],
   },
   build(rig) {
     const suit = mat(0x109c8e, 0.45, 0.15);
@@ -406,7 +407,7 @@ const aerin: CharacterDef = {
     grapple: 'Lifts light props only.',
     finisher: 'Skyfall — carries the opponent up and drives them down in a lightning strike',
     weakness: 'Flight burns energy; caught charging on the ground she is exposed.',
-    moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Gale Kick'], ['R+A', 'Volt bolt'], ['R+A (running)', 'Storm Dash'], ['Hold R+A', 'Chain Lightning — heavy bolt'], ['L', 'Flight (B up, Y down)'], ['L+A', 'Flight dash'], ['R+X', 'Skyfall Drop'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A', 'Spark palm, push kick, high kick'], ['A (running)', 'Gale Kick'], ['R+A', 'Volt bolt'], ['R+A (running)', 'Storm Dash'], ['Hold R+A', 'Chain Lightning — heavy bolt'], ['L', 'Flight (B up, Y down)'], ['L+A', 'Flight dash'], ['R+X', 'Skyfall Drop'], ['Grab, A', 'Knee pummel']],
   },
   build(rig) {
     const white = mat(0xe8e6f4, 0.4, 0.15);
@@ -519,7 +520,7 @@ const shunt: CharacterDef = {
     grapple: 'Lifts light props only.',
     finisher: 'Scatter — a chain of teleport strikes from every side',
     weakness: 'Teleports cost energy; with an empty meter he has no way back from a launch.',
-    moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Phase Elbow'], ['R+A', 'Displacement pulse'], ['R+A (running)', 'Phase Lunge — blink behind and strike'], ['Hold R+A', 'Pulse Mines — three proximity charges'], ['L + dir / L', 'Hop / flank teleport'], ['L+A', 'Blink strike'], ['R+X', 'Displace — teleports the victim away (off an edge!)'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A', 'Blade cut, diagonal slash, sweeping slash'], ['A (running)', 'Phase Elbow'], ['R+A', 'Displacement pulse'], ['R+A (running)', 'Phase Lunge — blink behind and strike'], ['Hold R+A', 'Pulse Mines — three proximity charges'], ['L + dir / L', 'Hop / flank teleport'], ['L+A', 'Blink strike'], ['R+X', 'Displace — teleports the victim away (off an edge!)'], ['Grab, A', 'Knee pummel']],
   },
   build(rig) {
     const coat = mat(0x2b303c, 0.7, 0.2);
@@ -565,111 +566,6 @@ const shunt: CharacterDef = {
     return { accents: [cyan] };
   },
 };
-
-// ------------------------------------------------------------------ rigged-body looks
-const deco = (obj: THREE.Mesh, outline = true) => { obj.castShadow = true; if (outline) addOutline(obj, 1.06); return obj; };
-const g = (geo: THREE.BufferGeometry, m: THREE.Material, pos: [number, number, number], rot?: [number, number, number], scl?: [number, number, number], outline = true) => {
-  const o = new THREE.Mesh(geo, m);
-  o.position.set(...pos);
-  if (rot) o.rotation.set(...rot);
-  if (scl) o.scale.set(...scl);
-  return deco(o, outline);
-};
-
-basalt.look = { height: 2.5, bulk: 1.22, body: 0x4e5c70, joints: 0x8a3a1a, jointGlow: 0.6, bodyRough: 0.95, bodyMetal: 0.05 };
-basalt.adorn = (b) => {
-  const rock = mat(0x4a586a, 0.95, 0.05, 0, 0, true);
-  const rock2 = mat(0x343e4c, 0.95, 0.05, 0, 0, true);
-  const magma = mat(0xff5a1a, 0.4, 0, 0xff4a10, 1.8);
-  const D = (r: number) => new THREE.DodecahedronGeometry(r, 0);
-  // Shoulder boulders, chest plate, back ridge, forearm and shin slabs, heavy fists.
-  for (const [j, sx] of [['lArm', 1], ['rArm', -1]] as const) {
-    b.attach(j, g(D(0.3), rock2, [sx * 0.02, 0.02, 0], [0.4, 0.3, 0.2], [1.3, 0.9, 1.1]));
-    b.attach(j, g(D(0.16), rock, [0, -0.3, 0.1], [1, 0.4, 0]));
-  }
-  for (const j of ['lFore', 'rFore'] as const) {
-    b.attach(j, g(new THREE.BoxGeometry(0.3, 0.42, 0.3), rock2, [0, -0.25, 0.02], [0.1, 0.3, 0.05]));
-    b.attach(j, g(D(0.2), rock, [0, -0.62, 0.04], [0.5, 0.2, 0.3], [1.1, 0.9, 1.1]));
-    b.attach(j, g(new THREE.BoxGeometry(0.04, 0.3, 0.04), magma, [0.1, -0.25, 0.17], undefined, undefined, false));
-  }
-  b.attach('spine', g(new THREE.BoxGeometry(0.75, 0.5, 0.2), rock2, [0, 0.05, 0.2], [0.1, 0, 0]));
-  b.attach('spine', g(new THREE.BoxGeometry(0.5, 0.05, 0.03), magma, [0, 0.0, 0.31], undefined, undefined, false));
-  for (const [x, y] of [[0.2, 0.1], [-0.22, 0.0], [0, -0.2]]) b.attach('spine', g(D(0.2), rock, [x, y, -0.22], [x, y, 0.4], [1.2, 0.9, 0.8]));
-  for (const j of ['lShin', 'rShin'] as const) b.attach(j, g(new THREE.BoxGeometry(0.28, 0.4, 0.22), rock2, [0, -0.2, 0.08], [0.1, 0, 0]));
-  // Boulders over the thighs, upper arms and hips so the whole body reads as stone.
-  for (const j of ['lThigh', 'rThigh'] as const) { b.attach(j, g(D(0.2), rock, [0, -0.15, 0.06], [0.3, 0.5, 0.1], [1.1, 1.3, 1])); b.attach(j, g(D(0.16), rock2, [0, -0.38, 0.05], [1.2, 0.2, 0.4])); }
-  for (const j of ['lArm', 'rArm'] as const) b.attach(j, g(D(0.15), rock2, [0, -0.18, -0.06], [0.7, 0.2, 1]));
-  b.attach('hips', g(new THREE.BoxGeometry(0.62, 0.22, 0.4), rock2, [0, 0.02, 0], [0, 0.1, 0]));
-  b.attach('spine', g(D(0.22), rock, [0, 0.3, 0.12], [0.2, 0.6, 0], [1.4, 0.8, 1]));
-  b.attach('head', g(new THREE.BoxGeometry(0.4, 0.12, 0.25), rock2, [0, 0.2, 0.1], [-0.2, 0, 0]));
-  b.attach('head', g(new THREE.BoxGeometry(0.22, 0.03, 0.02), magma, [0, 0.12, 0.18], undefined, undefined, false));
-  return [magma, b.jointMat];
-};
-
-tether.look = { height: 1.95, bulk: 0.98, body: 0x109c8e, joints: 0x14161c, jointGlow: 0, bodyRough: 0.45, bodyMetal: 0.15 };
-tether.adorn = (b) => {
-  const gold = mat(0xe8b520, 0.3, 0.8, 0x6a4800, 0.4);
-  const lens = mat(0xe8fbff, 0.2, 0, 0x9ff7ff, 1.6);
-  const dark = mat(0x12151c, 0.5, 0.2);
-  for (const j of ['lFore', 'rFore'] as const) {
-    b.attach(j, g(new THREE.BoxGeometry(0.1, 0.13, 0.12), gold, [0, -0.2, 0.05]));
-    b.attach(j, g(new THREE.CylinderGeometry(0.025, 0.025, 0.1, 8), dark, [0, -0.25, 0.12], [Math.PI / 2, 0, 0], undefined, false));
-  }
-  b.attach('head', g(new THREE.SphereGeometry(0.06, 12, 8), lens, [0.06, 0.1, 0.1], undefined, [1.2, 0.75, 0.5], false));
-  b.attach('head', g(new THREE.SphereGeometry(0.06, 12, 8), lens, [-0.06, 0.1, 0.1], undefined, [1.2, 0.75, 0.5], false));
-  const em = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.016, 6, 16, Math.PI * 1.4), gold);
-  em.position.set(0, 0.02, 0.15);
-  em.rotation.z = -0.6;
-  b.attach('spine', em);
-  b.attach('hips', g(new THREE.BoxGeometry(0.34, 0.06, 0.24), dark, [0, 0.02, 0]));
-  for (const x of [-0.12, -0.04, 0.04, 0.12]) b.attach('hips', g(new THREE.BoxGeometry(0.05, 0.07, 0.04), gold, [x, 0.02, 0.13], undefined, undefined, false));
-  return [lens, gold];
-};
-
-aerin.look = { female: true, height: 1.95, bulk: 0.96, body: 0xe6e4f2, joints: 0x8a4cff, jointGlow: 1.4, bodyRough: 0.38, bodyMetal: 0.2 };
-aerin.adorn = (b, rig) => {
-  const hair = mat(0xf1f1ff, 0.6, 0.1);
-  const glow = mat(0xc9a8ff, 0.2, 0, 0xa070ff, 1.8);
-  const tail = g(new THREE.ConeGeometry(0.07, 0.5, 8), hair, [0, 0.08, -0.16], [-2.5, 0, 0]);
-  b.attach('head', tail);
-  b.attach('head', g(new THREE.SphereGeometry(0.135, 14, 10), hair, [0, 0.13, -0.03], undefined, [1.02, 0.95, 1.05]));
-  b.attach('head', g(new THREE.BoxGeometry(0.18, 0.03, 0.03), glow, [0, 0.1, 0.12], undefined, undefined, false));
-  b.attach('hips', g(new THREE.BoxGeometry(0.33, 0.05, 0.23), glow, [0, 0.03, 0], undefined, undefined, false));
-  const wingShape = new THREE.Shape();
-  wingShape.moveTo(0, 0); wingShape.lineTo(1.15, 0.55); wingShape.lineTo(0.95, -0.15); wingShape.lineTo(1.25, -0.65); wingShape.lineTo(0.15, -0.35); wingShape.lineTo(0, 0);
-  const wingGeo = new THREE.ShapeGeometry(wingShape);
-  const wingMat = new THREE.MeshBasicMaterial({ color: 0xb48cff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false });
-  const lw = new THREE.Mesh(wingGeo, wingMat);
-  lw.position.set(0.08, 0.1, -0.14);
-  lw.scale.setScalar(0.72);
-  const rw = new THREE.Mesh(wingGeo, wingMat);
-  rw.scale.set(-0.72, 0.72, 0.72);
-  rw.position.set(-0.08, 0.1, -0.14);
-  b.attach('spine', lw);
-  b.attach('spine', rw);
-  (rig as any).wings = [lw, rw];
-  return [glow, b.jointMat];
-};
-
-shunt.look = { height: 2.0, bulk: 1.02, body: 0x2b303c, joints: 0x37f2ff, jointGlow: 1.5, bodyRough: 0.7, bodyMetal: 0.2 };
-shunt.adorn = (b) => {
-  const coat = mat(0x2b303c, 0.7, 0.2);
-  coat.side = THREE.DoubleSide;
-  const cyan = mat(0x37f2ff, 0.2, 0, 0x20e0ff, 1.6);
-  const plate = mat(0xb9c3cf, 0.35, 0.6);
-  const skirt = g(new THREE.CylinderGeometry(0.22, 0.42, 0.8, 12, 1, true), coat, [0, -0.32, 0], undefined, undefined, false);
-  b.attach('hips', skirt);
-  b.attach('head', g(new THREE.SphereGeometry(0.16, 14, 10), coat, [0, 0.12, -0.04], undefined, [1.05, 1.12, 1.08]));
-  b.attach('head', g(new THREE.BoxGeometry(0.2, 0.04, 0.05), cyan, [0, 0.1, 0.11], undefined, undefined, false));
-  for (const [j, sx] of [['lArm', 1], ['rArm', -1]] as const) {
-    b.attach(j, g(new THREE.BoxGeometry(0.2, 0.07, 0.22), plate, [sx * 0.03, 0.03, 0], [0, 0, sx * 0.35]));
-    b.attach(j, g(new THREE.BoxGeometry(0.12, 0.02, 0.18), cyan, [sx * 0.07, 0.075, 0], [0, 0, sx * 0.35], undefined, false));
-  }
-  b.attach('spine', g(new THREE.BoxGeometry(0.3, 0.38, 0.14), coat, [0, 0, -0.2]));
-  b.attach('spine', g(new THREE.SphereGeometry(0.07, 10, 8), cyan, [0, 0, -0.28], undefined, undefined, false));
-  return [cyan, b.jointMat];
-};
-
 
 // ------------------------------------------------------------------ generic procedural fallback body
 function genericBuild(mainC: number, trimC: number, glowC: number, bulky = false) {
@@ -737,7 +633,7 @@ const vanta: CharacterDef = {
     grapple: 'Lifts light and medium props. R+X: Shadow Shred.',
     finisher: 'Thousand Cuts — darts through the opponent from every angle in golden streaks',
     weakness: 'Light and fragile: big hits send her flying, and ground recovery is short.',
-    moves: [['A A A A', 'Four-hit claw combo'], ['A (running)', 'Running Slash'], ['R+A', 'Claw Frenzy'], ['R+A (running)', 'Shadow Rush'], ['Hold R+A', 'Shade Rend — phases through the opponent three times'], ['L+A', 'Pounce'], ['R+X', 'Shadow Shred — pins them and rakes, then kicks them away'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A A', 'Elbow cut, claw rake, knee, heel kick'], ['A (running)', 'Running Slash'], ['R+A', 'Claw Frenzy'], ['R+A (running)', 'Shadow Rush'], ['Hold R+A', 'Shade Rend — phases through the opponent three times'], ['L+A', 'Pounce'], ['R+X', 'Shadow Shred — pins them and rakes, then kicks them away'], ['Grab, A', 'Knee pummel']],
   },
   build: genericBuild(0x15151a, 0xc8a030, 0xffd050),
 };
@@ -792,7 +688,7 @@ const magna: CharacterDef = {
     grapple: 'X at range pulls opponents and ANY object to his hands — cars included.',
     finisher: 'Crush Field — floats the opponent in a shell of spinning shards, compresses it and drops them',
     weakness: 'Slow on foot; flight burns energy.',
-    moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Iron Elbow'], ['R+A', 'Shard Volley'], ['R+A (running)', 'Polar Charge'], ['Hold R+A', 'Implosion — drags the opponent in, then blasts'], ['X (range)', 'Magnetic pull: fighters and objects'], ['L', 'Flight'], ['R+X', 'Iron Maiden — crushes them in a magnetic field and hurls them'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A', 'Magnetic palm, cross, uppercut'], ['A (running)', 'Iron Elbow'], ['R+A', 'Shard Volley'], ['R+A (running)', 'Polar Charge'], ['Hold R+A', 'Implosion — drags the opponent in, then blasts'], ['X (range)', 'Magnetic pull: fighters and objects'], ['L', 'Flight'], ['R+X', 'Iron Maiden — crushes them in a magnetic field and hurls them'], ['Grab, A', 'Knee pummel']],
   },
   build: genericBuild(0x8a9098, 0x8a1a28, 0xff4a6a),
 };
@@ -852,63 +748,12 @@ const ember: CharacterDef = {
     grapple: 'Lifts light and medium props. R+X: Furnace Slam.',
     finisher: 'Inferno — lifts and spikes the opponent in a pillar of fire',
     weakness: 'Big and readable; no way back from a long launch.',
-    moves: [['A A A', 'Jab, cross, rising hook'], ['A (running)', 'Searing Hook'], ['R+A', 'Fireball — explodes and burns'], ['R+A (running)', 'Flame Rush'], ['Hold R+A', 'Eruption — burns'], ['R+A (air)', 'Meteor Drop'], ['L+A', 'Blaze Shoulder'], ['R+X', 'Furnace Slam — suplex into a pillar of fire'], ['Passive', 'Heavy hits set the target burning']],
+    moves: [['A A A', 'Jab-cross, hook, uppercut'], ['A (running)', 'Searing Hook'], ['R+A', 'Fireball — explodes and burns'], ['R+A (running)', 'Flame Rush'], ['Hold R+A', 'Eruption — burns'], ['R+A (air)', 'Meteor Drop'], ['L+A', 'Blaze Shoulder'], ['R+X', 'Furnace Slam — suplex into a pillar of fire'], ['Passive', 'Heavy hits set the target burning']],
   },
   build: genericBuild(0x2a2420, 0x6a2a10, 0xff6a1a, true),
 };
 
-// ------------------------------------------------------------------ rigged looks for the new fighters
 vanta.fxColor = 0xe8c040;
-vanta.look = { female: true, height: 1.85, bulk: 0.95, body: 0x17171c, joints: 0xe8c040, jointGlow: 0.9, bodyRough: 0.35, bodyMetal: 0.35 };
-vanta.adorn = (b) => {
-  const gold = mat(0xe8c040, 0.25, 0.8, 0x6a4800, 0.5);
-  const blade = mat(0xdfe4ea, 0.15, 1.0);
-  const visor = mat(0xffe08a, 0.2, 0, 0xffc040, 1.8);
-  for (const j of ['lFore', 'rFore'] as const) {
-    b.attach(j, g(new THREE.BoxGeometry(0.1, 0.16, 0.12), gold, [0, -0.18, 0.04]));
-    for (const dx of [-0.04, 0, 0.04]) b.attach(j, g(new THREE.ConeGeometry(0.018, 0.34, 6), blade, [dx, -0.42, 0.1], [Math.PI, 0, 0], undefined, false));
-  }
-  b.attach('head', g(new THREE.BoxGeometry(0.2, 0.04, 0.05), visor, [0, 0.1, 0.12], undefined, undefined, false));
-  for (const sx of [-1, 1]) b.attach('head', g(new THREE.ConeGeometry(0.04, 0.16, 6), gold, [sx * 0.08, 0.26, -0.02], [0, 0, -sx * 0.4]));
-  b.attach('hips', g(new THREE.BoxGeometry(0.32, 0.05, 0.22), gold, [0, 0.03, 0], undefined, undefined, false));
-  return [visor, gold, b.jointMat];
-};
-
-magna.look = { height: 2.0, bulk: 1.05, body: 0x9aa2ac, joints: 0xd02040, jointGlow: 0.8, bodyRough: 0.25, bodyMetal: 0.85 };
-magna.adorn = (b, rig) => {
-  const red = mat(0xb01a30, 0.35, 0.5);
-  const steel = mat(0xc8ced6, 0.2, 0.95);
-  const glow = mat(0xff5a7a, 0.2, 0, 0xff3a5a, 1.8);
-  b.attach('head', g(new THREE.SphereGeometry(0.15, 14, 10), red, [0, 0.12, 0.01], undefined, [1.05, 1.08, 1.1]));
-  b.attach('head', g(new THREE.BoxGeometry(0.04, 0.16, 0.3), red, [0, 0.27, -0.02]));
-  b.attach('head', g(new THREE.BoxGeometry(0.2, 0.035, 0.04), glow, [0, 0.1, 0.14], undefined, undefined, false));
-  for (const [j, sx] of [['lArm', 1], ['rArm', -1]] as const) b.attach(j, g(new THREE.SphereGeometry(0.13, 12, 8), red, [sx * 0.03, 0.02, 0], undefined, [1.2, 0.7, 1.2]));
-  // Orbiting shards around the waist (spun in Fighter.animate via rig.orbit).
-  const orbit = new THREE.Group();
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * Math.PI * 2;
-    const shard = g(new THREE.OctahedronGeometry(0.06, 0), steel, [Math.cos(a) * 0.55, Math.sin(i * 1.7) * 0.12, Math.sin(a) * 0.55], [a, a * 0.5, 0], [1, 1.8, 1], false);
-    orbit.add(shard);
-  }
-  b.attach('hips', orbit);
-  (rig as any).orbit = orbit;
-  return [glow, b.jointMat];
-};
-
-ember.look = { height: 2.15, bulk: 1.12, body: 0x2c2622, joints: 0xff5a10, jointGlow: 1.4, bodyRough: 0.8, bodyMetal: 0.15 };
-ember.adorn = (b) => {
-  const char = mat(0x1e1a18, 0.9, 0.1, 0, 0, true);
-  const lava = mat(0xff6a1a, 0.4, 0, 0xff4a10, 1.8);
-  for (const [j, sx] of [['lArm', 1], ['rArm', -1]] as const) {
-    b.attach(j, g(new THREE.DodecahedronGeometry(0.17, 0), char, [sx * 0.03, 0.02, 0], [0.3, 0.2, 0], [1.2, 0.8, 1.1]));
-  }
-  for (const j of ['lFore', 'rFore'] as const) b.attach(j, g(new THREE.BoxGeometry(0.16, 0.3, 0.16), char, [0, -0.2, 0.02], [0.1, 0.2, 0]));
-  b.attach('spine', g(new THREE.BoxGeometry(0.42, 0.06, 0.04), lava, [0, 0.05, 0.2], undefined, undefined, false));
-  b.attach('spine', g(new THREE.BoxGeometry(0.05, 0.3, 0.04), lava, [0.08, -0.05, 0.2], [0, 0, 0.3], undefined, false));
-  b.attach('head', g(new THREE.BoxGeometry(0.22, 0.04, 0.04), lava, [0, 0.1, 0.13], undefined, undefined, false));
-  b.attach('head', g(new THREE.ConeGeometry(0.12, 0.22, 7), char, [0, 0.3, -0.02]));
-  return [lava, b.jointMat];
-};
 
 // ------------------------------------------------------------------ RIFT — portal teleporter
 const rift: CharacterDef = {
@@ -956,30 +801,14 @@ const rift: CharacterDef = {
     grapple: 'Lifts light and medium props. R+X: Portal Drop.',
     finisher: 'Gate Barrage — drops the opponent through a chain of portals, faster each time, then slams them',
     weakness: 'Every portal costs energy; with an empty meter she has no way back from a launch.',
-    moves: [['A A A', 'Jab, cross, gate kick'], ['A (running)', 'Gate Elbow'], ['R+A', 'Swap Gate — swap places (use it near an edge!)'], ['R+A (running)', 'Portal Punch — hits from behind at range, pulls them in'], ['Hold R+A', 'Rift Storm — three gates fire on the opponent'], ['L + dir / L', 'Portal hop / step behind'], ['L+A', 'Rift Step kick'], ['R+X', 'Portal Drop — drops them from the sky'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A', 'Cross, push kick, axe kick'], ['A (running)', 'Gate Elbow'], ['R+A', 'Swap Gate — swap places (use it near an edge!)'], ['R+A (running)', 'Portal Punch — hits from behind at range, pulls them in'], ['Hold R+A', 'Rift Storm — three gates fire on the opponent'], ['L + dir / L', 'Portal hop / step behind'], ['L+A', 'Rift Step kick'], ['R+X', 'Portal Drop — drops them from the sky'], ['Grab, A', 'Knee pummel']],
   },
   build: genericBuild(0x1c2a24, 0x2e3a44, 0x7dff6a),
 };
-rift.look = { female: true, height: 1.95, bulk: 0.96, body: 0x22302c, joints: 0x7dff6a, jointGlow: 1.4, bodyRough: 0.4, bodyMetal: 0.4 };
-rift.adorn = (b) => {
-  const dark = mat(0x18201c, 0.5, 0.4);
-  const glow = mat(0x9dff8a, 0.2, 0, 0x5aff4a, 1.8);
-  const silver = mat(0xc8d2cc, 0.25, 0.9);
-  // Hood, visor, portal rings on the wrists and a halo ring on the back.
-  b.attach('head', g(new THREE.SphereGeometry(0.15, 14, 10), dark, [0, 0.13, -0.03], undefined, [1.05, 1.1, 1.1]));
-  b.attach('head', g(new THREE.BoxGeometry(0.19, 0.035, 0.04), glow, [0, 0.1, 0.12], undefined, undefined, false));
-  for (const j of ['lFore', 'rFore'] as const) {
-    b.attach(j, g(new THREE.TorusGeometry(0.09, 0.018, 8, 20), glow, [0, -0.2, 0], [Math.PI / 2, 0, 0], undefined, false));
-    b.attach(j, g(new THREE.CylinderGeometry(0.075, 0.07, 0.16, 10), silver, [0, -0.12, 0]));
-  }
-  b.attach('spine', g(new THREE.TorusGeometry(0.3, 0.025, 8, 32), glow, [0, 0.1, -0.24], undefined, undefined, false));
-  b.attach('spine', g(new THREE.TorusGeometry(0.22, 0.012, 6, 28), silver, [0, 0.1, -0.24], undefined, undefined, false));
-  for (const [j, sx] of [['lArm', 1], ['rArm', -1]] as const) b.attach(j, g(new THREE.BoxGeometry(0.18, 0.06, 0.2), silver, [sx * 0.03, 0.03, 0], [0, 0, sx * 0.35]));
-  b.attach('hips', g(new THREE.BoxGeometry(0.33, 0.05, 0.23), glow, [0, 0.03, 0], undefined, undefined, false));
-  return [glow, b.jointMat];
-};
 
 export const ROSTER: CharacterDef[] = [basalt, tether, aerin, shunt, vanta, magna, ember, rift];
+// Character designs (painted bodies, clothes, hair, creatures) live in looks.ts.
+for (const c of ROSTER) { const l = LOOKS[c.id]; if (l) { c.look = l.look; c.adorn = l.adorn; } }
 export function charById(id: string) {
   return ROSTER.find((c) => c.id === id) ?? ROSTER[0];
 }
