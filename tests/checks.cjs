@@ -402,7 +402,7 @@ const URL = process.argv[2] || 'http://localhost:5173/';
 
   await check('Power grapples: each fighter has its own R+X throw', () => {
     const out = [];
-    for (const id of ['basalt', 'tether', 'aerin', 'shunt']) {
+    for (const id of ['basalt', 'tether', 'aerin', 'shunt', 'vanta', 'magna', 'ember']) {
       const m = T.setup(id, 'basalt');
       const [a, b] = m.fighters;
       T.faceEachOther(m, a.def.radius + b.def.radius + 0.6);
@@ -438,6 +438,44 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     const held = a.heldProp === crate;
     for (let i = 0; i < 3; i++) { T.hold(0, ['attack'], 1); T.idle(30); }
     return { pass: held && crate.state === 'gone' && !a.heldProp, info: `held=${held} crate=${crate.state} uses=${crate.uses}` };
+  });
+
+  await check('MAGNA pulls a car to his hands from range', () => {
+    const m = T.setup('magna', 'tether', 'overpass');
+    const [a, b] = m.fighters;
+    const car = m.arena.props.find((p) => p.kind === 'car');
+    T.place(a, car.pos.x + 8, car.pos.z, -Math.PI / 2);
+    T.place(b, 15, 4, 0);
+    const tgt = a.grabTarget();
+    T.hold(0, ['grab'], 1);
+    T.idle(40);
+    return { pass: tgt?.kind === 'line-prop' && a.heldProp === car, info: `target=${tgt?.kind} held=${a.heldProp?.kind}` };
+  });
+
+  await check('EMBER heavy hits set the target burning (damage over time)', () => {
+    const m = T.setup('ember', 'tether');
+    const [a, b] = m.fighters;
+    T.faceEachOther(m, 2.6);
+    a.energy = 100;
+    T.hold(0, ['power', 'attack'], 1);
+    T.idle(30);
+    const burning = b.burnT > 0, st0 = b.stamina;
+    T.idle(60);
+    return { pass: burning && b.stamina < st0, info: `burning=${burning} stamina ${st0.toFixed(1)} -> ${b.stamina.toFixed(1)}` };
+  });
+
+  await check('New fighters: CPU bouts resolve (VANTA, MAGNA, EMBER)', () => {
+    const outcomes = [];
+    for (const [p, q, ar] of [['vanta', 'basalt', 'rooftop'], ['magna', 'ember', 'overpass'], ['ember', 'vanta', 'rooftop']]) {
+      const m = T.setup(p, q, ar);
+      T.G.forced[0] = null; T.G.forced[1] = null;
+      T.G.enableCPUs('hard');
+      let n = 0;
+      while (!m.ended && n < 60 * 150) { T.G.step(30); n += 30; }
+      outcomes.push(m.ended ? `${p}v${q}:${m.ended.how}:${m.ended.winner.def.id}@${(n / 60).toFixed(0)}s` : `${p}v${q}:timeout`);
+      T.G.disableCPU();
+    }
+    return { pass: outcomes.every((o) => !o.includes('timeout')), info: outcomes.join(' ; ') };
   });
 
   await check('CPU vs CPU: 4 full bouts run to a single resolved winner without errors', () => {

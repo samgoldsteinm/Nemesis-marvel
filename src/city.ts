@@ -99,7 +99,7 @@ export function facadeMaterial(style: FacadeStyle) {
   if (!m) {
     const t = facadeMaps(style);
     m = new THREE.MeshStandardMaterial({
-      map: t.map, emissive: 0xffffff, emissiveMap: t.emissiveMap, emissiveIntensity: 0.85, bumpMap: t.bumpMap, bumpScale: 2.2,
+      map: t.map, emissive: 0xffffff, emissiveMap: t.emissiveMap, emissiveIntensity: 0.6, bumpMap: t.bumpMap, bumpScale: 2.2,
       roughness: style === 'glass' ? 0.25 : 0.88, metalness: style === 'glass' ? 0.55 : 0.05,
       vertexColors: true,
     });

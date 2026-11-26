@@ -81,7 +81,16 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
   - **Building detail:** belt-course ledges, cornices and parapets, stepped-back upper floors, pilasters, fire escapes on buildings facing the fight, and rooftop clutter (water towers, AC units, antennas, stair huts). Everything is merged per material, so the whole city costs only a few draw calls.
   - **Skyline:** a mid-distance ring of varied towers plus a painted far panorama with lit windows that fades into each venue's haze. Soft light shafts hang between the buildings.
   - **Props:** sculpted car bodies with glass, rims, bumpers and lights; slatted crates; AC units with grilles and fans; ribbed, labelled barrels; a domed fuel tank; and jersey barriers with reflectors. Overpass pile-ups are built from a box truck, burnt cars and barriers.
-  - **Lighting:** an environment map built from each venue's sky gives car paint, glass, metal and puddles real reflections. Contact shading comes from the lighting features described above.
+  - **Fighters (7):**
+  - **Basalt:** heavy, ground recovery.
+  - **Tether:** swing recovery, line yank.
+  - **Aerin Volt:** flight and bolts.
+  - **Shunt:** teleport, displace.
+  - **Vanta:** fast claw striker with a 4-hit combo, ground recovery.
+  - **Magna:** magnetic flier who pulls opponents and *any* object, cars included, to his hands from range.
+  - **Ember:** fire bruiser whose heavy hits set the target burning, a damage-over-time effect that can't K.O. on its own.
+- **Auras:** Rage and charging are shown as flickering flame wisps spawned across the fighter's skeleton, so the aura hugs the body and moves with the animation.
+- **Lighting:** an environment map built from each venue's sky gives car paint, glass, metal and puddles real reflections. Contact shading comes from the lighting features described above.
 - **Lighting:**
   - The sun's shadow map follows the action with a tight, texel-snapped box, so shadows are sharp and soft near the fighters.
   - Each fighter carries a glow light in their own colour that lights the floor and the opponent. It turns red in Rage, pulses blue while charging, and flashes white on hits.
@@ -120,7 +129,7 @@ These come from 40 frames of the gameplay clip you supplied. They're genre conve
 - bloom with a full-screen red wash during Rage
 - an elevated roadway arena full of throwable cars and barrels
 
-## Checks actually run (`tests/checks.cjs`, 27/27 passing)
+## Checks actually run (`tests/checks.cjs`, 30/30 passing)
 
 The CPU detours around objects it gets stuck behind. In a batch of 14 rooftop bouts, none timed out.
 

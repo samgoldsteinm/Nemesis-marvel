@@ -78,6 +78,13 @@ export interface CharacterDef {
   build: (rig: Rig) => { accents: THREE.MeshStandardMaterial[] };
   /** Rigged-body look and bone-attached decorations (used when the skinned model is loaded). */
   look?: BodyLook;
+  /** X at range: pull opponents (if fighters) and props up to maxCls toward you. */
+  rangedGrab?: { fighters: boolean; maxCls: LiftClass; range: number };
+  lineColor?: number;
+  /** Heavy hits set the target burning (damage over time). */
+  burns?: boolean;
+  /** Small constant flame wisps from the hands. */
+  embers?: boolean;
   adorn?: (b: SkinnedBody, rig: Rig) => THREE.MeshStandardMaterial[];
 }
 
@@ -267,6 +274,7 @@ const tether: CharacterDef = {
   blurb: 'Fast, light and slippery. Swings on grapple lines, sticks to walls and yanks targets from range.',
   color: '#27e0c8',
   recovery: 'swing',
+  rangedGrab: { fighters: true, maxCls: 0, range: 11 },
   lift: 0,
   speed: 7.6,
   jumpV: 12.5,
@@ -659,7 +667,247 @@ shunt.adorn = (b) => {
   return [cyan, b.jointMat];
 };
 
-export const ROSTER: CharacterDef[] = [basalt, tether, aerin, shunt];
+
+// ------------------------------------------------------------------ generic procedural fallback body
+function genericBuild(mainC: number, trimC: number, glowC: number, bulky = false) {
+  return (rig: Rig) => {
+    const main = mat(mainC, 0.5, 0.2), trim = mat(trimC, 0.45, 0.4), glow = mat(glowC, 0.2, 0, glowC, 1.6);
+    const j = rig.joints;
+    box(j.hips, bulky ? 0.5 : 0.36, 0.22, 0.26, trim, [0, 0.02, 0]);
+    torso(j.spine, bulky ? 0.2 : 0.15, bulky ? 0.3 : 0.22, 0.66, main, 1.3, 0.8);
+    sphere(j.head, 0.16, main, [0, 0.12, 0], [0.95, 1.12, 1.02]);
+    box(j.head, 0.2, 0.04, 0.04, glow, [0, 0.13, 0.13], undefined, false);
+    for (const [a, f] of [[j.lArm, j.lFore], [j.rArm, j.rFore]] as const) { limb(a, rig.p.upperArm, 0.08, 0.07, main); limb(f, rig.p.foreArm, 0.07, 0.06, trim); }
+    for (const [t, sh] of [[j.lThigh, j.lShin], [j.rThigh, j.rShin]] as const) { limb(t, rig.p.thigh, 0.1, 0.08, main); limb(sh, rig.p.shin, 0.08, 0.065, trim); }
+    return { accents: [glow] };
+  };
+}
+
+// ------------------------------------------------------------------ VANTA — claw striker, ground recovery
+const vanta: CharacterDef = {
+  id: 'vanta',
+  name: 'VANTA',
+  title: 'Night Claw',
+  blurb: 'Blinding speed and a four-hit claw combo. Fragile, but she never stops pressing.',
+  color: '#e8c040',
+  recovery: 'ground',
+  lift: 1,
+  speed: 7.4,
+  jumpV: 12.5,
+  weight: 0.85,
+  heavy: 0,
+  radius: 0.45,
+  height: 1.85,
+  durability: 0.85,
+  proportions: { thigh: 0.5, shin: 0.5, torso: 0.6, shoulderW: 0.5, hipW: 0.27, upperArm: 0.33, foreArm: 0.31, neck: 0.1 },
+  moves: {
+    chain: [jab(4, 0.95), cross(4, 1.0), { ...jab(5, 1.05), id: 'claw3', limb: 'lh' }, launcher(9, 1.1, 9, 9, { id: 'clawUp', startup: 8 })],
+    airRise: airRise(6),
+    airDive: airDive(8),
+    mobilityAtk: {
+      id: 'pounce', name: 'Pounce', limb: 'both', wind: P.evade, strike: P.diveS, startup: 5, active: 10, recovery: 12, lunge: 14,
+      hit: { fwd: 0.9, up: 1.0, radius: 0.9, stamina: 9, health: 3, kbF: 11, kbU: 5, stun: 28, launch: true, heavy: true, breaksWalls: 25 },
+    },
+    power: {
+      id: 'clawFrenzy', name: 'Claw Frenzy', limb: 'both', wind: P.crossW, strike: P.clapS, startup: 6, active: 10, recovery: 16, lunge: 7, energy: 20,
+      hit: { fwd: 1.0, up: 1.2, radius: 1.0, stamina: 12, health: 7, kbF: 10, kbU: 6, stun: 32, launch: true, heavy: true, breaksWalls: 30 },
+    },
+    powerAir: airDive(12),
+    counter: counter(),
+    runAttack: {
+      id: 'slashRun', name: 'Running Slash', limb: 'rh', wind: P.crossW, strike: P.jabS, startup: 4, active: 6, recovery: 10, lunge: 10,
+      hit: { fwd: 1.0, up: 1.3, radius: 0.85, stamina: 7, health: 1, kbF: 7, kbU: 2, stun: 22 },
+    },
+    dashPower: {
+      id: 'shadowRush', name: 'Shadow Rush', limb: 'both', wind: P.evade, strike: P.jabS, startup: 6, active: 14, recovery: 14, lunge: 17, energy: 20,
+      hit: { fwd: 1.0, up: 1.2, radius: 1.0, stamina: 12, health: 8, kbF: 14, kbU: 6, stun: 34, launch: true, heavy: true, breaksWalls: 60 },
+    },
+    chargePower: {
+      id: 'whirlwind', name: 'Whirlwind', limb: 'both', wind: P.charge.bind(null, 0), strike: P.kickS, startup: 4, active: 6, recovery: 18, energy: 15, special: 'pulse',
+      hit: { fwd: 0, up: 1.0, radius: 2.6, stamina: 14, health: 9, kbF: 12, kbU: 8, stun: 34, launch: true, heavy: true, breaksWalls: 40 },
+    },
+  },
+  powerGrapple: 'webSpin',
+  sheet: {
+    mobility: 'L: Sprint · L+A Pounce',
+    power: 'R+A: Claw Frenzy · running R+A: Shadow Rush · hold R+A: Whirlwind',
+    grapple: 'Lifts light and medium props. R+X: Spiral Toss.',
+    finisher: 'Nightfall — a blur of claw strikes from every side',
+    weakness: 'Light and fragile: big hits send her flying, and ground recovery is short.',
+    moves: [['A A A A', 'Four-hit claw combo'], ['A (running)', 'Running Slash'], ['R+A', 'Claw Frenzy'], ['R+A (running)', 'Shadow Rush'], ['Hold R+A', 'Whirlwind — spinning blast'], ['L+A', 'Pounce'], ['R+X', 'Spiral Toss — fling for a ring-out'], ['Grab, A', 'Knee pummel']],
+  },
+  build: genericBuild(0x15151a, 0xc8a030, 0xffd050),
+};
+
+// ------------------------------------------------------------------ MAGNA — magnetic flier, pulls objects from range
+const magna: CharacterDef = {
+  id: 'magna',
+  name: 'MAGNA',
+  title: 'The Lodestone',
+  blurb: 'Levitates on magnetism and yanks anything metal to his hands — even cars, from across the arena.',
+  color: '#ff4a6a',
+  recovery: 'flight',
+  lift: 2,
+  speed: 6.0,
+  jumpV: 11,
+  weight: 1.05,
+  heavy: 0.2,
+  radius: 0.5,
+  height: 2.0,
+  durability: 1.05,
+  proportions: { thigh: 0.53, shin: 0.51, torso: 0.68, shoulderW: 0.62, hipW: 0.3, upperArm: 0.36, foreArm: 0.35, neck: 0.1 },
+  rangedGrab: { fighters: true, maxCls: 2, range: 13 },
+  lineColor: 0xff5a7a,
+  moves: {
+    chain: [jab(5, 0.95), cross(6, 1.0), launcher(9, 1.05, 8, 9)],
+    airRise: airRise(6),
+    airDive: airDive(8),
+    mobilityAtk: {
+      id: 'magRam', name: 'Magnet Ram', limb: 'both', wind: P.fly.bind(null, 12), strike: P.diveS, startup: 5, active: 12, recovery: 12, lunge: 15, airOk: true,
+      hit: { fwd: 0.9, up: 1.0, radius: 0.9, stamina: 9, health: 3, kbF: 12, kbU: 4, stun: 28, launch: true, heavy: true, breaksWalls: 30 },
+    },
+    power: { id: 'shards', name: 'Shard Volley', limb: 'rh', wind: P.shoot, strike: P.shoot, startup: 7, active: 2, recovery: 12, energy: 12, special: 'bolt', airOk: true },
+    powerAir: { id: 'shardsAir', name: 'Shard Volley', limb: 'rh', wind: P.shoot, strike: P.shoot, startup: 6, active: 2, recovery: 10, energy: 12, special: 'bolt', airOk: true },
+    counter: counter(),
+    runAttack: {
+      id: 'ironElbow', name: 'Iron Elbow', limb: 'rh', wind: P.crossW, strike: P.crossS, startup: 6, active: 6, recovery: 12, lunge: 8,
+      hit: { fwd: 1.0, up: 1.3, radius: 0.85, stamina: 8, health: 2, kbF: 9, kbU: 2, stun: 24 },
+    },
+    dashPower: {
+      id: 'polarCharge', name: 'Polar Charge', limb: 'both', wind: P.fly.bind(null, 12), strike: P.diveS, startup: 5, active: 14, recovery: 14, lunge: 17, energy: 20, airOk: true,
+      hit: { fwd: 0.9, up: 1.0, radius: 1.0, stamina: 10, health: 8, kbF: 13, kbU: 6, stun: 30, launch: true, heavy: true, breaksWalls: 50 },
+    },
+    chargePower: {
+      id: 'implosion', name: 'Implosion', limb: 'both', wind: P.charge.bind(null, 0), strike: P.clapW, startup: 4, active: 4, recovery: 20, energy: 18, special: 'pulse', airOk: true,
+      hit: { fwd: 0, up: 1.0, radius: 3.4, stamina: 12, health: 9, kbF: 13, kbU: 9, stun: 34, launch: true, heavy: true, breaksWalls: 50 },
+    },
+  },
+  powerGrapple: 'skyDrop',
+  sheet: {
+    mobility: 'L: Magnetic flight (B up, Y down) · L+A Magnet Ram',
+    power: 'R+A: Shard Volley · running R+A: Polar Charge · hold R+A: Implosion',
+    grapple: 'X at range pulls opponents and ANY object to his hands — cars included.',
+    finisher: 'Crush Field — lifts the opponent and slams them down',
+    weakness: 'Slow on foot; flight burns energy.',
+    moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Iron Elbow'], ['R+A', 'Shard Volley'], ['R+A (running)', 'Polar Charge'], ['Hold R+A', 'Implosion — big magnetic blast'], ['X (range)', 'Magnetic pull: fighters and objects'], ['L', 'Flight'], ['R+X', 'Skyfall Drop'], ['Grab, A', 'Knee pummel']],
+  },
+  build: genericBuild(0x8a9098, 0x8a1a28, 0xff4a6a),
+};
+
+// ------------------------------------------------------------------ EMBER — fire bruiser, burns
+const ember: CharacterDef = {
+  id: 'ember',
+  name: 'EMBER',
+  title: 'The Furnace',
+  blurb: 'A walking furnace. His power hits set you burning, so every exchange keeps costing you.',
+  color: '#ff6a1a',
+  recovery: 'ground',
+  lift: 1,
+  speed: 6.4,
+  jumpV: 11,
+  weight: 1.2,
+  heavy: 0.6,
+  radius: 0.6,
+  height: 2.15,
+  durability: 1.15,
+  proportions: { thigh: 0.53, shin: 0.51, torso: 0.72, shoulderW: 0.74, hipW: 0.34, upperArm: 0.38, foreArm: 0.37, neck: 0.1 },
+  burns: true,
+  embers: true,
+  moves: {
+    chain: [jab(6, 1.0), cross(7, 1.05), launcher(11, 1.1, 9, 8)],
+    airRise: airRise(7),
+    airDive: airDive(10),
+    mobilityAtk: {
+      id: 'blazeShoulder', name: 'Blaze Shoulder', limb: 'both', wind: P.evade, strike: P.jabS, startup: 7, active: 12, recovery: 15, lunge: 12,
+      hit: { fwd: 1.0, up: 1.2, radius: 0.95, stamina: 10, health: 4, kbF: 12, kbU: 5, stun: 30, launch: true, heavy: true, breaksWalls: 50 },
+    },
+    power: {
+      id: 'flameWave', name: 'Flame Wave', limb: 'both', wind: P.clapW, strike: P.clapS, startup: 13, active: 4, recovery: 20, energy: 22, special: 'thunderclap',
+      hit: { fwd: 3.0, up: 1.2, radius: 2.4, stamina: 10, health: 7, kbF: 12, kbU: 5, stun: 32, launch: true, heavy: true, breaksWalls: 35 },
+    },
+    powerAir: {
+      id: 'meteorDrop', name: 'Meteor Drop', limb: 'both', wind: P.overheadW, strike: P.slamS, startup: 8, active: 40, recovery: 20, energy: 22, special: 'groundPound', airOk: true, riseV: -26,
+      hit: { fwd: 0, up: 0.4, radius: 3.0, stamina: 11, health: 8, kbF: 10, kbU: 9, stun: 34, launch: true, heavy: true, breaksWalls: 30 },
+    },
+    counter: counter(),
+    runAttack: {
+      id: 'searingHook', name: 'Searing Hook', limb: 'rh', wind: P.crossW, strike: P.upperS, startup: 7, active: 6, recovery: 14, lunge: 9,
+      hit: { fwd: 1.0, up: 1.4, radius: 0.9, stamina: 9, health: 3, kbF: 8, kbU: 5, stun: 26, heavy: true },
+    },
+    dashPower: {
+      id: 'flameRush', name: 'Flame Rush', limb: 'both', wind: P.evade, strike: P.jabS, startup: 8, active: 14, recovery: 18, lunge: 14, energy: 22,
+      hit: { fwd: 1.1, up: 1.2, radius: 1.05, stamina: 12, health: 9, kbF: 14, kbU: 6, stun: 34, launch: true, heavy: true, breaksWalls: 80 },
+    },
+    chargePower: {
+      id: 'eruption', name: 'Eruption', limb: 'both', wind: P.overheadW, strike: P.slamS, startup: 6, active: 4, recovery: 28, energy: 18, special: 'quake',
+      hit: { fwd: 0, up: 0.5, radius: 4.2, stamina: 14, health: 12, kbF: 11, kbU: 11, stun: 38, launch: true, heavy: true, breaksWalls: 60 },
+    },
+  },
+  powerGrapple: 'piledriver',
+  sheet: {
+    mobility: 'L: Sprint · L+A Blaze Shoulder',
+    power: 'R+A: Flame Wave · running R+A: Flame Rush · hold R+A: Eruption · air: Meteor Drop',
+    grapple: 'Lifts light and medium props. R+X: Furnace Slam.',
+    finisher: 'Inferno — lifts and spikes the opponent in a pillar of fire',
+    weakness: 'Big and readable; no way back from a long launch.',
+    moves: [['A A A', 'Jab, cross, rising hook'], ['A (running)', 'Searing Hook'], ['R+A', 'Flame Wave — burns'], ['R+A (running)', 'Flame Rush'], ['Hold R+A', 'Eruption — burns'], ['R+A (air)', 'Meteor Drop'], ['L+A', 'Blaze Shoulder'], ['R+X', 'Furnace Slam'], ['Passive', 'Heavy hits set the target burning']],
+  },
+  build: genericBuild(0x2a2420, 0x6a2a10, 0xff6a1a, true),
+};
+
+// ------------------------------------------------------------------ rigged looks for the new fighters
+vanta.look = { female: true, height: 1.85, bulk: 0.95, body: 0x17171c, joints: 0xe8c040, jointGlow: 0.9, bodyRough: 0.35, bodyMetal: 0.35 };
+vanta.adorn = (b) => {
+  const gold = mat(0xe8c040, 0.25, 0.8, 0x6a4800, 0.5);
+  const blade = mat(0xdfe4ea, 0.15, 1.0);
+  const visor = mat(0xffe08a, 0.2, 0, 0xffc040, 1.8);
+  for (const j of ['lFore', 'rFore'] as const) {
+    b.attach(j, g(new THREE.BoxGeometry(0.1, 0.16, 0.12), gold, [0, -0.18, 0.04]));
+    for (const dx of [-0.04, 0, 0.04]) b.attach(j, g(new THREE.ConeGeometry(0.018, 0.34, 6), blade, [dx, -0.42, 0.1], [Math.PI, 0, 0], undefined, false));
+  }
+  b.attach('head', g(new THREE.BoxGeometry(0.2, 0.04, 0.05), visor, [0, 0.1, 0.12], undefined, undefined, false));
+  for (const sx of [-1, 1]) b.attach('head', g(new THREE.ConeGeometry(0.04, 0.16, 6), gold, [sx * 0.08, 0.26, -0.02], [0, 0, -sx * 0.4]));
+  b.attach('hips', g(new THREE.BoxGeometry(0.32, 0.05, 0.22), gold, [0, 0.03, 0], undefined, undefined, false));
+  return [visor, gold, b.jointMat];
+};
+
+magna.look = { height: 2.0, bulk: 1.05, body: 0x9aa2ac, joints: 0xd02040, jointGlow: 0.8, bodyRough: 0.25, bodyMetal: 0.85 };
+magna.adorn = (b, rig) => {
+  const red = mat(0xb01a30, 0.35, 0.5);
+  const steel = mat(0xc8ced6, 0.2, 0.95);
+  const glow = mat(0xff5a7a, 0.2, 0, 0xff3a5a, 1.8);
+  b.attach('head', g(new THREE.SphereGeometry(0.15, 14, 10), red, [0, 0.12, 0.01], undefined, [1.05, 1.08, 1.1]));
+  b.attach('head', g(new THREE.BoxGeometry(0.04, 0.16, 0.3), red, [0, 0.27, -0.02]));
+  b.attach('head', g(new THREE.BoxGeometry(0.2, 0.035, 0.04), glow, [0, 0.1, 0.14], undefined, undefined, false));
+  for (const [j, sx] of [['lArm', 1], ['rArm', -1]] as const) b.attach(j, g(new THREE.SphereGeometry(0.13, 12, 8), red, [sx * 0.03, 0.02, 0], undefined, [1.2, 0.7, 1.2]));
+  // Orbiting shards around the waist (spun in Fighter.animate via rig.orbit).
+  const orbit = new THREE.Group();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const shard = g(new THREE.OctahedronGeometry(0.06, 0), steel, [Math.cos(a) * 0.55, Math.sin(i * 1.7) * 0.12, Math.sin(a) * 0.55], [a, a * 0.5, 0], [1, 1.8, 1], false);
+    orbit.add(shard);
+  }
+  b.attach('hips', orbit);
+  (rig as any).orbit = orbit;
+  return [glow, b.jointMat];
+};
+
+ember.look = { height: 2.15, bulk: 1.12, body: 0x2c2622, joints: 0xff5a10, jointGlow: 1.4, bodyRough: 0.8, bodyMetal: 0.15 };
+ember.adorn = (b) => {
+  const char = mat(0x1e1a18, 0.9, 0.1, 0, 0, true);
+  const lava = mat(0xff6a1a, 0.4, 0, 0xff4a10, 1.8);
+  for (const [j, sx] of [['lArm', 1], ['rArm', -1]] as const) {
+    b.attach(j, g(new THREE.DodecahedronGeometry(0.17, 0), char, [sx * 0.03, 0.02, 0], [0.3, 0.2, 0], [1.2, 0.8, 1.1]));
+  }
+  for (const j of ['lFore', 'rFore'] as const) b.attach(j, g(new THREE.BoxGeometry(0.16, 0.3, 0.16), char, [0, -0.2, 0.02], [0.1, 0.2, 0]));
+  b.attach('spine', g(new THREE.BoxGeometry(0.42, 0.06, 0.04), lava, [0, 0.05, 0.2], undefined, undefined, false));
+  b.attach('spine', g(new THREE.BoxGeometry(0.05, 0.3, 0.04), lava, [0.08, -0.05, 0.2], [0, 0, 0.3], undefined, false));
+  b.attach('head', g(new THREE.BoxGeometry(0.22, 0.04, 0.04), lava, [0, 0.1, 0.13], undefined, undefined, false));
+  b.attach('head', g(new THREE.ConeGeometry(0.12, 0.22, 7), char, [0, 0.3, -0.02]));
+  return [lava, b.jointMat];
+};
+
+export const ROSTER: CharacterDef[] = [basalt, tether, aerin, shunt, vanta, magna, ember];
 export function charById(id: string) {
   return ROSTER.find((c) => c.id === id) ?? ROSTER[0];
 }

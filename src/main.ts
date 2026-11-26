@@ -29,7 +29,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+renderer.toneMappingExposure = 0.98;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 container.appendChild(renderer.domElement);
 
@@ -81,7 +81,7 @@ const rim = new THREE.DirectionalLight(0x6c7cff, 0.9);
 rim.position.set(25, 12, -20);
 scene.add(rim);
 // Soft key light that follows the camera so silhouettes stay readable from any framing.
-const keyLight = new THREE.DirectionalLight(0xfff0e0, 0.9);
+const keyLight = new THREE.DirectionalLight(0xfff0e0, 0.6);
 scene.add(keyLight, keyLight.target);
 
 const SHADOW_HALF = 17;
@@ -98,14 +98,14 @@ const PALETTES: Record<LayoutId, Palette> = {
   // Hazy late-day roof: warm key light, lifted lilac shadows.
   rooftop: {
     sky: [[0, '#2a2140'], [0.45, '#6a4a70'], [0.7, '#d07a70'], [0.86, '#ffc890'], [1, '#5a4050']], fog: 0x8a7088, fogNear: 45, fogFar: 200,
-    hemi: [0xb8a8d8, 0x3a3040, 1.0], sun: [0xffd0a0, 3.2], sunPos: [-22, 26, 12], rim: [0x8aa0ff, 1.2], shadow: [26, 22],
-    grade: { sat: 0.72, lift: [0.07, 0.06, 0.09], shadowTint: [0.85, 0.9, 1.15], highTint: [1.0, 0.95, 0.85], gamma: 0.9 }, bloom: [0.75, 0.5, 0.62],
+    hemi: [0xb8a8d8, 0x3a3040, 0.8], sun: [0xffd0a0, 2.6], sunPos: [-22, 26, 12], rim: [0x8aa0ff, 1.2], shadow: [26, 22],
+    grade: { sat: 0.8, lift: [0.035, 0.03, 0.05], shadowTint: [0.85, 0.9, 1.15], highTint: [1.0, 0.95, 0.85], gamma: 0.97 }, bloom: [0.42, 0.45, 0.82],
   },
   // Overcast, washed teal daylight: blown highlights, hard girder shadows across the deck.
   overpass: {
-    sky: [[0, '#8fb4bc'], [0.5, '#b8d4d6'], [0.8, '#d8e8e4'], [1, '#9ab4b4']], fog: 0x9fbcbc, fogNear: 30, fogFar: 150,
-    hemi: [0xcfe8ec, 0x3a4a4c, 1.15], sun: [0xf4fbff, 3.4], sunPos: [10, 34, 14], rim: [0x9fe0ff, 0.9], shadow: [34, 14],
-    grade: { sat: 0.6, lift: [0.06, 0.09, 0.1], shadowTint: [0.82, 1.0, 1.12], highTint: [0.95, 1.0, 1.0], gamma: 0.86 }, bloom: [0.85, 0.55, 0.58],
+    sky: [[0, '#7a9ea8'], [0.5, '#a2c0c4'], [0.8, '#c2d6d4'], [1, '#88a2a4']], fog: 0x8fadb0, fogNear: 30, fogFar: 150,
+    hemi: [0xcfe8ec, 0x3a4a4c, 0.85], sun: [0xf4fbff, 2.6], sunPos: [10, 34, 14], rim: [0x9fe0ff, 0.9], shadow: [34, 14],
+    grade: { sat: 0.7, lift: [0.03, 0.05, 0.06], shadowTint: [0.82, 1.0, 1.12], highTint: [0.95, 1.0, 1.0], gamma: 0.96 }, bloom: [0.45, 0.5, 0.82],
   },
 };
 // Sky reflections: an environment map rendered from the palette's sky and sun, so car paint,
@@ -125,7 +125,7 @@ function buildEnvironment(p: Palette) {
   envRT?.dispose();
   envRT = pmrem.fromScene(envScene, 0.02);
   scene.environment = envRT.texture;
-  (scene as any).environmentIntensity = 0.55;
+  (scene as any).environmentIntensity = 0.42;
 }
 
 function applyPalette(id: LayoutId) {
@@ -309,6 +309,9 @@ const RATINGS: Record<string, { power: number; speed: number; range: number; tou
   tether: { power: 2, speed: 5, range: 4, toughness: 2, difficulty: 'Hard' },
   aerin: { power: 3, speed: 4, range: 5, toughness: 3, difficulty: 'Medium' },
   shunt: { power: 3, speed: 4, range: 3, toughness: 3, difficulty: 'Hard' },
+  vanta: { power: 3, speed: 5, range: 2, toughness: 2, difficulty: 'Medium' },
+  magna: { power: 4, speed: 2, range: 5, toughness: 3, difficulty: 'Medium' },
+  ember: { power: 4, speed: 3, range: 3, toughness: 4, difficulty: 'Easy' },
 };
 const ICON = { ground: '⛰', swing: '🪢', flight: '🪽', teleport: '✦' } as Record<string, string>;
 const LIFT = ['Light objects', 'Medium objects', 'Anything — even cars'];

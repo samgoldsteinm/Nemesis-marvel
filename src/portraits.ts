@@ -11,6 +11,9 @@ const POSE: Record<string, [string, number]> = {
   tether: ['Idle_Shield_Loop', 0.4],
   aerin: ['Spell_Simple_Idle_Loop', 0.5],
   shunt: ['Idle_Loop', 0.8],
+  vanta: ['Idle_Shield_Loop', 0.9],
+  magna: ['Spell_Simple_Shoot', 0.25],
+  ember: ['Idle_FoldArms_Loop', 1.2],
 };
 
 export const portraits = new Map<string, string>();

@@ -59,7 +59,7 @@
   .btn2.primary { background: linear-gradient(135deg, #ff7a3a, #e0402a); border-color: transparent; }
   .btn2.wide { width: 100%; }
   /* fighter select */
-  .select-grid { display: grid; grid-template-columns: 1fr 1.25fr 1fr; gap: 14px; align-items: stretch; }
+  .select-grid { display: grid; grid-template-columns: 1fr 1.7fr 1fr; gap: 14px; align-items: stretch; }
   .side { position: relative; border-radius: 18px; padding: 14px; background: linear-gradient(180deg, color-mix(in srgb, var(--c) 22%, transparent), rgba(255,255,255,0.03)); border: 1px solid rgba(255,255,255,0.1); cursor: pointer; overflow: hidden; }
   .side.active { border-color: var(--c); box-shadow: 0 0 0 2px var(--c), 0 10px 40px color-mix(in srgb, var(--c) 35%, transparent); }
   .side-who { display: flex; justify-content: space-between; align-items: center; }
@@ -77,11 +77,11 @@
   .stat i { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
   .stat b { height: 7px; border-radius: 3px; background: rgba(255,255,255,0.1); }
   .stat b.on { background: var(--c); }
-  .roster { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-content: start; }
-  .rcard { position: relative; border-radius: 14px; border: 1px solid rgba(255,255,255,0.1); background: linear-gradient(180deg, color-mix(in srgb, var(--c) 30%, #111), #0d0b12); padding: 6px 6px 8px; height: clamp(130px, 20vh, 190px); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; overflow: hidden; transition: transform .1s; }
+  .roster { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; align-content: start; }
+  .rcard { position: relative; border-radius: 14px; border: 1px solid rgba(255,255,255,0.1); background: linear-gradient(180deg, color-mix(in srgb, var(--c) 30%, #111), #0d0b12); padding: 6px 4px 8px; height: clamp(120px, 19vh, 170px); display: flex; flex-direction: column; align-items: center; justify-content: flex-end; overflow: hidden; transition: transform .1s; }
   .rcard:hover, .rcard.focus { transform: translateY(-2px); border-color: var(--c); }
   .rimg { position: absolute; inset: 4px 0 26px; width: 100%; height: calc(100% - 30px); object-fit: contain; object-position: center bottom; }
-  .rname { position: relative; font: 900 16px Impact, "Arial Black", sans-serif; letter-spacing: .04em; text-shadow: 0 2px 6px #000; }
+  .rname { position: relative; font: 900 14px Impact, "Arial Black", sans-serif; letter-spacing: .04em; text-shadow: 0 2px 6px #000; }
   .rtags { position: absolute; top: 6px; left: 6px; display: flex; gap: 4px; }
   .rtags i { font: 800 11px system-ui; padding: 2px 6px; border-radius: 5px; color: #000; font-style: normal; }
   .rtags .t1 { background: var(--p1); } .rtags .t2 { background: var(--p2); }

@@ -95,6 +95,17 @@ export class Fighter {
   hitSide = 1;
 
   ribbon: Ribbon;
+  private auraAcc = 0;
+  private emberAcc = 0;
+  /** World points spread over the body, for aura wisps. */
+  private auraPoints(): THREE.Vector3[] {
+    if (this.skinned) {
+      return ['pelvis', 'spine_02', 'spine_03', 'Head', 'upperarm_l', 'upperarm_r', 'lowerarm_l', 'lowerarm_r', 'hand_l', 'hand_r', 'thigh_l', 'thigh_r', 'calf_l', 'calf_r', 'foot_l', 'foot_r']
+        .map((n) => this.skinned!.boneWorld(n));
+    }
+    const r = this.rig, v = (o: THREE.Object3D) => o.getWorldPosition(new THREE.Vector3());
+    return [v(r.joints.hips), v(r.joints.spine), v(r.joints.head), v(r.joints.lFore), v(r.joints.rFore), v(r.hand.l), v(r.hand.r), v(r.joints.lShin), v(r.joints.rShin), v(r.foot.l), v(r.foot.r)];
+  }
   /** The fighter's own glow: accent colour normally, red in Rage, pulsing blue while charging. */
   glow: THREE.PointLight;
   contact: THREE.Mesh;
@@ -150,7 +161,7 @@ export class Fighter {
     this.shadowBlob = ring;
     match.scene.add(ring);
     this.lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-    this.line = new THREE.Line(this.lineGeo, new THREE.LineBasicMaterial({ color: 0xeaffff }));
+    this.line = new THREE.Line(this.lineGeo, new THREE.LineBasicMaterial({ color: def.lineColor ?? 0xeaffff }));
     this.line.visible = false;
     this.line.frustumCulled = false;
     match.scene.add(this.line);
@@ -215,6 +226,7 @@ export class Fighter {
     this.anchor = null;
     this.outcome = null;
     this.dangerPrev = false;
+    this.burnT = 0;
     this.lineTarget = null;
     this.finisherData = null;
     this.lastAttacker = null;
@@ -281,7 +293,20 @@ export class Fighter {
     if (this.pos.y < KILL_Y && this.state !== 'out') this.ringOut();
   }
 
+  burnT = 0;
   private updateResources(dt: number) {
+    if (this.burnT > 0 && this.alive) {
+      this.burnT--;
+      // Damage over time: mostly stamina, a little lasting health. Never finishes a fighter off on its own.
+      this.stamina = Math.max(0, this.stamina - 4 * dt);
+      this.health = Math.max(1, this.health - 1.2 * dt);
+      this.stamina = Math.min(this.stamina, this.health);
+      this.lastHit = 0;
+      if (this.tick % 3 === 0) {
+        const p = this.center.add(new THREE.Vector3((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 0.6));
+        this.match.fx.wisp(p, new THREE.Color(Math.random() < 0.5 ? 0xff5a10 : 0xffb030).multiplyScalar(0.8), 0.4);
+      }
+    }
     if (this.lastHit > TUNING.staminaRegenDelay && this.alive && this.stamina < this.health) {
       this.stamina = Math.min(this.health, this.stamina + TUNING.staminaRegen * this.def.durability * dt);
     }
@@ -975,15 +1000,16 @@ export class Fighter {
       if (score < bestScore) { bestScore = score; best = p; }
     }
     if (best) return { kind: 'prop', p: best };
-    if (this.def.recovery === 'swing') {
-      if (oGrabbable && dO > reach && dO < 11 && facingO > 0.8) return { kind: 'line-fighter', f: o };
+    const rg = this.def.rangedGrab;
+    if (rg) {
+      if (rg.fighters && oGrabbable && dO > reach && dO < rg.range && facingO > 0.8) return { kind: 'line-fighter', f: o };
       let lp: Prop | null = null;
       let ld = Infinity;
       for (const p of this.match.arena.props) {
-        if (p.state !== 'rest' || p.cls > 0) continue;
+        if (p.state !== 'rest' || p.cls > rg.maxCls || p.cls > this.def.lift) continue;
         const tp = p.pos.clone().sub(this.pos);
         const d = tp.length();
-        if (d > 11) continue;
+        if (d > rg.range) continue;
         if ((tp.x * fwd.x + tp.z * fwd.z) / Math.max(0.01, Math.hypot(tp.x, tp.z)) < 0.85) continue;
         if (d < ld) { ld = d; lp = p; }
       }
@@ -1537,6 +1563,7 @@ export class Fighter {
     this.yaw = Math.atan2(-dir.x, -dir.z);
     sfx.hit(!!spec.heavy);
     this.match.fx.hitstop = spec.heavy ? 0.085 : 0.045;
+    if (att.def.burns && spec.heavy && this.health > 0) { this.burnT = 150; this.say('BURNING'); }
     if (spec.heavy) { this.match.camera.punch = 1; this.match.fx.blur = Math.max(this.match.fx.blur, 0.35); }
     this.match.fx.shake = Math.max(this.match.fx.shake, spec.heavy ? 0.45 : 0.15);
     this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.4), spec.heavy ? 16 : 8, spec.heavy ? 0xffc060 : 0xffffff, spec.heavy ? 9 : 6);
@@ -1650,7 +1677,7 @@ export class Fighter {
     const id = this.def.id;
     if (t < 30) {
       o.pos.lerp(front(this.def.radius + o.def.radius + 0.2, 0.3), 0.3);
-    } else if (id === 'basalt') {
+    } else if (id === 'basalt' || id === 'ember') {
       if (t < 70) o.pos.lerp(s.clone().add(new THREE.Vector3(0, this.def.height + 0.6, 0)), 0.15);
       else if (t < 82) o.pos.lerp(front(1.6, 0), 0.5);
       if (t === 82) { fx.ring(front(1.6, 0), 6, 0xff7a3a, 0.6); fx.burstDebris(front(1.6, 0.2), 40, 0x6a6a72, 10, 0.4); fx.shake = 1.2; fx.screenFlash = 0.7; fx.blur = 0.6; sfx.explosion(); }
@@ -1661,7 +1688,7 @@ export class Fighter {
       if (t < 90) { o.pos.copy(s).add(new THREE.Vector3(Math.sin(this.yaw) * r, 1.2 + Math.sin(t * 0.2) * 0.3, Math.cos(this.yaw) * r)); if (t % 4 === 0) fx.trail(o.center, 0xeaffff, 0.2, 0.6); }
       if (t === 90) { o.vel.copy(fwd).multiplyScalar(14); o.vel.y = 8; fx.flash(o.center, 1.2, 0xffffff, 0.2); sfx.hit(true); }
       if (t > 90 && t < 120) { o.pos.addScaledVector(o.vel, 1 / 60); o.vel.y -= 0.5; if (o.pos.y < s.y) { o.pos.y = s.y; o.vel.set(0, 0, 0); } }
-    } else if (id === 'aerin') {
+    } else if (id === 'aerin' || id === 'magna') {
       if (t < 75) { this.pos.lerp(s.clone().add(new THREE.Vector3(0, 7, 0)), 0.05); o.pos.lerp(this.pos.clone().addScaledVector(fwd, 0.9).add(new THREE.Vector3(0, 0.2, 0)), 0.3); if (t % 2 === 0) fx.trail(this.pos, 0xa070ff, 0.25, 0.5); }
       else if (t < 88) o.pos.lerp(front(2, 0), 0.4);
       if (t === 88) { fx.flash(front(2, 1), 3, 0xc9a8ff, 0.35); fx.ring(front(2, 0), 6, 0xa070ff, 0.6); fx.shake = 1.1; fx.screenFlash = 0.7; fx.blur = 0.6; sfx.explosion(); sfx.zap(); }
@@ -1809,8 +1836,34 @@ export class Fighter {
     const charge = this.state === 'charge' ? 0.25 + Math.sin(time * 20) * 0.08 : 0;
     (this.aura.material as GlowMaterial).level += (charge * 2.2 - (this.aura.material as GlowMaterial).level) * 0.3;
     this.aura.rotation.y += dt * 4;
-    const upright = !['down', 'launched', 'ko', 'getup', 'finished', 'grabbed', 'yanked'].includes(this.state);
-    this.aura.visible = this.rageAura.visible = upright;
+    // Ember: hands always smoulder. Magna: shards orbit the waist.
+    if (this.def.embers && this.rig.root.visible && this.state !== 'out') {
+      this.emberAcc += 24 * dt * this.match.fx.quality;
+      while (this.emberAcc >= 1) {
+        this.emberAcc -= 1;
+        const hp = this.skinned ? this.skinned.boneWorld(Math.random() < 0.5 ? 'hand_l' : 'hand_r') : this.hand();
+        this.match.fx.wisp(hp, new THREE.Color(Math.random() < 0.6 ? 0xff5a10 : 0xffb040).multiplyScalar(0.75), 0.28);
+      }
+    }
+    const orbit = (r as any).orbit as THREE.Group | undefined;
+    if (orbit) orbit.rotation.y += dt * (this.state === 'fly' ? 4 : 2.2);
+    // Auras are particle wisps that hug the body (the old shells stay hidden).
+    this.aura.visible = this.rageAura.visible = false;
+    const charging = this.state === 'charge' || this.state === 'powerCharge';
+    if ((this.raging || charging) && this.rig.root.visible && this.state !== 'out') {
+      const rate = (this.raging ? 95 : 32) * this.match.fx.quality;
+      this.auraAcc += rate * dt;
+      const pts = this.auraPoints();
+      while (this.auraAcc >= 1) {
+        this.auraAcc -= 1;
+        const p = pts[Math.floor(Math.random() * pts.length)].clone();
+        p.x += (Math.random() - 0.5) * 0.3; p.y += (Math.random() - 0.5) * 0.2; p.z += (Math.random() - 0.5) * 0.3;
+        const col = this.raging
+          ? new THREE.Color(Math.random() < 0.6 ? 0xff3a10 : 0xffa030)
+          : new THREE.Color(Math.random() < 0.7 ? 0x2a78ff : 0x6fc0ff);
+        this.match.fx.wisp(p, col.multiplyScalar(this.raging ? 0.8 : 0.6), (this.raging ? 0.45 : 0.3) * (0.7 + Math.random() * 0.6) * (this.def.height / 1.9));
+      }
+    }
     const ra = this.raging ? 0.06 + Math.sin(time * 14) * 0.03 : 0;
     (this.rageAura.material as GlowMaterial).level += (ra * 5 - (this.rageAura.material as GlowMaterial).level) * 0.3;
     this.rageAura.rotation.y -= dt * 6;
@@ -1822,9 +1875,9 @@ export class Fighter {
     {
       const base = new THREE.Color(this.def.color);
       let inten = 2.2, col = base;
-      if (this.raging) { col = new THREE.Color(0xff3a14); inten = 7 + Math.sin(time * 14) * 2; }
+      if (this.raging) { col = new THREE.Color(0xff4a1c); inten = 4 + Math.sin(time * 11) * 1.2; }
       else if (this.state === 'charge' || this.state === 'powerCharge') { col = new THREE.Color(0x6fc8ff); inten = 5 + Math.sin(time * 18) * 2; }
-      if (this.hitFlash > 4) { col = new THREE.Color(0xffffff); inten = 9; }
+      if (this.hitFlash > 4) { col = new THREE.Color(0xffffff); inten = 6; }
       if (!this.rig.root.visible || this.state === 'out') inten = 0;
       this.glow.color.lerp(col, 0.35);
       this.glow.intensity += (inten - this.glow.intensity) * 0.3;

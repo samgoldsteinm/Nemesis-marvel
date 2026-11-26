@@ -234,10 +234,11 @@ export class CPU {
           this.set('go-prop', 25, { move: () => prop.state === 'rest' ? prop.pos.clone().sub(f.pos) : null }); return;
         }
       }
-      if (id === 'aerin' && this.canShoot(o)) {
+      if ((id === 'aerin' || id === 'magna') && this.canShoot(o)) {
         if (f.state !== 'fly' && f.energy > 45 && rnd < 0.35) { this.set('takeoff', 10, { press: ['mobility'] }); return; }
         if (f.energy > 20 && rnd < 0.6) { this.shot(); this.set('bolt', 18, { hold: ['power'], press: ['attack'] }); return; }
       }
+      if (f.def.rangedGrab && dist < f.def.rangedGrab.range - 1 && rnd < 0.3 * p.aggression) { f.yaw = Math.atan2(toO.x, toO.z); this.set('ranged-pull', 8, { press: ['grab'] }); return; }
       if (id === 'tether') {
         if (dist < 10 && rnd < 0.35 * p.aggression) { f.yaw = Math.atan2(toO.x, toO.z); this.set('line-yank', 8, { press: ['grab'] }); return; }
         if (this.canShoot(o) && f.energy > 35 && rnd < 0.25) { this.shot(); this.set('snare', 14, { hold: ['power'], press: ['attack'] }); return; }

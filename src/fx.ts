@@ -118,6 +118,9 @@ export class FX {
   private firePool: THREE.Sprite[] = [];
   private smokePool: THREE.Sprite[] = [];
   private dustPool: THREE.Sprite[] = [];
+  /** Flame-shaped additive wisps for auras (Rage, charging). */
+  private wisps: { s: THREE.Sprite; v: THREE.Vector3; life: number; max: number; size: number; sway: number }[] = [];
+  private wispPool: THREE.Sprite[] = [];
   /** Lingering flames (e.g. on a burnt wreck): position and remaining seconds. */
   burners: { p: THREE.Vector3; t: number; size: number }[] = [];
   /** A small fixed pool of point lights for hits, explosions and power effects (fixed count: no shader recompiles). */
@@ -156,6 +159,21 @@ export class FX {
     scene.add(this.puffs);
     const fireTex = radialTex([[0, 'rgba(255,255,230,1)'], [0.25, 'rgba(255,200,90,0.95)'], [0.55, 'rgba(255,90,20,0.6)'], [1, 'rgba(120,20,0,0)']]);
     const smokeTex = radialTex([[0, 'rgba(70,66,64,0.85)'], [0.5, 'rgba(60,58,58,0.5)'], [1, 'rgba(40,40,40,0)']]);
+    {
+      // Tall, soft flame wisp: bright core fading up and out.
+      const c = document.createElement('canvas');
+      c.width = 32; c.height = 64;
+      const g = c.getContext('2d')!;
+      const gr = g.createRadialGradient(16, 44, 1, 16, 40, 30);
+      gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.35, 'rgba(255,255,255,0.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = gr;
+      g.beginPath(); g.ellipse(16, 38, 12, 26, 0, 0, Math.PI * 2); g.fill();
+      const wt = new THREE.CanvasTexture(c);
+      for (let i = 0; i < 160; i++) {
+        const w = new THREE.Sprite(new THREE.SpriteMaterial({ map: wt, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+        w.visible = false; scene.add(w); this.wispPool.push(w);
+      }
+    }
     const dustTex = radialTex([[0, 'rgba(225,215,200,0.55)'], [0.5, 'rgba(210,200,185,0.28)'], [1, 'rgba(200,190,175,0)']]);
     for (let i = 0; i < 90; i++) {
       const d = new THREE.Sprite(new THREE.SpriteMaterial({ map: dustTex, transparent: true, depthWrite: false }));
@@ -193,6 +211,8 @@ export class FX {
     this.dParts.length = 0;
     this.pParts.length = 0;
     for (const b of this.billows) b.s.visible = false;
+    for (const w of this.wisps) w.s.visible = false;
+    this.wisps.length = 0;
     this.billows.length = 0;
     this.burners.length = 0;
     for (const s of this.lights) { s.life = 0; s.l.intensity = 0; }
@@ -251,6 +271,17 @@ export class FX {
     this.screenFlash = Math.max(this.screenFlash, 0.55);
     this.blur = Math.max(this.blur, 0.55);
     this.light(pos.clone().setY(pos.y + 1), 0xff8a30, 90, 0.9, 16);
+  }
+
+  /** One aura wisp at a body point: rises, sways, flickers and fades. */
+  wisp(pos: THREE.Vector3, color: THREE.Color, size: number) {
+    const s = this.wispPool.find((x) => !x.visible);
+    if (!s) return;
+    s.visible = true;
+    s.position.copy(pos);
+    s.material.color.copy(color);
+    const life = 0.3 + Math.random() * 0.3;
+    this.wisps.push({ s, v: new THREE.Vector3((Math.random() - 0.5) * 0.4, 1.4 + Math.random() * 1.4, (Math.random() - 0.5) * 0.4), life, max: life, size, sway: Math.random() * 6.28 });
   }
 
   /** Soft dust from landings, footsteps and slides. */
@@ -385,6 +416,19 @@ export class FX {
       b.s.scale.set(sc, sc, 1);
       b.s.material.opacity = b.fire ? Math.max(0, 1 - f * 1.15) : Math.max(0, Math.min(1, f * 4) * (1 - f)) * 0.9;
       b.s.material.rotation += dt * 0.4;
+    }
+    for (let k = this.wisps.length - 1; k >= 0; k--) {
+      const w = this.wisps[k];
+      w.life -= dt;
+      if (w.life <= 0) { w.s.visible = false; this.wisps.splice(k, 1); continue; }
+      const f = 1 - w.life / w.max;
+      w.sway += dt * 9;
+      w.s.position.x += (w.v.x + Math.sin(w.sway) * 0.35) * dt;
+      w.s.position.y += w.v.y * dt;
+      w.s.position.z += (w.v.z + Math.cos(w.sway) * 0.35) * dt;
+      const sc = w.size * (1 - f * 0.6);
+      w.s.scale.set(sc * 0.55, sc * (1 + f * 0.6), 1);
+      w.s.material.opacity = Math.sin(Math.min(1, f * 1.4) * Math.PI) * (0.75 + Math.random() * 0.25);
     }
     for (const bn of this.burners) {
       bn.t -= dt;
