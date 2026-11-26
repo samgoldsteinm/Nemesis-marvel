@@ -1,3 +1,4 @@
+import { FightIntro } from './intro';
 import { updatePadCursor, hidePadCursor } from './padcursor';
 import { VFX } from './vfx';
 import { TRAITS } from './traits';
@@ -274,7 +275,13 @@ function bindings(): DeviceBinding[] {
   return [{ keyboard: [0], gamepad: 0, touch: true }, { keyboard: [1], gamepad: 1, touch: false }];
 }
 
-function startMatch() {
+let intro: FightIntro | null = null;
+let introsOn = true, voicesOn = true;
+try { introsOn = localStorage.getItem('bl.intros') !== '0'; voicesOn = localStorage.getItem('bl.voices') !== '0'; } catch { /* storage optional */ }
+const introEl = document.getElementById('intro')!;
+function endIntro() { if (intro) { intro.finish(); intro = null; } }
+function startMatch(withIntro = true) {
+  endIntro();
   if (match) match.dispose();
   const d: [CharacterDef, CharacterDef] = [charById(setup.p1), charById(setup.p2)];
   if (arena.layout !== setup.arena) arena.setLayout(setup.arena);
@@ -291,6 +298,7 @@ function startMatch() {
   paused = false;
   showScreen('none');
   startMusic();
+  if (introsOn && withIntro) intro = new FightIntro(match, vcam, introEl, voicesOn);
 }
 
 function rematch(swap = false) {
@@ -392,6 +400,8 @@ function render(s: Screen): string {
       </div>
       <div class="foot">
         <button class="pill" data-nav data-act="mute">${muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
+        <button class="pill" data-nav data-act="intros">${introsOn ? '🎬 Fight intros on' : '🎬 Fight intros off'}</button>
+        <button class="pill" data-nav data-act="voices">${voicesOn ? '🗣 Voices on' : '🗣 Voices off'}</button>
         <span class="pill static">🎮 ${connectedPads().length ? connectedPads().length + ' controller' + (connectedPads().length > 1 ? 's' : '') + ' connected' : 'Keyboard: WASD + J K L I U O'}</span>
       </div>
     </div>`;
@@ -539,14 +549,16 @@ function act(a: string, arg?: string) {
     case 'arena': setup.arena = arg as LayoutId; rerender(); break;
     case 'diff': setup.diff = arg as Difficulty; rerender(); break;
     case 'tab': howTab = arg as typeof howTab; rerender(); break;
-    case 'title': if (match) { match.dispose(); match = null; } hud.show(false); stopMusic(); touchRoot.classList.add('off'); showScreen('title'); break;
-    case 'select': selectSide = 0; locked[0] = locked[1] = false; if (match) { match.dispose(); match = null; } hud.show(false); showScreen('select'); break;
+    case 'title': endIntro(); if (match) { match.dispose(); match = null; } hud.show(false); stopMusic(); touchRoot.classList.add('off'); showScreen('title'); break;
+    case 'select': endIntro(); selectSide = 0; locked[0] = locked[1] = false; if (match) { match.dispose(); match = null; } hud.show(false); showScreen('select'); break;
     case 'rematch': rematch(false); break;
     case 'swap': rematch(true); break;
     case 'resume': paused = false; showScreen('none'); break;
     case 'moves': movesReturn = screen === 'pause' ? 'pause' : 'title'; howTab = 'controls'; showScreen('moves'); break;
     case 'back': showScreen(movesReturn); break;
     case 'mute': setMuted(!muted); rerender(); break;
+    case 'intros': introsOn = !introsOn; try { localStorage.setItem('bl.intros', introsOn ? '1' : '0'); } catch { /* */ } rerender(); break;
+    case 'voices': voicesOn = !voicesOn; try { localStorage.setItem('bl.voices', voicesOn ? '1' : '0'); } catch { /* */ } rerender(); break;
   }
 }
 
@@ -667,6 +679,8 @@ function frame(now: number) {
 
   if (screen !== 'none') menuInput(rawDt * 1000);
   else hidePadCursor();
+  if (intro && match && !paused && screen === 'none' && !intro.update(rawDt)) intro = null;
+  (window as any).__introT = intro ? intro.t : 99;
   if (match && !paused && screen === 'none' && !manualStep) {
     if (fx.hitstop > 0) fx.hitstop -= rawDt; // brief impact emphasis: sim holds, rendering continues
     else {
@@ -689,6 +703,8 @@ function frame(now: number) {
     vcam.update(match.fighters, rawDt, fx.shake);
     hud.update(match, time);
     hud.el.classList.toggle('menu-up', screen !== 'none');
+    hud.el.classList.toggle('cine', !!intro);
+    document.body.classList.toggle('cine', !!intro);
     // X-target markers for human players.
     match.fighters.forEach((f, i) => {
       const mk = markers[i];
@@ -750,7 +766,8 @@ const hooks = {
   TUNING,
   forced,
   cpus: () => cpus,
-  start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal', arenaId: LayoutId = 'rooftop') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; setup.arena = arenaId; startMatch(); },
+  start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal', arenaId: LayoutId = 'rooftop') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; setup.arena = arenaId; startMatch(false); },
+  startWithIntro(p1: string, p2: string) { setup.p1 = p1; setup.p2 = p2; setup.mode = 'cpu'; startMatch(true); },
   rematch,
   act,
   get screen() { return screen; },
