@@ -76,6 +76,12 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
   - road cracks, skid marks, stains and reflective puddles, plus debris along the barriers
   - Rooftop: crowding neighbour buildings, a water tower, a billboard, and pipes and vents
   - cars explode into fireballs and smoke, leaving a burning wreck that still blocks and can be thrown again
+- **City and props (`src/city.ts`, `src/props.ts`):**
+  - **Buildings:** generated with facades at true window scale: brick, dark brick, concrete, stone or glass curtain wall. Lit and dark rooms vary floor to floor, with frames, sills, blinds and grime.
+  - **Building detail:** belt-course ledges, cornices and parapets, stepped-back upper floors, pilasters, fire escapes on buildings facing the fight, and rooftop clutter (water towers, AC units, antennas, stair huts). Everything is merged per material, so the whole city costs only a few draw calls.
+  - **Skyline:** a mid-distance ring of varied towers plus a painted far panorama with lit windows that fades into each venue's haze. Soft light shafts hang between the buildings.
+  - **Props:** sculpted car bodies with glass, rims, bumpers and lights; slatted crates; AC units with grilles and fans; ribbed, labelled barrels; a domed fuel tank; and jersey barriers with reflectors. Overpass pile-ups are built from a box truck, burnt cars and barriers.
+  - **Lighting:** an environment map built from each venue's sky gives car paint, glass, metal and puddles real reflections. Ambient occlusion adds contact shadows on desktop, and is the first effect dropped when frames run long (`?noao` / `?ao`).
 - **Rigged bodies:**
   - Every fighter uses the skinned humanoid model in `public/models/xbot.glb` (from the three.js examples, originally from Mixamo; see `public/models/README.md` for the licence).
   - My animation system still authors every pose. Each frame its joints are retargeted onto the model's skeleton through a one-time T-pose calibration.

@@ -28,6 +28,9 @@ export class CPU {
   private wantProp: Prop | null = null;
   lastPlan = '';
   private dashPending = 0;
+  private lastHits = 0;
+  private sinceHit = 0;
+  private noPropsUntil = 0;
   constructor(public f: Fighter, public match: Match, public diff: Difficulty = 'normal') {}
 
   get p() {
@@ -36,6 +39,7 @@ export class CPU {
 
   read(): RawState {
     this.tick++;
+    this.sinceHit++;
     if (this.projCooldown > 0) this.projCooldown--;
     const out = emptyRaw();
     const f = this.f;
@@ -154,6 +158,10 @@ export class CPU {
 
   private think() {
     const f = this.f, o = f.opp, A = this.match.arena;
+    // Anti-stall: track progress; if nothing has landed for ~10s, stop chasing props and go direct.
+    if (f.stats.hits !== this.lastHits) { this.lastHits = f.stats.hits; this.sinceHit = 0; }
+    const stalled = this.sinceHit > 600;
+    if (stalled) this.noPropsUntil = this.tick + 300;
     const toO = o.pos.clone().sub(f.pos);
     const dist = Math.hypot(toO.x, toO.z);
     const dy = o.pos.y - f.pos.y;
@@ -185,10 +193,16 @@ export class CPU {
     const edge = A.openEdgeNear(f.pos, 4);
     if (edge && dist < 6) { this.set('leave-edge', 18, { move: new THREE.Vector3(-f.pos.x, 0, -f.pos.z) }); return; }
 
+    // Opponent hovering out of reach overhead: super jump into a rising attack.
+    if (dy > 2.5 && dist < 6 && f.onGround && f.hasEnergy(TUNING.superJumpCost) && (stalled || rnd < 0.35)) {
+      this.set('super-jump', 22, { move: toward, hold: ['power'], press: ['jump'] });
+      this.dashPending = 0;
+      return;
+    }
     // 6. Character-specific mid-range behaviors.
     const id = f.def.id;
     if (dist > 5) {
-      if (f.def.lift >= 1 && rnd < 0.65) {
+      if (f.def.lift >= 1 && rnd < 0.65 && this.tick > this.noPropsUntil) {
         // Heavies look for something big to throw.
         const prop = this.bestProp(12);
         if (prop) {
@@ -211,7 +225,7 @@ export class CPU {
         // Flank: neutral L teleports behind the opponent.
         this.set('flank', 6, { press: ['mobility'] }); return;
       }
-      const prop = f.def.lift === 0 && rnd < 0.25 ? this.bestProp(5) : null;
+      const prop = f.def.lift === 0 && rnd < 0.25 && this.tick > this.noPropsUntil ? this.bestProp(5) : null;
       if (prop) {
         const dP = prop.pos.distanceTo(f.pos);
         if (dP < f.def.radius + 1.3) { f.yaw = Math.atan2(prop.pos.x - f.pos.x, prop.pos.z - f.pos.z); this.set('lift-light', 6, { press: ['grab'] }); return; }

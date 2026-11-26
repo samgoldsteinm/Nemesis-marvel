@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { LiftClass } from './characters';
 import { addOutline } from './rig';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { CityBuilder, farPanorama, lightShafts, facadeMaterial } from './city';
+import { buildCar, buildCrate, buildAC, buildBarrel, buildTank, buildBarrier } from './props';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { FX } from './fx';
 import { sfx } from './audio';
 
@@ -259,28 +262,17 @@ export class Arena {
     this.reset();
   }
 
-  private buildCity(minR: number) {
-    const winTex = this.winTex;
-    const n = 150;
-    const towers = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6f6a7a, map: winTex, emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: 0.6, roughness: 0.9 }), n);
-    const o = new THREE.Object3D();
-    let k = 0;
-    for (let i = 0; i < n * 4 && k < n; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const d = minR + Math.random() * 110;
-      const x = Math.cos(a) * d, z = Math.sin(a) * d * 0.9;
-      if (Math.abs(x) < BOUNDS.hw + 10 && Math.abs(z) < BOUNDS.hd + 10) continue;
-      const w = 6 + Math.random() * 12, dd = 6 + Math.random() * 12;
-      const top = -30 + Math.random() * (d > 80 ? 70 : 38);
-      const h = top + 90;
-      o.position.set(x, top - h / 2, z);
-      o.scale.set(w, h, dd);
-      o.rotation.y = Math.random() < 0.2 ? Math.random() : 0;
-      o.updateMatrix();
-      towers.setMatrixAt(k++, o.matrix);
-    }
-    towers.count = k;
-    this.static.add(towers);
+  private city: CityBuilder | null = null;
+  private get cityB() {
+    if (!this.city) this.city = new CityBuilder(this.mats.concrete, this.mats.steel, new THREE.MeshStandardMaterial({ color: 0x5a4030, roughness: 0.9 }));
+    return this.city;
+  }
+
+  /** Mid-distance varied towers (merged) plus a painted far panorama. */
+  private buildCity(minR: number, yBase = -30) {
+    this.cityB.skyline(BOUNDS.hw + 8, BOUNDS.hd + 8, minR, minR + 95, 46, yBase);
+    // Far panorama tinted toward each venue's haze.
+    this.static.add(farPanorama(260, yBase - 20, 150, this.layout === 'overpass' ? 0xe4eef0 : 0xa49ab8));
   }
 
   private get winTex() {
@@ -317,7 +309,20 @@ export class Arena {
     const key = `decal_${kind}`;
     let mat = this.decalMats.get(key);
     if (!mat) {
-      if (kind === 'puddle') mat = new THREE.MeshStandardMaterial({ color: 0x7a9aa4, roughness: 0.04, metalness: 0.9, transparent: true, opacity: 0.55, depthWrite: false });
+      if (kind === 'puddle') {
+        // Irregular round puddle: soft-edged alpha so it never reads as a square.
+        const alpha = canvasTex(128, 128, (g) => {
+          g.fillStyle = '#000'; g.fillRect(0, 0, 128, 128);
+          for (let k = 0; k < 5; k++) {
+            const x = 40 + Math.random() * 48, y = 40 + Math.random() * 48, r = 22 + Math.random() * 20;
+            const gr = g.createRadialGradient(x, y, r * 0.3, x, y, r);
+            gr.addColorStop(0, '#fff'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+            g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+          }
+        });
+        alpha.colorSpace = THREE.NoColorSpace;
+        mat = new THREE.MeshStandardMaterial({ color: 0x4a5a60, roughness: 0.03, metalness: 0.85, transparent: true, alphaMap: alpha, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+      }
       else {
         const tex = canvasTex(128, 128, (g) => {
           g.clearRect(0, 0, 128, 128);
@@ -339,7 +344,8 @@ export class Arena {
       }
       this.decalMats.set(key, mat);
     }
-    const m = new THREE.Mesh(new THREE.PlaneGeometry(size, kind === 'skid' ? size * 0.4 : kind === 'puddle' ? size * 0.6 : size), mat);
+    const geo = kind === 'puddle' ? new THREE.CircleGeometry(size / 2, 28).scale(1, 0.6, 1) : new THREE.PlaneGeometry(size, kind === 'skid' ? size * 0.4 : size);
+    const m = new THREE.Mesh(geo, mat);
     m.rotation.set(-Math.PI / 2, 0, rot);
     m.position.set(x, 0.015 + Math.random() * 0.005, z);
     m.receiveShadow = true;
@@ -358,25 +364,16 @@ export class Arena {
   }
 
   /** A close city block face: tall, windowed, with a storefront sign at the given height. */
+  /** A close city block: a detailed building with a storefront sign and awning facing the action. */
   private block(x: number, z: number, w: number, d: number, bottom: number, top: number, face: 1 | -1, sign?: [string, string, string], signY?: number) {
-    const h = top - bottom;
-    const tone = 0.55 + Math.random() * 0.35;
-    const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(tone, tone * 0.98, tone * 1.02), map: this.winTex, emissive: 0xffffff, emissiveMap: this.winTex, emissiveIntensity: 0.15, roughness: 0.85 });
-    const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    b.position.set(x, bottom + h / 2, z);
-    b.castShadow = true;
-    b.receiveShadow = true;
-    this.static.add(b);
-    // Cornice and rooftop clutter.
-    this.boxes([[w + 0.6, 0.5, d + 0.6, x, top + 0.1, z], [2, 1.4, 2, x - w * 0.25, top + 0.9, z], [1.2, 2.2, 1.2, x + w * 0.3, top + 1.2, z - d * 0.2]], this.mats.concrete);
+    this.cityB.building({ x, z, w, d, bottom, top, detail: 2, front: new THREE.Vector3(0, 0, face) });
     if (sign) {
       const tex = this.signTex(...sign);
-      const sm = new THREE.Mesh(new THREE.BoxGeometry(Math.min(w * 0.8, 9), 2, 0.3), new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.5 }));
-      sm.position.set(x, signY ?? bottom + 4, z + face * (d / 2 + 0.2));
+      const sm = new THREE.Mesh(new RoundedBoxGeometry(Math.min(w * 0.8, 9), 2, 0.3, 2, 0.06), new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.5 }));
+      sm.position.set(x, signY ?? bottom + 4, z + face * (d / 2 + 0.4));
       this.static.add(sm);
-      // Awning under the sign.
-      const aw = new THREE.Mesh(new THREE.BoxGeometry(Math.min(w * 0.8, 9), 0.15, 1.6), new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(Math.random(), 0.45, 0.35), roughness: 0.8 }));
-      aw.position.set(x, (signY ?? bottom + 4) - 1.4, z + face * (d / 2 + 0.8));
+      const aw = new THREE.Mesh(new THREE.BoxGeometry(Math.min(w * 0.8, 9), 0.12, 1.6), new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(Math.random(), 0.45, 0.35), roughness: 0.8 }));
+      aw.position.set(x, (signY ?? bottom + 4) - 1.4, z + face * (d / 2 + 0.9));
       aw.rotation.x = face * 0.25;
       aw.castShadow = true;
       this.static.add(aw);
@@ -384,20 +381,7 @@ export class Arena {
   }
 
   makeWreck() {
-    const g = new THREE.Group();
-    const char = new THREE.MeshStandardMaterial({ color: 0x1c1a19, roughness: 0.95, metalness: 0.3 });
-    const rust = new THREE.MeshStandardMaterial({ color: 0x4a2a1a, roughness: 1 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.6, 4.1), char);
-    body.position.y = 0.5;
-    body.rotation.z = 0.06;
-    addOutline(body, 1.02);
-    g.add(body);
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.45, 1.9), rust);
-    cab.position.set(0.05, 1.0, -0.3);
-    cab.rotation.set(0.05, 0.04, -0.1);
-    addOutline(cab, 1.03);
-    g.add(cab);
-    return new Prop('wreck', 2, g, new THREE.Vector3(0.95, 0.6, 2.05), false);
+    return new Prop('wreck', 2, buildCar(0, true), new THREE.Vector3(0.95, 0.6, 2.05), false);
   }
 
   // ------------------------------------------------------------------ overpass
@@ -486,26 +470,39 @@ export class Arena {
       junk.push([sz, sz * 0.7, sz * 1.2, (Math.random() - 0.5) * hw * 1.9, sz * 0.35, side * (hd - 0.7 - Math.random() * 0.8), Math.random() * 3]);
     }
     this.boxes(junk, this.mats.rubble);
-    // Wreck pile-ups close both ends of the fighting stretch (permanent cover).
+    // Wreck pile-ups close both ends of the fighting stretch (permanent cover):
+    // a jack-knifed box truck, burnt cars and a row of jersey barriers.
     for (const sx of [-1, 1]) {
       const g = new THREE.Group();
-      for (let i = 0; i < 4; i++) {
-        const b = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2 + Math.random() * 1.4, 3.4), i % 2 ? this.mats.concrete : this.mats.acDark);
-        b.position.set((Math.random() - 0.5) * 0.6, 0.9, -hd + 2 + i * 3.4);
-        b.rotation.y = (Math.random() - 0.5) * 0.4;
-        b.castShadow = true;
-        addOutline(b, 1.03);
-        g.add(b);
+      const truck = new THREE.Group();
+      const box = new THREE.Mesh(new RoundedBoxGeometry(2.5, 3.0, 6.2, 2, 0.1), new THREE.MeshStandardMaterial({ color: 0x8a3020, roughness: 0.55, metalness: 0.2 }));
+      box.position.set(0, 1.95, -0.6); box.castShadow = true; addOutline(box, 1.02); truck.add(box);
+      const cab = new THREE.Mesh(new RoundedBoxGeometry(2.4, 2.2, 1.9, 3, 0.25), new THREE.MeshStandardMaterial({ color: 0xd8d4c8, roughness: 0.4, metalness: 0.3 }));
+      cab.position.set(0, 1.55, 3.6); cab.castShadow = true; addOutline(cab, 1.02); truck.add(cab);
+      const ws = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 0.9), new THREE.MeshPhysicalMaterial({ color: 0x18242c, roughness: 0.05, metalness: 0.3, clearcoat: 1 }));
+      ws.position.set(0, 2.05, 4.56); truck.add(ws);
+      for (const [wx, wz] of [[-1.15, 3.5], [1.15, 3.5], [-1.15, -2.2], [1.15, -2.2], [-1.15, -3.2], [1.15, -3.2]]) {
+        const w = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.35, 18), new THREE.MeshStandardMaterial({ color: 0x141416, roughness: 0.9 }));
+        w.rotation.z = Math.PI / 2; w.position.set(wx, 0.5, wz); w.castShadow = true; truck.add(w);
       }
-      const truck = new THREE.Mesh(new THREE.BoxGeometry(2.4, 3.2, 6), new THREE.MeshStandardMaterial({ color: 0x8a3020, roughness: 0.6 }));
-      truck.position.set(sx * 0.6, 1.6, 0);
-      truck.rotation.y = 0.15 * sx;
-      truck.castShadow = true;
-      addOutline(truck, 1.02);
+      truck.position.set(sx * 0.4, 0, -1.2);
+      truck.rotation.y = 0.18 * sx;
       g.add(truck);
+      for (const [cz, ry] of [[3.6, 0.5], [-5.2, -0.4]]) {
+        const car = buildCar(0, true);
+        car.position.set(-sx * 0.6, 0, cz);
+        car.rotation.y = ry * 0.4;
+        g.add(car);
+      }
+      for (const bz of [-1.2, 1.2]) {
+        const bar = buildBarrier(this.mats.concrete);
+        bar.position.set(-sx * 1.4, 0, bz + 4.8 * Math.sign(bz));
+        bar.rotation.y = Math.PI / 2 + (Math.random() - 0.5) * 0.3;
+        g.add(bar);
+      }
       g.position.set(sx * (hw - 0.8), 0, 0);
       s.add(g);
-      this.fixedSolids.push({ min: new THREE.Vector3(sx > 0 ? hw - 1.6 : -hw, 0, -hd), max: new THREE.Vector3(sx > 0 ? hw : -hw + 1.6, 3.2, hd), kind: 'hut', clingable: true });
+      this.fixedSolids.push({ min: new THREE.Vector3(sx > 0 ? hw - 2.6 : -hw, 0, -hd), max: new THREE.Vector3(sx > 0 ? hw : -hw + 2.6, 3.4, hd), kind: 'hut', clingable: true });
     }
     // Light poles along both rails: swing anchors and the arena's warm sodium glow.
     const lampMat = new THREE.MeshBasicMaterial({ color: 0xffc070 });
@@ -541,8 +538,10 @@ export class Arena {
     sign.position.set(4.2, 6.5, -2);
     s.add(sign);
     for (const z of [-4, 0, 4]) this.anchors.push(new THREE.Vector3(4, 7.4, z));
-    // Skyline beyond the close blocks.
-    this.buildCity(70);
+    // Skyline beyond the close blocks, then merge the whole city into a few draw calls.
+    this.buildCity(70, -22);
+    this.cityB.flush(this.static);
+    lightShafts(this.static, [[-14, 10, -12], [6, 12, 13], [20, 10, -13], [-4, 14, 16]], new THREE.Vector3(10, 34, 14), 0xf4fbff, 0.07);
     this.spawns = [new THREE.Vector3(-7, 0, 0), new THREE.Vector3(7, 0, 0)];
   }
 
@@ -563,7 +562,13 @@ export class Arena {
     const winTex = this.winTex;
     this.spawns = [new THREE.Vector3(-6, 0, 2), new THREE.Vector3(6, 0, 2)];
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x8c8794, map: winTex, emissive: 0xffffff, emissiveMap: winTex, emissiveIntensity: 0.55, roughness: 0.9 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(HW * 2 - 0.2, 70, HD * 2 - 0.2), bodyMat);
+    // The Clarion building itself: a stone facade at true window scale.
+    void bodyMat;
+    const fac = facadeMaterial('stone').clone();
+    fac.map = fac.map!.clone(); fac.map.repeat.set((HW * 2) / 24, 70 / 27.2); fac.map.needsUpdate = true;
+    fac.emissiveMap = fac.emissiveMap!.clone(); fac.emissiveMap.repeat.copy(fac.map.repeat); fac.emissiveMap.needsUpdate = true;
+    fac.bumpMap = fac.bumpMap!.clone(); fac.bumpMap.repeat.copy(fac.map.repeat); fac.bumpMap.needsUpdate = true;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(HW * 2 - 0.2, 70, HD * 2 - 0.2), fac);
     body.position.y = -35.6;
     s.add(body);
     const cornice = new THREE.Mesh(new THREE.BoxGeometry(HW * 2 + 0.8, 0.5, HD * 2 + 0.8), this.mats.concrete);
@@ -577,6 +582,8 @@ export class Arena {
     this.block(-HW - 14, -2, 12, 22, -60, 12, 1, nsigns[1], 6);
     this.block(HW + 13, 4, 12, 18, -60, 30, 1, nsigns[2], 12);
     this.block(-10, HD + 18, 18, 14, -60, 6, -1, nsigns[3], 2);
+    this.cityB.flush(this.static);
+    lightShafts(this.static, [[-HW - 6, 8, -8], [6, 14, -HD - 7], [HW + 5, 10, 6]], new THREE.Vector3(-22, 26, 12), 0xffd8a8, 0.06);
     // Water tower on the neighbouring roof, billboard frame, rooftop pipes and vents.
     const wt = new THREE.Group();
     const tankM = new THREE.MeshStandardMaterial({ color: 0x6a4a34, roughness: 0.9 });
@@ -621,7 +628,7 @@ export class Arena {
 
     // Rooftop access hut (permanent cover and a wall to cling to).
     const hut = new THREE.Group();
-    const hb = new THREE.Mesh(new THREE.BoxGeometry(4, 3.6, 3.2), this.mats.hut);
+    const hb = new THREE.Mesh(new RoundedBoxGeometry(4, 3.6, 3.2, 3, 0.08), this.mats.hut);
     hb.position.y = 1.8;
     hb.castShadow = hb.receiveShadow = true;
     addOutline(hb, 1.02);
@@ -632,6 +639,17 @@ export class Arena {
     const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffd9a0 }));
     lamp.position.set(0, 2.6, 1.7);
     hut.add(lamp);
+    // Roof lip, vent stack, conduit and a door frame so the hut reads as built, not a box.
+    const lip = new THREE.Mesh(new THREE.BoxGeometry(4.3, 0.18, 3.5), this.mats.concrete);
+    lip.position.y = 3.65; lip.castShadow = true; hut.add(lip);
+    const vent = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 1.1, 12), this.mats.steel);
+    vent.position.set(-1.2, 4.2, -0.6); vent.castShadow = true; hut.add(vent);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(0.36, 0.25, 12), this.mats.steel);
+    cap.position.set(-1.2, 4.85, -0.6); hut.add(cap);
+    const conduit = new THREE.Mesh(new THREE.BoxGeometry(0.08, 3.2, 0.08), this.mats.steel);
+    conduit.position.set(1.7, 1.7, 1.63); hut.add(conduit);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.35, 2.42, 0.05), this.mats.concrete);
+    frame.position.set(0, 1.2, 1.6); hut.add(frame);
     hut.position.set(11, 0, -5.5);
     s.add(hut);
     this.fadeables.push(hut);
@@ -764,84 +782,20 @@ export class Arena {
   }
 
   makeCar(color: number) {
-    const g = new THREE.Group();
-    const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.35, metalness: 0.5 });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.75, 4.2), paint);
-    body.position.y = 0.65;
-    addOutline(body, 1.02);
-    g.add(body);
-    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.65, 0.6, 2.1), this.mats.glass);
-    cab.position.set(0, 1.3, -0.2);
-    addOutline(cab, 1.03);
-    g.add(cab);
-    for (const [x, z] of [[-0.9, 1.3], [0.9, 1.3], [-0.9, -1.3], [0.9, -1.3]]) {
-      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.36, 0.28, 12), this.mats.tire);
-      w.rotation.z = Math.PI / 2;
-      w.position.set(x, 0.36, z);
-      g.add(w);
-    }
-    for (const x of [-0.6, 0.6]) {
-      const l = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.15, 0.05), new THREE.MeshBasicMaterial({ color: 0xfff0c0 }));
-      l.position.set(x, 0.75, 2.12);
-      g.add(l);
-    }
-    return new Prop('car', 2, g, new THREE.Vector3(0.95, 0.8, 2.1), true);
+    return new Prop('car', 2, buildCar(color), new THREE.Vector3(0.95, 0.8, 2.1), true);
   }
   makeBarrel() {
-    const g = new THREE.Group();
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.95, 14), this.mats.barrel);
-    b.position.y = 0.475;
-    addOutline(b, 1.05);
-    g.add(b);
-    for (const y of [0.25, 0.7]) {
-      const r = new THREE.Mesh(new THREE.TorusGeometry(0.345, 0.025, 6, 16), this.mats.steel);
-      r.rotation.x = Math.PI / 2;
-      r.position.y = y;
-      g.add(r);
-    }
-    return new Prop('barrel', 0, g, new THREE.Vector3(0.34, 0.475, 0.34));
+    const colors = [0x2f6a9a, 0x8a2a20, 0x3a5a2a, 0x7a6a20];
+    return new Prop('barrel', 0, buildBarrel(colors[Math.floor(Math.random() * colors.length)]), new THREE.Vector3(0.34, 0.475, 0.34));
   }
   makeBarrier() {
-    const g = new THREE.Group();
-    const shape = new THREE.Shape();
-    shape.moveTo(-0.4, 0); shape.lineTo(0.4, 0); shape.lineTo(0.18, 0.35); shape.lineTo(0.12, 0.9); shape.lineTo(-0.12, 0.9); shape.lineTo(-0.18, 0.35); shape.lineTo(-0.4, 0);
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: 2.2, bevelEnabled: false });
-    geo.translate(0, 0, -1.1);
-    geo.rotateY(Math.PI / 2);
-    const b = new THREE.Mesh(geo, this.mats.concrete);
-    addOutline(b, 1.03);
-    g.add(b);
-    return new Prop('barrier', 1, g, new THREE.Vector3(1.1, 0.45, 0.4));
+    return new Prop('barrier', 1, buildBarrier(this.mats.concrete), new THREE.Vector3(1.1, 0.45, 0.4));
   }
   makeAC() {
-    const g = new THREE.Group();
-    const b = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.2, 1.2), this.mats.ac);
-    b.position.y = 0.6;
-    addOutline(b, 1.03);
-    g.add(b);
-    const fan = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.05, 16), this.mats.acDark);
-    fan.position.set(0, 1.22, 0);
-    g.add(fan);
-    const grill = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 0.04), this.mats.acDark);
-    grill.position.set(0, 0.6, 0.61);
-    g.add(grill);
-    return new Prop('ac', 1, g, new THREE.Vector3(0.85, 0.6, 0.6));
+    return new Prop('ac', 1, buildAC(), new THREE.Vector3(0.85, 0.6, 0.6));
   }
   makeTank() {
-    const g = new THREE.Group();
-    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.7, 16), this.mats.tank);
-    b.position.y = 0.85;
-    addOutline(b, 1.04);
-    g.add(b);
-    for (const y of [0.35, 1.35]) {
-      const s = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.72, 0.16, 16), this.mats.stripe);
-      s.position.y = y;
-      g.add(s);
-    }
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.2, 8), this.mats.steel);
-    cap.position.y = 1.8;
-    g.add(cap);
-    return new Prop('tank', 2, g, new THREE.Vector3(0.7, 0.85, 0.7), true);
+    return new Prop('tank', 2, buildTank(this.mats.tank, this.mats.stripe), new THREE.Vector3(0.7, 0.85, 0.7), true);
   }
   makePanel() {
     const g = new THREE.Group();
@@ -852,12 +806,7 @@ export class Arena {
     return new Prop('panel', 0, g, new THREE.Vector3(0.65, 0.06, 0.42));
   }
   makeCrate() {
-    const g = new THREE.Group();
-    const b = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.75, 0.75), this.mats.crate);
-    b.position.y = 0.375;
-    addOutline(b, 1.04);
-    g.add(b);
-    return new Prop('crate', 0, g, new THREE.Vector3(0.375, 0.375, 0.375));
+    return new Prop('crate', 0, buildCrate(), new THREE.Vector3(0.375, 0.375, 0.375));
   }
   makeRubble() {
     const g = new THREE.Group();
