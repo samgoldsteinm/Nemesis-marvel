@@ -5,6 +5,7 @@ import { FX } from './fx';
 import { VersusCamera } from './camera';
 import { CharacterDef, MoveDef, HitSpec } from './characters';
 import { sfx } from './audio';
+import type { ProjectileHandle } from './vfx';
 
 const PROJ: Record<ProjKind, { speed: number; color: number; scale: number; trail: number; light: number }> = {
   bolt: { speed: 30, color: 0xc9a8ff, scale: 1.1, trail: 0xa070ff, light: 0xb48cff },
@@ -26,6 +27,7 @@ interface Projectile {
   life: number;
   mesh: THREE.Mesh;
   alive: boolean;
+  vis?: ProjectileHandle;
 }
 
 export class Match {
@@ -66,7 +68,7 @@ export class Match {
     this.tick = 0;
     this.introT = 90;
     this.events = [];
-    for (const p of this.projectiles) p.mesh.visible = false;
+    for (const p of this.projectiles) { p.mesh.visible = false; p.vis?.stop(false); }
     for (const m of this.mines) this.scene.remove(m.mesh);
     this.mines = [];
     this.projectiles = [];
@@ -239,7 +241,17 @@ export class Match {
     mesh.scale.setScalar(PROJ[kind].scale);
     mesh.visible = true;
     mesh.position.copy(origin);
-    const proj = { kind, owner, pos: origin.clone(), vel: dir.multiplyScalar(speed), life: kind === 'fireball' ? 1.6 : 1.3, mesh, alive: true };
+    const proj: Projectile = { kind, owner, pos: origin.clone(), vel: dir.multiplyScalar(speed), life: kind === 'fireball' ? 1.6 : 1.3, mesh, alive: true };
+    const vfx = this.fx.vfx;
+    if (vfx) {
+      // Shader projectile replaces the plain sphere; the pooled mesh only marks the slot as used.
+      (mesh.material as THREE.Material).visible = false;
+      const shape = kind === 'snare' ? 'javelin' : 'basic';
+      const size = kind === 'bigbolt' ? 1.1 : kind === 'fireball' ? 0.9 : kind === 'snare' ? 0.55 : 0.5;
+      proj.vis = vfx.projectile(shape, PROJ[kind].color, size);
+      proj.vis.set(proj.pos, proj.vel);
+      vfx.muzzle(origin, proj.vel.clone().normalize(), PROJ[kind].color, kind === 'bigbolt' || kind === 'fireball' ? 1.1 : 0.7);
+    } else (mesh.material as THREE.Material).visible = true;
     this.projectiles.push(proj);
     if (kind !== 'snare') this.fx.light(origin, PROJ[kind].light, kind === 'bigbolt' || kind === 'fireball' ? 14 : 6, 1.2, 6, () => (proj.alive ? proj.pos : null));
     sfx.zap();
@@ -251,10 +263,11 @@ export class Match {
       p.life -= dt;
       p.pos.addScaledVector(p.vel, dt);
       p.mesh.position.copy(p.pos);
-      this.fx.trail(p.pos, PROJ[p.kind].trail, p.kind === 'bigbolt' || p.kind === 'fireball' ? 0.25 : 0.1, 0.2);
-      if (p.kind === 'fireball') { p.mesh.scale.setScalar(PROJ.fireball.scale * (0.85 + Math.random() * 0.3)); this.fx.wisp(p.pos, FIRE_COL, 0.55); }
-      const kill = () => { p.alive = false; p.mesh.visible = false; };
-      if (p.life <= 0) { kill(); continue; }
+      p.vis?.set(p.pos, p.vel);
+      if (!p.vis) this.fx.trail(p.pos, PROJ[p.kind].trail, p.kind === 'bigbolt' || p.kind === 'fireball' ? 0.25 : 0.1, 0.2);
+      if (p.kind === 'fireball' && !p.vis) { p.mesh.scale.setScalar(PROJ.fireball.scale * (0.85 + Math.random() * 0.3)); this.fx.wisp(p.pos, FIRE_COL, 0.55); }
+      const kill = (impact = true) => { p.alive = false; p.mesh.visible = false; p.vis?.stop(impact); p.vis = undefined; };
+      if (p.life <= 0) { kill(false); continue; }
       for (const f of this.fighters) {
         if (f === p.owner || !this.sphereVsFighter(p.pos, 0.25, f)) continue;
         const dir = p.vel.clone().setY(0).normalize();
@@ -273,6 +286,7 @@ export class Match {
           // Burns via the owner's passive; a small blast on contact.
           f.receiveHit(p.owner, { fwd: 0, up: 0, radius: 0, stamina: 8, health: 9, kbF: 9, kbU: 6, stun: 30, launch: true, heavy: true }, dir, { source: 'projectile' });
           this.fx.fireball(p.pos.clone(), 1.3);
+          this.fx.vfx?.explosion(p.pos.clone(), 1.4, false);
           sfx.explosion();
         } else if (p.kind === 'rift') {
           f.receiveHit(p.owner, { fwd: 0, up: 0, radius: 0, stamina: 4, health: 4, kbF: 5, kbU: 4, stun: 22, launch: !f.onGround }, dir, { source: 'projectile' });
@@ -284,7 +298,7 @@ export class Match {
           f.receiveHit(p.owner, { fwd: 0, up: 0, radius: 0, stamina: 4, health: 5, kbF: 4, kbU: f.onGround ? 0 : 5, stun: 18, launch: !f.onGround }, dir, { source: 'projectile' });
         } else {
           const r = f.receiveHit(p.owner, { fwd: 0, up: 0, radius: 0, stamina: 4, health: 1, kbF: 1, kbU: 0, stun: 10 }, dir, { source: 'projectile' });
-          if (r === 'hit' && f.state === 'hitstun') { f.setState('stunned'); f.stun = 55; f.say('SNARED'); }
+          if (r === 'hit' && f.state === 'hitstun') { f.setState('stunned'); f.stun = 55; f.snared = true; f.say('SNARED'); }
         }
         kill();
         break;
@@ -299,7 +313,7 @@ export class Match {
         continue;
       }
       const g = this.arena.groundAt(p.pos.x, p.pos.z, p.pos.y, 0);
-      if (p.pos.y <= g && p.kind === 'fireball') { this.fx.fireball(p.pos.clone(), 1.0); kill(); continue; }
+      if (p.pos.y <= g && p.kind === 'fireball') { this.fx.fireball(p.pos.clone(), 1.0); this.fx.vfx?.explosion(p.pos.clone(), 1.2, true); kill(); continue; }
       if (p.pos.y <= g) { this.fx.sparksAt(p.pos, 6, 0xc9a8ff, 4); kill(); }
     }
     this.projectiles = this.projectiles.filter((p) => p.alive);
@@ -329,6 +343,7 @@ export class Match {
     this.fx.burstDebris(c, 30, 0x302820, 12, 0.3);
     this.fx.sparksAt(c, 40, 0xffb040, 14, 0.14, 4);
     this.fx.fireball(c, p.kind === 'car' ? 3.6 : 3);
+    this.fx.vfx?.explosion(c, p.kind === 'car' ? 3.2 : 2.6, true);
     // Aftermath: a car leaves a burning wreck that still blocks and can be thrown again.
     if (p.kind === 'car' && this.arena.inside(p.pos.x, p.pos.z) && p.pos.y > -1) {
       const w = this.arena.makeWreck();

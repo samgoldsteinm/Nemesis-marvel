@@ -1,3 +1,4 @@
+import { VFX } from './vfx';
 import * as THREE from 'three';
 import { BOUNDS } from './arena';
 
@@ -208,6 +209,7 @@ export class FX {
   }
 
   clear() {
+    this.vfx?.clear();
     this.dParts.length = 0;
     this.pParts.length = 0;
     for (const b of this.billows) b.s.visible = false;
@@ -334,7 +336,11 @@ export class FX {
     f.m.visible = true;
   }
 
+  /** Ported Binbun shader effects (hits, impacts, projectiles, statuses). */
+  vfx: VFX | null = null;
+
   update(dt: number) {
+    if (this.vfx) { this.vfx.quality = this.quality; this.vfx.update(dt); }
     const t = this.tmp;
     let i = 0;
     for (let k = this.dParts.length - 1; k >= 0; k--) {

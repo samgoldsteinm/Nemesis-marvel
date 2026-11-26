@@ -1,0 +1,9 @@
+flash_atlas.png is built from textures in Binbun3D's "Muzzle Flash VFX" pack (flash_front_01, flash_front_03,
+flash_side_01, flash_long_01), downscaled and packed into a 2x2 grayscale atlas.
+
+The effects in src/vfx.ts are GLSL re-implementations inspired by Binbun3D's free Godot packs:
+Stylized Hit FX, Electric FX, Stylized Explosion FX, Elemental Magic FX, Status FX, Magic Projectiles VFX,
+Beam VFX and Muzzle Flash VFX.
+
+All are licensed Creative Commons Zero (CC0): https://creativecommons.org/publicdomain/zero/1.0/
+Free for personal, educational and commercial use, no attribution required. Credit: Binbun3D (bun3d.com).

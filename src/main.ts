@@ -1,3 +1,4 @@
+import { VFX } from './vfx';
 import { TRAITS } from './traits';
 import * as THREE from 'three';
 import { Arena, LAYOUTS, LayoutId } from './arena';
@@ -153,6 +154,7 @@ function applyPalette(id: LayoutId) {
 }
 
 const fx = new FX(scene);
+fx.vfx = new VFX(scene, '');
 const arena = new Arena(scene, fx);
 const vcam = new VersusCamera(window.innerWidth / window.innerHeight);
 // Bloom: hazy highlights on lamps, sparks, explosions and power effects. First thing dropped when slow.

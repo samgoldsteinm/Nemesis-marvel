@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { StatusHandle, StatusKind } from './vfx';
 import { CharacterDef, MoveDef, HitSpec, PROP_SWING, finishMaterial } from './characters';
 import { SkinnedBody, hasBodyModel, ClipPlay, hasClip } from './skinned';
 import { Rig, P, Pose } from './rig';
@@ -171,6 +172,7 @@ export class Fighter {
   }
 
   dispose() {
+    this.clearStatusFx();
     this.match.scene.remove(this.rig.root, this.shadowBlob, this.line, this.glow, this.contact);
     this.ribbon.dispose(this.match.scene);
   }
@@ -228,6 +230,7 @@ export class Fighter {
     this.outcome = null;
     this.dangerPrev = false;
     this.burnT = 0;
+    this.clearStatusFx();
     this.bleedT = 0;
     this.airJumped = false;
     this.staticCount = 0;
@@ -324,7 +327,32 @@ export class Fighter {
   bleedT = 0;
   airJumped = false;
   staticCount = 0;
+  snared = false;
+  private statusFx: Partial<Record<StatusKind, StatusHandle>> = {};
+  /** Keeps the persistent status effects (stun stars, snare rings, burn, rage/charge aura) in sync with state. */
+  private updateStatusFx() {
+    const vfx = this.match.fx.vfx;
+    if (!vfx) return;
+    if (this.state !== 'stunned') this.snared = false;
+    const on: Partial<Record<StatusKind, boolean>> = {
+      stun: this.alive && this.state === 'stunned' && !this.snared,
+      snare: this.alive && this.state === 'stunned' && this.snared,
+      burn: this.alive && this.burnT > 0,
+      rage: this.alive && this.raging,
+      charge: this.alive && (this.state === 'charge' || this.state === 'powerCharge'),
+    };
+    for (const k of Object.keys(on) as StatusKind[]) {
+      const h = this.statusFx[k];
+      if (on[k] && !h) {
+        const col = k === 'rage' ? 0xff3a2a : k === 'charge' ? new THREE.Color(this.def.color).getHex() : undefined;
+        this.statusFx[k] = vfx.status(() => (this.rig.root.visible && this.state !== 'out' ? this.center : null), k, col, this.def.height);
+      } else if (!on[k] && h) { h.stop(); delete this.statusFx[k]; }
+    }
+  }
+  clearStatusFx() { for (const h of Object.values(this.statusFx)) h?.stop(); this.statusFx = {}; }
+
   private updateResources(dt: number) {
+    this.updateStatusFx();
     if (this.burnT > 0 && this.alive) {
       this.burnT--;
       // Damage over time: mostly stamina, a little lasting health. Never finishes a fighter off on its own.
@@ -332,7 +360,7 @@ export class Fighter {
       this.health = Math.max(1, this.health - 1.2 * dt);
       this.stamina = Math.min(this.stamina, this.health);
       this.lastHit = 0;
-      if (this.tick % 3 === 0) {
+      if (this.tick % 3 === 0 && !this.match.fx.vfx) {
         const p = this.center.add(new THREE.Vector3((Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 1.2, (Math.random() - 0.5) * 0.6));
         this.match.fx.wisp(p, new THREE.Color(Math.random() < 0.5 ? 0xff5a10 : 0xffb030).multiplyScalar(0.8), 0.4);
       }
@@ -624,6 +652,8 @@ export class Fighter {
     sfx.rageOn();
     this.say('RAGE!');
     this.match.fx.ring(this.pos, 4, 0xff3a20, 0.6);
+    this.match.fx.vfx?.cast(this.pos.clone().setY(this.pos.y + 0.05), 0xff3a20, undefined, 1.6);
+    this.match.fx.vfx?.groundImpact(this.pos.clone(), 0xff3a20, 3);
     this.match.fx.flash(this.center, 1.6, 0xff4020, 0.3);
   }
 
@@ -672,6 +702,7 @@ export class Fighter {
     this.teleportTo.copy(target);
     this.match.fx.sparksAt(this.center, 18, this.tpColor, 5);
     this.match.fx.flash(this.center, 0.9, this.tpColor, 0.2);
+    this.match.fx.vfx?.cast(this.pos.clone().setY(this.pos.y + 0.05), this.tpColor, undefined, 0.9);
     sfx.teleport();
     this.setState('teleport');
     this.invuln = 14;
@@ -685,6 +716,7 @@ export class Fighter {
       this.rig.root.visible = true;
       this.match.fx.flash(this.center, 0.9, this.tpColor, 0.2);
       this.match.fx.sparksAt(this.center, 14, this.tpColor, 5);
+      this.match.fx.vfx?.cast(this.pos.clone().setY(this.pos.y + 0.05), this.tpColor, undefined, 0.9);
       const g = this.match.arena.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.1);
       this.onGround = this.pos.y <= g + 0.05;
       this.faceOpp(40);
@@ -951,6 +983,7 @@ export class Fighter {
     if (m.special === 'thunderclap') {
       const c = this.pos.clone().addScaledVector(this.forward, m.hit!.fwd);
       this.match.fx.ring(c.clone(), m.hit!.radius * 1.6, 0xffb070, 0.4);
+      this.match.fx.vfx?.groundImpact(c.clone().setY(this.pos.y), this.def.id === 'ember' ? 0xff6a1a : 0xffa050, m.hit!.radius * 1.2);
       this.match.fx.flash(this.pos.clone().addScaledVector(this.forward, 1).setY(this.pos.y + 1.5), 0.8, 0xffd0a0, 0.15);
       this.match.fx.shake = Math.max(this.match.fx.shake, 0.5);
       sfx.shock();
@@ -959,7 +992,8 @@ export class Fighter {
     if (m.special === 'pulse') {
       const c = this.center;
       this.match.fx.ring(this.pos.clone(), m.hit!.radius * 1.3, this.tpColor, 0.35);
-      this.match.fx.flash(c, 2.2, this.tpColor, 0.2);
+      this.match.fx.flash(c, 1.2, this.tpColor, 0.2);
+      this.match.fx.vfx?.electricBall(c, this.tpColor, m.hit!.radius * 0.9, 0.4);
       sfx.zap();
       this.match.resolveArea(this, m, c);
     }
@@ -969,6 +1003,7 @@ export class Fighter {
     if (m.special === 'mines') this.match.dropMines(this);
     if (m.special === 'quake') {
       this.match.fx.ring(this.pos.clone(), m.hit!.radius * 1.3, 0xff8040, 0.6);
+      this.match.fx.vfx?.groundImpact(this.pos.clone(), this.def.id === 'ember' ? 0xff5a10 : 0xffa050, m.hit!.radius * 1.3);
       this.match.fx.ring(this.pos.clone(), m.hit!.radius * 0.7, 0xffd0a0, 0.4);
       this.match.fx.burstDebris(this.pos.clone(), 30, 0x6a6a72, 10, 0.35);
       this.match.fx.shake = 1.2;
@@ -1000,6 +1035,7 @@ export class Fighter {
     fx.flash(this.center, 0.6, c, 0.15); fx.flash(o.center, 0.6, c, 0.15);
     const a = this.pos.clone(), b = o.pos.clone();
     for (let i = 0; i <= 8; i++) fx.trail(a.clone().lerp(b, i / 8).setY(a.y + 1 + Math.sin((i / 8) * Math.PI) * 1.2), c, 0.18, 0.4);
+    if (fx.vfx) { fx.vfx.beam(a.clone().setY(a.y + 1), b.clone().setY(b.y + 1), c, 0.3, 0.25); fx.vfx.cast(a.clone().setY(a.y + 0.05), c); fx.vfx.cast(b.clone().setY(b.y + 0.05), c); }
     this.pos.copy(b); o.pos.copy(a);
     this.vel.set(0, 0, 0); o.vel.set(0, 0, 0);
     this.match.arena.pushOut(this.pos, this.def.radius, this.def.height);
@@ -1025,6 +1061,8 @@ export class Fighter {
     const dir = to.normalize();
     const gate = o.center.addScaledVector(dir, 1.0);
     fx.ring(gate.clone().setY(o.pos.y), 1.4, c, 0.35);
+    fx.vfx?.cast(gate, c, dir.clone().negate(), 0.8);
+    fx.vfx?.hit(o.center, dir.clone().negate(), c, 0.8);
     fx.flash(gate, 0.7, c, 0.15);
     fx.sparksAt(gate, 14, c, 6);
     const r = o.receiveHit(this, m.hit!, dir.clone().negate(), { unblockable: true, source: 'melee' });
@@ -1077,7 +1115,8 @@ export class Fighter {
         }
       }
       if (t === a1 - 1) {
-        fx.flash(c, 1.6, 0xff5a7a, 0.25);
+        fx.flash(c, 1.0, 0xff5a7a, 0.25);
+        fx.vfx?.bigImpact(c, 0xff5a7a, 1.4);
         fx.ring(this.pos.clone(), m.hit!.radius * 1.5, 0xff5a7a, 0.5);
         fx.ring(this.pos.clone(), m.hit!.radius * 0.8, 0xffffff, 0.3);
         fx.shake = Math.max(fx.shake, 1);
@@ -1092,6 +1131,7 @@ export class Fighter {
         const ang = this.yaw + Math.PI * 0.5 + (k / 8) * (Math.PI * 0.5);
         const gate = o.center.add(new THREE.Vector3(Math.sin(ang) * 4, 1.4, Math.cos(ang) * 4));
         fx.ring(gate.clone(), 0.8, this.tpColor, 0.4);
+        fx.vfx?.cast(gate, this.tpColor, o.center.sub(gate).normalize(), 0.8);
         fx.flash(gate, 0.55, this.tpColor, 0.15);
         this.match.spawnProjectile(this, 'rift', 0, gate, o.center.sub(gate));
       }
@@ -1101,6 +1141,7 @@ export class Fighter {
   private groundPoundImpact() {
     const m = this.move!;
     this.match.fx.ring(this.pos.clone(), m.hit!.radius * 1.4, 0xff8040, 0.5);
+    this.match.fx.vfx?.groundImpact(this.pos.clone(), this.def.id === 'ember' ? 0xff5a10 : 0xffa050, m.hit!.radius * 1.1);
     this.match.fx.burstDebris(this.pos.clone(), 18, 0x6a6a72, 8, 0.3);
     this.match.fx.shake = Math.max(this.match.fx.shake, 0.9);
     sfx.shock();
@@ -1591,9 +1632,14 @@ export class Fighter {
       const dur = this.skinned!.clipDuration(name);
       const impact = CLIP_IMPACT[name];
       let speed: number;
-      if (impact !== undefined && impactTicks !== undefined) speed = THREE.MathUtils.clamp(impact / Math.max(0.05, impactTicks / 60), 0.85, 2.3);
-      else speed = THREE.MathUtils.clamp(dur / Math.max(0.05, ticks / 60), 0.85, 2.3);
-      return { name, loop: false, speed, key: `${name}#${tag}`, fade };
+      let startAt = 0;
+      if (impact !== undefined && impactTicks !== undefined) {
+        const want = Math.max(0.05, impactTicks / 60);
+        speed = THREE.MathUtils.clamp(impact / want, 0.85, 2.3);
+        // Long wind-ups (mocap clips) can't be sped up enough: skip into the clip so the blow still lands on the hit frame.
+        startAt = Math.max(0, impact - want * speed);
+      } else speed = THREE.MathUtils.clamp(dur / Math.max(0.05, ticks / 60), 0.85, 2.3);
+      return { name, loop: false, speed, key: `${name}#${tag}`, fade, startAt };
     };
     if (this.move !== this.lastMoveRef) { this.lastMoveRef = this.move; this.moveSerial++; }
     const ms = String(this.moveSerial);
@@ -1610,13 +1656,24 @@ export class Fighter {
       case 'air': return this.heldProp ? null : this.vel.y > 2 && this.t < 16 ? once(st.jumpStart ?? 'Jump_Start', 16, 's' + this.jumpSerial, undefined, 0.08) : loop('Jump_Loop', 1, 0.3);
       case 'recover': return once(st.land ?? 'Jump_Land', 10, 'l' + this.landSerial);
       case 'guard': case 'sblock': return this.blockT > 0 ? once('Idle_Shield_Break', 16, 'b' + this.blockSerial, undefined, 0.06) : loop('Idle_Shield_Loop', 1, 0.12);
-      case 'evade': return once('Roll', 28, 'r' + this.evadeSerial, undefined, 0.08);
+      case 'evade': {
+        if (st.dodge) {
+          const f = this.forward, side = this.vel.x * f.z - this.vel.z * f.x, fwd = this.vel.x * f.x + this.vel.z * f.z;
+          const name = Math.abs(side) > Math.abs(fwd) ? (side > 0 ? 'M_DodgeL' : 'M_DodgeR') : fwd < 0 ? 'M_DodgeBack' : 'M_RollFwd';
+          const c = once(name, 28, 'r' + this.evadeSerial, undefined, 0.08);
+          if (c) return c;
+        }
+        return once('Roll', 28, 'r' + this.evadeSerial, undefined, 0.08);
+      }
       case 'charge': return loop('Spell_Simple_Idle_Loop', 1, 0.2);
       case 'powerCharge': return once('Spell_Simple_Enter', 18, 'pc' + ms);
       case 'lift': return once('PickUp_Table', this.heldProp?.cls === 2 ? 26 : 14, 'lift' + ms, undefined, 0.12);
       case 'throw': return once('OverhandThrow', this.throwWind + 14, 'th' + ms, this.throwWind);
       case 'grabbing': return this.pummelT > 0 ? once('Melee_Hook', 10, 'pm' + this.pummels, 4, 0.06) : loop('Push_Loop', 0.5, 0.15);
-      case 'hitstun': return once(this.hitSide > 0 ? 'Hit_Chest' : 'Hit_Head', Math.max(16, this.stun), 'h' + this.lastHitSerial, undefined, 0.05);
+      case 'hitstun': {
+        const react = ['Hit_Chest', 'M_HitBody', 'Hit_Head', 'M_HitChest'][this.lastHitSerial % 4];
+        return once(hasClip(react) ? react : this.hitSide > 0 ? 'Hit_Chest' : 'Hit_Head', Math.max(16, this.stun), 'h' + this.lastHitSerial, undefined, 0.05);
+      }
       case 'stunned': return loop('Hit_Head', 0.35);
       case 'launched': return this.lastLaunchSpeed < 11 && this.t < 40 ? once('Hit_Knockback', 50, 'kb' + this.lastHitSerial, undefined, 0.05) : null;
       case 'getup': return once('LayToIdle', 40, 'gu' + this.lastHitSerial, undefined, 0.12);
@@ -1628,9 +1685,10 @@ export class Fighter {
         let name: string | undefined;
         const ci = this.def.moves.chain.indexOf(m);
         if (ci >= 0) name = st.chain[ci] || undefined;
+        else if (st.moves?.[m.id]) name = st.moves[m.id];
         else if (m === this.def.moves.runAttack) name = st.run;
         else if (m === this.def.moves.dashPower) name = st.dash;
-        else name = MOVE_CLIP[m.id];
+        else name = st.moves?.[m.id] ?? MOVE_CLIP[m.id];
         if (!name || (!this.onGround && !m.special && ci < 0)) return null;
         return once(name, dur, 'm' + ms, m.startup + 1, 0.07);
       }
@@ -1808,7 +1866,8 @@ export class Fighter {
         sfx.zap();
       }
       this.blockT = 14; this.blockSerial++;
-      this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.5), 6, 0xffffff, 4);
+      if (this.match.fx.vfx) this.match.fx.vfx.hit(this.center.addScaledVector(dir, -0.5), dir.clone().negate(), 0x9fd8ff, 0.15);
+      else this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.5), 6, 0xffffff, 4);
       att.rage = Math.min(100, att.rage + 2);
       return 'block';
     }
@@ -1863,16 +1922,26 @@ export class Fighter {
         this.applyDamage(6, 1);
         if (this.state === 'hitstun') this.stun += 16;
         this.match.fx.sparksAt(this.center, 18, 0xc9a8ff, 9, 0.06, 2);
-        this.match.fx.flash(this.center, 0.8, 0xb48cff, 0.15);
+        this.match.fx.vfx?.zap(att.hand(), this.center, 0xb48cff, 0.16, 0.25);
+        this.match.fx.vfx?.electricBall(this.center, 0xb48cff, 1.1, 0.35);
         sfx.zap();
         this.say('STATIC');
       }
     }
     if (spec.heavy) { this.match.camera.punch = 1; this.match.fx.blur = Math.max(this.match.fx.blur, 0.35); }
     this.match.fx.shake = Math.max(this.match.fx.shake, spec.heavy ? 0.45 : 0.15);
-    this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.4), spec.heavy ? 16 : 8, spec.heavy ? 0xffc060 : 0xffffff, spec.heavy ? 9 : 6);
-    if (spec.heavy) this.match.fx.flash(this.center, 0.7, 0xfff0d0, 0.1);
-    if (brokeStamina) this.say('STAMINA BREAK');
+    const vfx = this.match.fx.vfx;
+    const contact = this.center.addScaledVector(dir, -0.4);
+    const hitCol = new THREE.Color(att.def.color).lerp(new THREE.Color(0xffd080), 0.35).getHex();
+    if (vfx) {
+      vfx.hit(contact, dir.clone().negate(), hitCol, spec.heavy ? 0.9 : Math.min(0.6, spec.stamina / 14));
+      if (spec.heavy && launch) vfx.bigImpact(contact, hitCol, 0.8);
+    } else {
+      this.match.fx.sparksAt(contact, spec.heavy ? 16 : 8, spec.heavy ? 0xffc060 : 0xffffff, spec.heavy ? 9 : 6);
+      if (spec.heavy) this.match.fx.flash(this.center, 0.7, 0xfff0d0, 0.1);
+    }
+    if (brokeStamina) { this.say('STAMINA BREAK'); vfx?.shatter(this.center, 0xcfeeff, this.def.height * 0.8); }
+    if (this.health <= 0) vfx?.shatter(this.center, hitCol, this.def.height);
     if (this.health <= 0) this.match.declare(att, this, 'ko');
     return 'hit';
   }
@@ -2298,17 +2367,28 @@ function contactMat() {
 
 
 /** Per-fighter animation style: stance, combo clips, dash, landing and victory. */
-interface AnimStyle { idle: string; idleSpeed?: number; walk?: string; chain: string[]; run?: string; dash?: string; victory: string; jumpStart?: string; land?: string; locoScale?: number }
+interface AnimStyle { idle: string; idleSpeed?: number; walk?: string; chain: string[]; run?: string; dash?: string; victory: string; jumpStart?: string; land?: string; locoScale?: number; dodge?: boolean; moves?: Record<string, string> }
+// Chains/specials mix the Quaternius library with retargeted Motifect martial-arts clips (M_*), so each
+// fighter fights in their own style: Basalt pounds, Tether kicks like an acrobat, Aerin and Rift mix spells
+// with kicks, Shunt cuts with blade arcs, Vanta rakes and knees, Magna punches, Ember boxes.
 const STYLE: Record<string, AnimStyle> = {
   default: { idle: 'Idle_Loop', chain: ['Punch_Jab', 'Punch_Cross', 'Melee_Hook'], victory: 'Yes' },
-  basalt: { idle: 'Idle_Loop', idleSpeed: 0.7, chain: ['Shield_OneShot', 'Melee_Hook', 'Sword_Attack'], run: 'Melee_Hook', dash: 'Shield_Dash', victory: 'Idle_FoldArms_Loop', locoScale: 0.85 },
-  tether: { idle: 'NinjaJump_Idle_Loop', chain: ['Punch_Jab', 'Punch_Cross', ''], run: 'Slide_Start', dash: '', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land' },
-  aerin: { idle: 'Spell_Simple_Idle_Loop', chain: ['Spell_Simple_Shoot', 'Sword_Regular_A', 'Melee_Hook'], run: 'Sword_Regular_B', victory: 'Yes' },
-  shunt: { idle: 'Sword_Idle', chain: ['Sword_Regular_A', 'Sword_Regular_B', 'Sword_Regular_C'], run: 'Sword_Regular_A', dash: 'Sword_Dash', victory: 'Idle_FoldArms_Loop' },
-  vanta: { idle: 'Crouch_Idle_Loop', walk: 'Crouch_Fwd_Loop', chain: ['Sword_Regular_A', 'Sword_Regular_B', 'Zombie_Scratch', 'Melee_Hook'], run: 'Sword_Regular_B', dash: 'Sword_Dash', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land' },
-  magna: { idle: 'Idle_FoldArms_Loop', chain: ['Spell_Simple_Shoot', 'Punch_Cross', 'Melee_Hook'], run: 'Punch_Cross', victory: 'Idle_FoldArms_Loop' },
-  ember: { idle: 'Idle_Loop', idleSpeed: 0.85, chain: ['Punch_Jab', 'Melee_Hook', 'Shield_OneShot'], run: 'Melee_Hook', dash: 'Shield_Dash', victory: 'Yes', locoScale: 0.92 },
-  rift: { idle: 'Spell_Simple_Idle_Loop', idleSpeed: 0.7, chain: ['Punch_Jab', 'Spell_Simple_Shoot', ''], run: 'Melee_Hook', dash: 'Punch_Cross', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land' },
+  basalt: { idle: 'Idle_Loop', idleSpeed: 0.7, chain: ['M_BodyPunch', 'Melee_Hook', 'Sword_Attack'], run: 'M_Knee', dash: 'Shield_Dash', victory: 'Idle_FoldArms_Loop', locoScale: 0.85,
+    moves: { tectonic: 'M_Stomp', thunderclap: 'Shield_OneShot', counter: 'M_Elbow' } },
+  tether: { idle: 'NinjaJump_Idle_Loop', chain: ['Punch_Jab', 'M_Roundhouse_R', 'M_SpinKick'], run: 'M_Sweep', dash: '', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land', dodge: true,
+    moves: { counter: 'M_HeelKick', snare: 'Spell_Simple_Shoot', tripleSnare: 'Spell_Simple_Shoot' } },
+  aerin: { idle: 'Spell_Simple_Idle_Loop', chain: ['Spell_Simple_Shoot', 'M_Teep', 'M_HighKick'], run: 'M_MTRoundhouse', victory: 'Yes', dodge: true,
+    moves: { counter: 'M_SpinKick' } },
+  shunt: { idle: 'Sword_Idle', chain: ['Sword_Regular_A', 'M_SwordDiag', 'M_SwordH'], run: 'Sword_Regular_A', dash: 'Sword_Dash', victory: 'Idle_FoldArms_Loop',
+    moves: { counter: 'M_SwordSpin', blinkStrike: 'M_BackKick', phaseLunge: 'M_SideKick' } },
+  vanta: { idle: 'Crouch_Idle_Loop', walk: 'Crouch_Fwd_Loop', chain: ['M_ElbowCut', 'Zombie_Scratch', 'M_Knee', 'M_HeelKick'], run: 'Sword_Regular_B', dash: 'Sword_Dash', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land', dodge: true,
+    moves: { counter: 'M_AnkleSweep', clawFrenzy: 'Zombie_Scratch' } },
+  magna: { idle: 'Idle_FoldArms_Loop', chain: ['Spell_Simple_Shoot', 'M_Cross_R', 'M_Uppercut'], run: 'M_Elbow', victory: 'Idle_FoldArms_Loop',
+    moves: { counter: 'M_Hook_L' } },
+  ember: { idle: 'M_GuardStance', idleSpeed: 0.9, chain: ['M_JabCross', 'M_Hook_L', 'M_Uppercut_L'], run: 'M_HookUppercut', dash: 'Shield_Dash', victory: 'Yes', locoScale: 0.92,
+    moves: { counter: 'M_BodyPunch', eruption: 'M_Stomp' } },
+  rift: { idle: 'Spell_Simple_Idle_Loop', idleSpeed: 0.7, chain: ['M_Cross_L', 'M_Teep', 'M_AxeKick'], run: 'M_MTBodyKick', dash: 'Punch_Cross', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land', dodge: true,
+    moves: { counter: 'M_JumpFrontKick', riftStep: 'M_SideKick' } },
 };
 /** Clips for non-chain moves shared across fighters. */
 const MOVE_CLIP: Record<string, string> = {
@@ -2322,4 +2402,10 @@ const MOVE_CLIP: Record<string, string> = {
 const CLIP_IMPACT: Record<string, number> = {
   Punch_Jab: 0.22, Punch_Cross: 0.3, Melee_Hook: 0.2, Sword_Regular_A: 0.18, Sword_Regular_B: 0.22, Sword_Regular_C: 0.5, Shield_OneShot: 0.32,
   Sword_Attack: 0.6, Zombie_Scratch: 0.42, Spell_Simple_Shoot: 0.2, OverhandThrow: 0.55, Shield_Dash: 0.25, Sword_Dash: 0.35, Slide_Start: 0.3,
+  // Motifect (retargeted): seconds to the blow.
+  M_SpinKick: 0.78, M_Roundhouse_R: 0.63, M_Roundhouse_L: 0.7, M_FrontKick: 0.6, M_SideKick: 0.73, M_BackKick: 0.83, M_JumpKick: 1.53, M_Sweep: 0.6,
+  M_Uppercut: 0.47, M_Uppercut_L: 0.47, M_HookUppercut: 0.97, M_Hook_L: 0.37, M_Cross_R: 0.5, M_Cross_L: 0.43, M_JabCross: 0.3, M_PunchKick: 1.2,
+  M_BodyPunch: 0.67, M_Elbow: 0.37, M_Knee: 0.47, M_Stomp: 1.0, M_AxeKick: 0.8, M_HeelKick: 0.77, M_JumpSpinKick: 1.5, M_JumpFrontKick: 1.1,
+  M_HighKick: 0.63, M_Teep: 0.67, M_MTRoundhouse: 0.57, M_MTBodyKick: 0.53, M_ElbowCut: 0.43, M_AnkleSweep: 1.43, M_StaffOverhead: 0.8,
+  M_StaffSweep: 0.57, M_SwordSpin: 1.67, M_SwordDiag: 0.53, M_SwordH: 1.1,
 };
