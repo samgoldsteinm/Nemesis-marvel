@@ -21,7 +21,8 @@ export interface HitSpec {
 
 export type Special =
   | 'thunderclap' | 'groundPound' | 'bolt' | 'snare' | 'pulse' | 'blinkStrike' | 'counter' | 'dash'
-  | 'quake' | 'tripleSnare' | 'bigbolt' | 'mines' | 'slingshot' | 'propSwing';
+  | 'quake' | 'tripleSnare' | 'bigbolt' | 'mines' | 'slingshot' | 'propSwing'
+  | 'swap' | 'portalPunch' | 'riftStorm' | 'shadeRend' | 'implode' | 'fireball';
 
 /** Which limb draws the strike swoosh. */
 export type Limb = 'rh' | 'lh' | 'rf' | 'lf' | 'both';
@@ -43,7 +44,7 @@ export interface MoveDef {
   name?: string; // display name for the move sheet
 }
 
-export type PowerGrapple = 'piledriver' | 'webSpin' | 'skyDrop' | 'displace';
+export type PowerGrapple = 'piledriver' | 'webSpin' | 'skyDrop' | 'displace' | 'portalDrop';
 
 export interface CharacterDef {
   id: string;
@@ -81,6 +82,8 @@ export interface CharacterDef {
   /** X at range: pull opponents (if fighters) and props up to maxCls toward you. */
   rangedGrab?: { fighters: boolean; maxCls: LiftClass; range: number };
   lineColor?: number;
+  /** Colour of teleport / phase effects (defaults to cyan). */
+  fxColor?: number;
   /** Heavy hits set the target burning (damage over time). */
   burns?: boolean;
   /** Small constant flame wisps from the hands. */
@@ -723,18 +726,18 @@ const vanta: CharacterDef = {
       hit: { fwd: 1.0, up: 1.2, radius: 1.0, stamina: 12, health: 8, kbF: 14, kbU: 6, stun: 34, launch: true, heavy: true, breaksWalls: 60 },
     },
     chargePower: {
-      id: 'whirlwind', name: 'Whirlwind', limb: 'both', wind: P.charge.bind(null, 0), strike: P.kickS, startup: 4, active: 6, recovery: 18, energy: 15, special: 'pulse',
-      hit: { fwd: 0, up: 1.0, radius: 2.6, stamina: 14, health: 9, kbF: 12, kbU: 8, stun: 34, launch: true, heavy: true, breaksWalls: 40 },
+      id: 'shadeRend', name: 'Shade Rend', limb: 'both', wind: P.evade, strike: P.jabS, startup: 6, active: 24, recovery: 16, energy: 18, special: 'shadeRend',
+      hit: { fwd: 0, up: 1.0, radius: 1.0, stamina: 10, health: 8, kbF: 13, kbU: 8, stun: 36, launch: true, heavy: true, breaksWalls: 40 },
     },
   },
   powerGrapple: 'webSpin',
   sheet: {
     mobility: 'L: Sprint · L+A Pounce',
-    power: 'R+A: Claw Frenzy · running R+A: Shadow Rush · hold R+A: Whirlwind',
+    power: 'R+A: Claw Frenzy · running R+A: Shadow Rush · hold R+A: Shade Rend (phases through you three times)',
     grapple: 'Lifts light and medium props. R+X: Spiral Toss.',
     finisher: 'Nightfall — a blur of claw strikes from every side',
     weakness: 'Light and fragile: big hits send her flying, and ground recovery is short.',
-    moves: [['A A A A', 'Four-hit claw combo'], ['A (running)', 'Running Slash'], ['R+A', 'Claw Frenzy'], ['R+A (running)', 'Shadow Rush'], ['Hold R+A', 'Whirlwind — spinning blast'], ['L+A', 'Pounce'], ['R+X', 'Spiral Toss — fling for a ring-out'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A A', 'Four-hit claw combo'], ['A (running)', 'Running Slash'], ['R+A', 'Claw Frenzy'], ['R+A (running)', 'Shadow Rush'], ['Hold R+A', 'Shade Rend — phases through the opponent three times'], ['L+A', 'Pounce'], ['R+X', 'Spiral Toss — fling for a ring-out'], ['Grab, A', 'Knee pummel']],
   },
   build: genericBuild(0x15151a, 0xc8a030, 0xffd050),
 };
@@ -778,18 +781,18 @@ const magna: CharacterDef = {
       hit: { fwd: 0.9, up: 1.0, radius: 1.0, stamina: 10, health: 8, kbF: 13, kbU: 6, stun: 30, launch: true, heavy: true, breaksWalls: 50 },
     },
     chargePower: {
-      id: 'implosion', name: 'Implosion', limb: 'both', wind: P.charge.bind(null, 0), strike: P.clapW, startup: 4, active: 4, recovery: 20, energy: 18, special: 'pulse', airOk: true,
-      hit: { fwd: 0, up: 1.0, radius: 3.4, stamina: 12, health: 9, kbF: 13, kbU: 9, stun: 34, launch: true, heavy: true, breaksWalls: 50 },
+      id: 'implosion', name: 'Implosion', limb: 'both', wind: P.charge.bind(null, 0), strike: P.clapW, startup: 6, active: 34, recovery: 18, energy: 18, special: 'implode', airOk: true,
+      hit: { fwd: 0, up: 1.0, radius: 3.4, stamina: 12, health: 10, kbF: 14, kbU: 9, stun: 34, launch: true, heavy: true, breaksWalls: 50 },
     },
   },
   powerGrapple: 'skyDrop',
   sheet: {
     mobility: 'L: Magnetic flight (B up, Y down) · L+A Magnet Ram',
-    power: 'R+A: Shard Volley · running R+A: Polar Charge · hold R+A: Implosion',
+    power: 'R+A: Shard Volley · running R+A: Polar Charge · hold R+A: Implosion (drags you in, then blasts)',
     grapple: 'X at range pulls opponents and ANY object to his hands — cars included.',
     finisher: 'Crush Field — lifts the opponent and slams them down',
     weakness: 'Slow on foot; flight burns energy.',
-    moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Iron Elbow'], ['R+A', 'Shard Volley'], ['R+A (running)', 'Polar Charge'], ['Hold R+A', 'Implosion — big magnetic blast'], ['X (range)', 'Magnetic pull: fighters and objects'], ['L', 'Flight'], ['R+X', 'Skyfall Drop'], ['Grab, A', 'Knee pummel']],
+    moves: [['A A A', 'Jab, cross, uppercut'], ['A (running)', 'Iron Elbow'], ['R+A', 'Shard Volley'], ['R+A (running)', 'Polar Charge'], ['Hold R+A', 'Implosion — drags the opponent in, then blasts'], ['X (range)', 'Magnetic pull: fighters and objects'], ['L', 'Flight'], ['R+X', 'Skyfall Drop'], ['Grab, A', 'Knee pummel']],
   },
   build: genericBuild(0x8a9098, 0x8a1a28, 0xff4a6a),
 };
@@ -822,8 +825,7 @@ const ember: CharacterDef = {
       hit: { fwd: 1.0, up: 1.2, radius: 0.95, stamina: 10, health: 4, kbF: 12, kbU: 5, stun: 30, launch: true, heavy: true, breaksWalls: 50 },
     },
     power: {
-      id: 'flameWave', name: 'Flame Wave', limb: 'both', wind: P.clapW, strike: P.clapS, startup: 13, active: 4, recovery: 20, energy: 22, special: 'thunderclap',
-      hit: { fwd: 3.0, up: 1.2, radius: 2.4, stamina: 10, health: 7, kbF: 12, kbU: 5, stun: 32, launch: true, heavy: true, breaksWalls: 35 },
+      id: 'fireball', name: 'Fireball', limb: 'rh', wind: P.shoot, strike: P.shoot, startup: 9, active: 2, recovery: 16, energy: 18, special: 'fireball',
     },
     powerAir: {
       id: 'meteorDrop', name: 'Meteor Drop', limb: 'both', wind: P.overheadW, strike: P.slamS, startup: 8, active: 40, recovery: 20, energy: 22, special: 'groundPound', airOk: true, riseV: -26,
@@ -846,16 +848,17 @@ const ember: CharacterDef = {
   powerGrapple: 'piledriver',
   sheet: {
     mobility: 'L: Sprint · L+A Blaze Shoulder',
-    power: 'R+A: Flame Wave · running R+A: Flame Rush · hold R+A: Eruption · air: Meteor Drop',
+    power: 'R+A: Fireball (explodes and burns) · running R+A: Flame Rush · hold R+A: Eruption · air: Meteor Drop',
     grapple: 'Lifts light and medium props. R+X: Furnace Slam.',
     finisher: 'Inferno — lifts and spikes the opponent in a pillar of fire',
     weakness: 'Big and readable; no way back from a long launch.',
-    moves: [['A A A', 'Jab, cross, rising hook'], ['A (running)', 'Searing Hook'], ['R+A', 'Flame Wave — burns'], ['R+A (running)', 'Flame Rush'], ['Hold R+A', 'Eruption — burns'], ['R+A (air)', 'Meteor Drop'], ['L+A', 'Blaze Shoulder'], ['R+X', 'Furnace Slam'], ['Passive', 'Heavy hits set the target burning']],
+    moves: [['A A A', 'Jab, cross, rising hook'], ['A (running)', 'Searing Hook'], ['R+A', 'Fireball — explodes and burns'], ['R+A (running)', 'Flame Rush'], ['Hold R+A', 'Eruption — burns'], ['R+A (air)', 'Meteor Drop'], ['L+A', 'Blaze Shoulder'], ['R+X', 'Furnace Slam'], ['Passive', 'Heavy hits set the target burning']],
   },
   build: genericBuild(0x2a2420, 0x6a2a10, 0xff6a1a, true),
 };
 
 // ------------------------------------------------------------------ rigged looks for the new fighters
+vanta.fxColor = 0xe8c040;
 vanta.look = { female: true, height: 1.85, bulk: 0.95, body: 0x17171c, joints: 0xe8c040, jointGlow: 0.9, bodyRough: 0.35, bodyMetal: 0.35 };
 vanta.adorn = (b) => {
   const gold = mat(0xe8c040, 0.25, 0.8, 0x6a4800, 0.5);
@@ -907,7 +910,76 @@ ember.adorn = (b) => {
   return [lava, b.jointMat];
 };
 
-export const ROSTER: CharacterDef[] = [basalt, tether, aerin, shunt, vanta, magna, ember];
+// ------------------------------------------------------------------ RIFT — portal teleporter
+const rift: CharacterDef = {
+  id: 'rift',
+  name: 'RIFT',
+  title: 'The Gatekeeper',
+  blurb: 'Opens portals at will: blinks around the arena, swaps places with you and punches through gates.',
+  color: '#7dff6a',
+  recovery: 'teleport',
+  lift: 1,
+  speed: 6.2,
+  jumpV: 11,
+  weight: 0.95,
+  heavy: 0.2,
+  radius: 0.5,
+  height: 1.95,
+  durability: 0.95,
+  fxColor: 0x7dff6a,
+  proportions: { thigh: 0.53, shin: 0.51, torso: 0.66, shoulderW: 0.6, hipW: 0.3, upperArm: 0.35, foreArm: 0.34, neck: 0.1 },
+  moves: {
+    chain: [jab(5, 0.95), cross(5, 1.0), launcher(9, 1.05, 9, 9, { id: 'gateKick', wind: P.upperW, strike: P.kickS, startup: 8 })],
+    airRise: airRise(6),
+    airDive: airDive(8),
+    mobilityAtk: {
+      id: 'riftStep', name: 'Rift Step', limb: 'lf', wind: P.teleport, strike: P.kickS, startup: 10, active: 6, recovery: 14, special: 'blinkStrike', energy: 10,
+      hit: { fwd: 1.0, up: 1.2, radius: 0.9, stamina: 9, health: 4, kbF: 11, kbU: 6, stun: 30, launch: true, heavy: true, breaksWalls: 25 },
+    },
+    power: { id: 'swapGate', name: 'Swap Gate', limb: 'rh', wind: P.shoot, strike: P.shoot, startup: 8, active: 2, recovery: 16, energy: 22, special: 'swap', airOk: true },
+    powerAir: { id: 'swapGateAir', name: 'Swap Gate', limb: 'rh', wind: P.shoot, strike: P.shoot, startup: 7, active: 2, recovery: 14, energy: 22, special: 'swap', airOk: true },
+    counter: counter(),
+    runAttack: {
+      id: 'gateElbow', name: 'Gate Elbow', limb: 'rh', wind: P.crossW, strike: P.crossS, startup: 6, active: 6, recovery: 12, lunge: 9,
+      hit: { fwd: 1.0, up: 1.3, radius: 0.85, stamina: 8, health: 2, kbF: 9, kbU: 2, stun: 24 },
+    },
+    dashPower: {
+      id: 'portalPunch', name: 'Portal Punch', limb: 'rh', wind: P.crossW, strike: P.crossS, startup: 8, active: 2, recovery: 16, energy: 18, special: 'portalPunch',
+      hit: { fwd: 0, up: 0, radius: 0, stamina: 10, health: 8, kbF: 10, kbU: 5, stun: 34, launch: true, heavy: true },
+    },
+    chargePower: { id: 'riftStorm', name: 'Rift Storm', limb: 'both', wind: P.charge.bind(null, 0), strike: P.shoot, startup: 6, active: 20, recovery: 14, energy: 18, special: 'riftStorm' },
+  },
+  powerGrapple: 'portalDrop',
+  sheet: {
+    mobility: 'L+direction: Portal hop · L neutral: step out behind the opponent · L+A Rift Step kick',
+    power: 'R+A: Swap Gate (trade places) · running R+A: Portal Punch · hold R+A: Rift Storm',
+    grapple: 'Lifts light and medium props. R+X: Portal Drop.',
+    finisher: 'Gate Barrage — strikes from portals on every side',
+    weakness: 'Every portal costs energy; with an empty meter she has no way back from a launch.',
+    moves: [['A A A', 'Jab, cross, gate kick'], ['A (running)', 'Gate Elbow'], ['R+A', 'Swap Gate — swap places (use it near an edge!)'], ['R+A (running)', 'Portal Punch — hits from behind at range, pulls them in'], ['Hold R+A', 'Rift Storm — three gates fire on the opponent'], ['L + dir / L', 'Portal hop / step behind'], ['L+A', 'Rift Step kick'], ['R+X', 'Portal Drop — drops them from the sky'], ['Grab, A', 'Knee pummel']],
+  },
+  build: genericBuild(0x1c2a24, 0x2e3a44, 0x7dff6a),
+};
+rift.look = { female: true, height: 1.95, bulk: 0.96, body: 0x22302c, joints: 0x7dff6a, jointGlow: 1.4, bodyRough: 0.4, bodyMetal: 0.4 };
+rift.adorn = (b) => {
+  const dark = mat(0x18201c, 0.5, 0.4);
+  const glow = mat(0x9dff8a, 0.2, 0, 0x5aff4a, 1.8);
+  const silver = mat(0xc8d2cc, 0.25, 0.9);
+  // Hood, visor, portal rings on the wrists and a halo ring on the back.
+  b.attach('head', g(new THREE.SphereGeometry(0.15, 14, 10), dark, [0, 0.13, -0.03], undefined, [1.05, 1.1, 1.1]));
+  b.attach('head', g(new THREE.BoxGeometry(0.19, 0.035, 0.04), glow, [0, 0.1, 0.12], undefined, undefined, false));
+  for (const j of ['lFore', 'rFore'] as const) {
+    b.attach(j, g(new THREE.TorusGeometry(0.09, 0.018, 8, 20), glow, [0, -0.2, 0], [Math.PI / 2, 0, 0], undefined, false));
+    b.attach(j, g(new THREE.CylinderGeometry(0.075, 0.07, 0.16, 10), silver, [0, -0.12, 0]));
+  }
+  b.attach('spine', g(new THREE.TorusGeometry(0.3, 0.025, 8, 32), glow, [0, 0.1, -0.24], undefined, undefined, false));
+  b.attach('spine', g(new THREE.TorusGeometry(0.22, 0.012, 6, 28), silver, [0, 0.1, -0.24], undefined, undefined, false));
+  for (const [j, sx] of [['lArm', 1], ['rArm', -1]] as const) b.attach(j, g(new THREE.BoxGeometry(0.18, 0.06, 0.2), silver, [sx * 0.03, 0.03, 0], [0, 0, sx * 0.35]));
+  b.attach('hips', g(new THREE.BoxGeometry(0.33, 0.05, 0.23), glow, [0, 0.03, 0], undefined, undefined, false));
+  return [glow, b.jointMat];
+};
+
+export const ROSTER: CharacterDef[] = [basalt, tether, aerin, shunt, vanta, magna, ember, rift];
 export function charById(id: string) {
   return ROSTER.find((c) => c.id === id) ?? ROSTER[0];
 }

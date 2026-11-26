@@ -456,7 +456,7 @@ export class Fighter {
         break;
       case 'attack':
         if (this.move?.special === 'groundPound') this.groundPoundImpact();
-        else if (this.move?.airOk && !['bolt', 'snare', 'pulse', 'blinkStrike'].includes(this.move.special ?? '') && this.move.id !== 'flightDash') { this.move = null; this.setState('recover'); }
+        else if (this.move?.airOk && !['bolt', 'snare', 'pulse', 'blinkStrike', 'implode', 'swap', 'riftStorm'].includes(this.move.special ?? '') && this.move.id !== 'flightDash') { this.move = null; this.setState('recover'); }
         break;
       case 'swing': this.setState('ground'); break;
       case 'ko': break;
@@ -631,6 +631,9 @@ export class Fighter {
     return false;
   }
 
+  /** Colour of this fighter's teleport / phase effects. */
+  get tpColor(): number { return this.def.fxColor ?? 0x37f2ff; }
+
   beginTeleport(target: THREE.Vector3, clampToRoof: boolean) {
     if (clampToRoof) {
       target.x = THREE.MathUtils.clamp(target.x, -BOUNDS.hw + 1, BOUNDS.hw - 1);
@@ -640,8 +643,8 @@ export class Fighter {
     target.y = Number.isFinite(g) ? Math.max(g, Math.min(target.y, g + 3)) : target.y;
     this.match.arena.pushOut(target, this.def.radius, this.def.height);
     this.teleportTo.copy(target);
-    this.match.fx.sparksAt(this.center, 18, 0x37f2ff, 5);
-    this.match.fx.flash(this.center, 0.9, 0x37f2ff, 0.2);
+    this.match.fx.sparksAt(this.center, 18, this.tpColor, 5);
+    this.match.fx.flash(this.center, 0.9, this.tpColor, 0.2);
     sfx.teleport();
     this.setState('teleport');
     this.invuln = 14;
@@ -653,8 +656,8 @@ export class Fighter {
       this.pos.copy(this.teleportTo);
       this.vel.set(0, 0, 0);
       this.rig.root.visible = true;
-      this.match.fx.flash(this.center, 0.9, 0x37f2ff, 0.2);
-      this.match.fx.sparksAt(this.center, 14, 0x37f2ff, 5);
+      this.match.fx.flash(this.center, 0.9, this.tpColor, 0.2);
+      this.match.fx.sparksAt(this.center, 14, this.tpColor, 5);
       const g = this.match.arena.groundAt(this.pos.x, this.pos.z, this.pos.y + 0.1);
       this.onGround = this.pos.y <= g + 0.05;
       this.faceOpp(40);
@@ -865,10 +868,10 @@ export class Fighter {
       const target = o.pos.clone().addScaledVector(o.forward, -1.6);
       target.x = THREE.MathUtils.clamp(target.x, -BOUNDS.hw + 0.8, BOUNDS.hw - 0.8);
       target.z = THREE.MathUtils.clamp(target.z, -BOUNDS.hd + 0.8, BOUNDS.hd - 0.8);
-      this.match.fx.flash(this.center, 0.8, 0x37f2ff, 0.15);
+      this.match.fx.flash(this.center, 0.8, this.tpColor, 0.15);
       this.pos.copy(target);
       this.faceOpp(10);
-      this.match.fx.flash(this.center, 0.8, 0x37f2ff, 0.15);
+      this.match.fx.flash(this.center, 0.8, this.tpColor, 0.15);
       this.invuln = 6;
     }
     if (m.special === 'blinkStrike') this.rig.root.visible = !(t > 2 && t < 6);
@@ -882,12 +885,13 @@ export class Fighter {
       const o = this.opp;
       if (o.pos.distanceTo(this.pos) < 1.6) this.vel.multiplyScalar(0.3);
     }
+    if (m.special === 'shadeRend' || m.special === 'implode' || m.special === 'riftStorm') this.tickSpecial(m, t, activeStart, activeEnd);
     // Ground pound continues until it lands.
     if (m.special === 'groundPound') {
       if (!this.onGround && t >= activeStart) { this.vel.y = Math.min(this.vel.y, m.riseV ?? -20); this.vel.x *= 0.9; this.vel.z *= 0.9; this.t = Math.min(this.t, activeStart + 1); }
       if (t < activeStart) { this.vel.set(0, Math.max(this.vel.y, 3), 0); }
     }
-    if (t >= activeStart && t < activeEnd && m.hit && !['groundPound', 'thunderclap', 'pulse'].includes(m.special ?? '')) {
+    if (t >= activeStart && t < activeEnd && m.hit && !['groundPound', 'thunderclap', 'pulse', 'shadeRend', 'implode', 'portalPunch', 'swap'].includes(m.special ?? '')) {
       this.match.resolveMelee(this, m);
     }
     // Cancel windows: ordinary attacks can be cancelled into jump, guard/evade or mobility once the hit is out.
@@ -927,8 +931,8 @@ export class Fighter {
     }
     if (m.special === 'pulse') {
       const c = this.center;
-      this.match.fx.ring(this.pos.clone(), m.hit!.radius * 1.3, 0x37f2ff, 0.35);
-      this.match.fx.flash(c, 2.2, 0x37f2ff, 0.2);
+      this.match.fx.ring(this.pos.clone(), m.hit!.radius * 1.3, this.tpColor, 0.35);
+      this.match.fx.flash(c, 2.2, this.tpColor, 0.2);
       sfx.zap();
       this.match.resolveArea(this, m, c);
     }
@@ -948,6 +952,123 @@ export class Fighter {
       this.heldProp.uses++;
     }
     if (m.special === 'snare') this.match.spawnProjectile(this, 'snare');
+    if (m.special === 'fireball') {
+      this.match.spawnProjectile(this, 'fireball');
+      this.match.fx.flash(this.hand(), 1.2, 0xff8a30, 0.15);
+      this.match.fx.light(this.hand(), 0xff7a2a, 30, 0.3, 8);
+    }
+    if (m.special === 'swap') this.swapGate();
+    if (m.special === 'portalPunch') this.portalPunch(m);
+  }
+
+  // ======================================================================== signature specials
+  /** Swap Gate: trade places with the opponent — turns your own edge danger into theirs. */
+  private swapGate() {
+    const o = this.opp;
+    const fx = this.match.fx;
+    const c = this.tpColor;
+    const blocked = !o.alive || o.invuln > 0 || ['teleport', 'grabbed', 'finished', 'yanked', 'out', 'ko'].includes(o.state);
+    if (blocked || o.pos.distanceTo(this.pos) > 16) { fx.ring(this.pos.clone(), 1.6, c, 0.3); fx.sparksAt(this.hand(), 8, c, 4); return; }
+    fx.ring(this.pos.clone(), 2.2, c, 0.4); fx.ring(o.pos.clone(), 2.2, c, 0.4);
+    fx.flash(this.center, 0.6, c, 0.15); fx.flash(o.center, 0.6, c, 0.15);
+    const a = this.pos.clone(), b = o.pos.clone();
+    for (let i = 0; i <= 8; i++) fx.trail(a.clone().lerp(b, i / 8).setY(a.y + 1 + Math.sin((i / 8) * Math.PI) * 1.2), c, 0.18, 0.4);
+    this.pos.copy(b); o.pos.copy(a);
+    this.vel.set(0, 0, 0); o.vel.set(0, 0, 0);
+    this.match.arena.pushOut(this.pos, this.def.radius, this.def.height);
+    this.match.arena.pushOut(o.pos, o.def.radius, o.def.height);
+    o.yaw += Math.PI;
+    this.faceOpp(40);
+    sfx.teleport();
+    const dir = o.pos.clone().sub(this.pos).setY(0).normalize();
+    o.receiveHit(this, { fwd: 0, up: 0, radius: 0, stamina: 5, health: 3, kbF: 2, kbU: 0, stun: 30 }, dir, { unblockable: true, source: 'projectile' });
+    o.say('SWAPPED');
+    this.invuln = 6;
+  }
+
+  /** Portal Punch: the fist goes through a gate and hits the opponent from behind, pulling them in. */
+  private portalPunch(m: MoveDef) {
+    const o = this.opp;
+    const fx = this.match.fx;
+    const c = this.tpColor;
+    const to = o.pos.clone().sub(this.pos).setY(0);
+    const d = to.length();
+    fx.ring(this.hand(), 0.9, c, 0.25);
+    if (!o.alive || d > 14 || d < 0.1 || o.invuln > 0) return;
+    const dir = to.normalize();
+    const gate = o.center.addScaledVector(dir, 1.0);
+    fx.ring(gate.clone().setY(o.pos.y), 1.4, c, 0.35);
+    fx.flash(gate, 0.7, c, 0.15);
+    fx.sparksAt(gate, 14, c, 6);
+    const r = o.receiveHit(this, m.hit!, dir.clone().negate(), { unblockable: true, source: 'melee' });
+    if (r === 'hit') sfx.hit(true);
+  }
+
+  /** Multi-tick specials: Shade Rend (dash through three times), Implosion (pull then blast), Rift Storm (gates fire). */
+  private tickSpecial(m: MoveDef, t: number, a0: number, a1: number) {
+    const o = this.opp;
+    const fx = this.match.fx;
+    if (m.special === 'shadeRend') {
+      const k = t - a0;
+      this.vel.x = 0; this.vel.z = 0;
+      this.rig.root.visible = !(k >= 0 && k % 9 < 2);
+      if (k >= 0 && k % 9 === 0 && k <= 18) {
+        const last = k === 18;
+        const to = o.pos.clone().sub(this.pos).setY(0);
+        if (!o.alive || to.length() > 9 || o.invuln > 0 || to.lengthSq() < 0.01) { if (k === 0) { this.vel.copy(this.forward.multiplyScalar(14)); } return; }
+        const dir = to.normalize();
+        const from = this.pos.clone();
+        const dest = o.pos.clone().addScaledVector(dir, 1.7);
+        dest.x = THREE.MathUtils.clamp(dest.x, -BOUNDS.hw + 0.8, BOUNDS.hw - 0.8);
+        dest.z = THREE.MathUtils.clamp(dest.z, -BOUNDS.hd + 0.8, BOUNDS.hd - 0.8);
+        dest.y = this.pos.y;
+        for (let i = 0; i <= 10; i++) fx.trail(from.clone().lerp(dest, i / 10).setY(from.y + 1.1), this.tpColor, 0.16, 0.35);
+        this.pos.copy(dest);
+        this.match.arena.pushOut(this.pos, this.def.radius, this.def.height);
+        this.yaw = Math.atan2(-dir.x, -dir.z);
+        this.invuln = 5;
+        fx.blur = Math.max(fx.blur, 0.5);
+        fx.sparksAt(o.center, 12, this.tpColor, 7);
+        const spec = last ? m.hit! : { fwd: 0, up: 0, radius: 0, stamina: 5, health: 3, kbF: 1, kbU: 0, stun: 20 };
+        const r = o.receiveHit(this, spec, last ? dir.clone().negate() : dir, { source: 'melee' });
+        if (r === 'hit') sfx.hit(last); else sfx.block();
+      }
+    }
+    if (m.special === 'implode') {
+      const c = this.center;
+      if (t >= a0 && t < a1) {
+        const f = (t - a0) / (a1 - a0);
+        const r = 5.5 * (1 - f) + 0.6;
+        for (let i = 0; i < 5; i++) {
+          const ang = t * 0.35 + (i / 5) * Math.PI * 2;
+          fx.trail(c.clone().add(new THREE.Vector3(Math.cos(ang) * r, Math.sin(ang * 1.7) * 0.6, Math.sin(ang) * r)), 0xff5a7a, 0.14, 0.25);
+        }
+        const to = c.clone().sub(o.center).setY(0);
+        if (o.alive && to.length() < 10 && to.length() > 1.3 && ['ground', 'air', 'guard', 'hitstun', 'stunned', 'attack', 'fly', 'charge', 'evade'].includes(o.state)) {
+          o.pos.addScaledVector(to.normalize(), 0.13);
+          this.match.arena.pushOut(o.pos, o.def.radius, o.def.height);
+        }
+      }
+      if (t === a1 - 1) {
+        fx.flash(c, 1.6, 0xff5a7a, 0.25);
+        fx.ring(this.pos.clone(), m.hit!.radius * 1.5, 0xff5a7a, 0.5);
+        fx.ring(this.pos.clone(), m.hit!.radius * 0.8, 0xffffff, 0.3);
+        fx.shake = Math.max(fx.shake, 1);
+        fx.screenFlash = Math.max(fx.screenFlash, 0.4);
+        sfx.shock(); sfx.zap();
+        this.match.resolveArea(this, m, c);
+      }
+    }
+    if (m.special === 'riftStorm') {
+      const k = t - a0;
+      if (k >= 0 && k <= 16 && k % 8 === 0 && o.alive) {
+        const ang = this.yaw + Math.PI * 0.5 + (k / 8) * (Math.PI * 0.5);
+        const gate = o.center.add(new THREE.Vector3(Math.sin(ang) * 4, 1.4, Math.cos(ang) * 4));
+        fx.ring(gate.clone(), 0.8, this.tpColor, 0.4);
+        fx.flash(gate, 0.55, this.tpColor, 0.15);
+        this.match.spawnProjectile(this, 'rift', 0, gate, o.center.sub(gate));
+      }
+    }
   }
 
   private groundPoundImpact() {
@@ -1225,18 +1346,32 @@ export class Fighter {
         }
         break;
       }
+      case 'portalDrop': {
+        // Open a gate under the victim, drop them through, and spike them down from the sky.
+        const c = this.tpColor;
+        if (t < 12) { o.pos.copy(this.pos).addScaledVector(fwd, 1.2); o.pos.y = this.pos.y - t * 0.14; if (t % 3 === 0) fx.ring(this.pos.clone().addScaledVector(fwd, 1.2), 1.8, c, 0.3); }
+        if (t === 2) { fx.flash(o.center, 1.2, c, 0.2); sfx.teleport(); }
+        o.rig.root.visible = t < 12 || t >= 26;
+        if (t === 26) {
+          o.pos.copy(this.pos).addScaledVector(fwd, 2.2).setY(this.pos.y + 9);
+          fx.ring(o.pos.clone().setY(o.pos.y + 1.5), 2.2, c, 0.5);
+          fx.flash(o.center, 0.9, c, 0.2);
+          release(fwd, { fwd: 0, up: 0, radius: 0, stamina: 12, health: 16, kbF: 3, kbU: 0, stun: 46, launch: true, heavy: true }, () => { o.vel.set(fwd.x * 2, -28, fwd.z * 2); });
+        }
+        break;
+      }
       case 'displace': {
         // Vanish with the victim and drop them nine metres away — off an open edge if aimed there.
         o.rig.root.visible = t < 6;
         this.rig.root.visible = t < 6 || t > 16;
-        if (t === 6) { fx.flash(o.center, 1.2, 0x37f2ff, 0.2); sfx.teleport(); }
+        if (t === 6) { fx.flash(o.center, 1.2, this.tpColor, 0.2); sfx.teleport(); }
         if (t === 18) {
           const wish = this.wishDir();
           const dir = wish.lengthSq() > 0.2 ? wish.normalize() : fwd;
           o.pos.copy(this.pos).addScaledVector(dir, 9).setY(this.pos.y + 3);
           o.rig.root.visible = true;
-          fx.flash(o.center, 1.4, 0x37f2ff, 0.25);
-          fx.sparksAt(o.center, 16, 0x37f2ff, 6);
+          fx.flash(o.center, 1.4, this.tpColor, 0.25);
+          fx.sparksAt(o.center, 16, this.tpColor, 6);
           release(dir, { fwd: 0, up: 0, radius: 0, stamina: 10, health: 10, kbF: 6, kbU: 4, stun: 40, launch: true, heavy: true });
         }
         break;
@@ -1748,11 +1883,11 @@ export class Fighter {
         const a = Math.random() * Math.PI * 2;
         this.pos.copy(o.pos).add(new THREE.Vector3(Math.sin(a) * 1.4, 0, Math.cos(a) * 1.4));
         this.yaw = Math.atan2(o.pos.x - this.pos.x, o.pos.z - this.pos.z);
-        fx.flash(o.center, 0.9, 0x37f2ff, 0.12);
-        fx.sparksAt(o.center, 10, 0x37f2ff, 7);
+        fx.flash(o.center, 0.9, this.tpColor, 0.12);
+        fx.sparksAt(o.center, 10, this.tpColor, 7);
         sfx.hit(true);
       }
-      if (t === 100) { this.pos.copy(s); fx.flash(o.center, 2.2, 0x37f2ff, 0.3); fx.ring(o.pos.clone(), 5, 0x37f2ff, 0.5); sfx.explosion(); }
+      if (t === 100) { this.pos.copy(s); fx.flash(o.center, 2.2, this.tpColor, 0.3); fx.ring(o.pos.clone(), 5, this.tpColor, 0.5); sfx.explosion(); }
     }
     o.vel.set(0, 0, 0);
     if (t === 105) {
@@ -1816,7 +1951,7 @@ export class Fighter {
       case 'recover': pose = P.air(2); break;
       case 'finisher': pose = this.t < 30 ? P.grab() : this.t < 80 ? P.holdOver() : P.slamS(); rate = 20; break;
       case 'powerCharge': pose = this.t < 18 ? P.charge(time) : P.clapW(); rate = 14; break;
-      case 'pgrapple': pose = this.def.powerGrapple === 'piledriver' ? (this.t < 22 ? P.holdOver() : P.slamS()) : this.def.powerGrapple === 'webSpin' ? P.swing(time) : this.def.powerGrapple === 'skyDrop' ? P.fly(4) : P.teleport(); rate = 20; break;
+      case 'pgrapple': pose = this.def.powerGrapple === 'piledriver' ? (this.t < 22 ? P.holdOver() : P.slamS()) : this.def.powerGrapple === 'webSpin' ? P.swing(time) : this.def.powerGrapple === 'skyDrop' ? P.fly(4) : this.def.powerGrapple === 'portalDrop' ? P.shoot() : P.teleport(); rate = 20; break;
       case 'finished': pose = P.launched(); break;
       case 'ko': pose = this.onGround ? P.down() : P.launched(); rate = 10; break;
       case 'victory': pose = P.victory(time); break;
@@ -2013,6 +2148,7 @@ const STYLE: Record<string, AnimStyle> = {
   vanta: { idle: 'Crouch_Idle_Loop', walk: 'Crouch_Fwd_Loop', chain: ['Sword_Regular_A', 'Sword_Regular_B', 'Zombie_Scratch', 'Melee_Hook'], run: 'Sword_Regular_B', dash: 'Sword_Dash', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land' },
   magna: { idle: 'Idle_FoldArms_Loop', chain: ['Spell_Simple_Shoot', 'Punch_Cross', 'Melee_Hook'], run: 'Punch_Cross', victory: 'Idle_FoldArms_Loop' },
   ember: { idle: 'Idle_Loop', idleSpeed: 0.85, chain: ['Punch_Jab', 'Melee_Hook', 'Shield_OneShot'], run: 'Melee_Hook', dash: 'Shield_Dash', victory: 'Yes', locoScale: 0.92 },
+  rift: { idle: 'Spell_Simple_Idle_Loop', idleSpeed: 0.7, chain: ['Punch_Jab', 'Spell_Simple_Shoot', ''], run: 'Melee_Hook', dash: 'Punch_Cross', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land' },
 };
 /** Clips for non-chain moves shared across fighters. */
 const MOVE_CLIP: Record<string, string> = {
@@ -2020,6 +2156,7 @@ const MOVE_CLIP: Record<string, string> = {
   whiffGrab: 'Push_Loop', bolt: 'Spell_Simple_Shoot', boltAir: 'Spell_Simple_Shoot', shards: 'Spell_Simple_Shoot', shardsAir: 'Spell_Simple_Shoot',
   snare: 'Spell_Simple_Shoot', snareAir: 'Spell_Simple_Shoot', chainLightning: 'Spell_Simple_Shoot', tripleSnare: 'Spell_Simple_Shoot', mineTrail: 'Spell_Simple_Shoot',
   clawFrenzy: 'Zombie_Scratch', pounce: 'Sword_Dash', counter: 'Melee_Hook',
+  fireball: 'Spell_Simple_Shoot', swapGate: 'Spell_Simple_Shoot', swapGateAir: 'Spell_Simple_Shoot', riftStorm: 'Spell_Simple_Shoot', shadeRend: 'Zombie_Scratch',
 };
 /** Seconds into each clip where the blow lands (estimated by eye); used to align clips to hit frames. */
 const CLIP_IMPACT: Record<string, number> = {

@@ -244,7 +244,9 @@ export class CPU {
         if (this.canShoot(o) && f.energy > 35 && rnd < 0.25) { this.shot(); this.set('snare', 14, { hold: ['power'], press: ['attack'] }); return; }
         if (rnd < 0.3) { this.set('swing-in', 40, { move: toward, hold: ['mobility'] }); return; }
       }
-      if (id === 'shunt' && f.energy > 30 && rnd < 0.45) {
+      if (id === 'ember' && this.canShoot(o) && f.energy > 25 && rnd < 0.35) { this.shot(); this.set('fireball', 26, { hold: ['power'], press: ['attack'] }); return; }
+      if (id === 'rift' && dist < 14 && f.energy > 30 && rnd < 0.2) { f.yaw = Math.atan2(toO.x, toO.z); this.set('swap', 20, { hold: ['power'], press: ['attack'] }); return; }
+      if ((id === 'shunt' || id === 'rift') && f.energy > 30 && rnd < 0.45) {
         // Flank: neutral L teleports behind the opponent.
         this.set('flank', 6, { press: ['mobility'] }); return;
       }

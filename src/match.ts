@@ -6,10 +6,20 @@ import { VersusCamera } from './camera';
 import { CharacterDef, MoveDef, HitSpec } from './characters';
 import { sfx } from './audio';
 
+const PROJ: Record<ProjKind, { speed: number; color: number; scale: number; trail: number; light: number }> = {
+  bolt: { speed: 30, color: 0xc9a8ff, scale: 1.1, trail: 0xa070ff, light: 0xb48cff },
+  bigbolt: { speed: 24, color: 0xc9a8ff, scale: 2.6, trail: 0xa070ff, light: 0xb48cff },
+  snare: { speed: 22, color: 0xeaffff, scale: 1.4, trail: 0xeaffff, light: 0xeaffff },
+  fireball: { speed: 20, color: 0xffa040, scale: 2.2, trail: 0xff6a1a, light: 0xff7a2a },
+  rift: { speed: 26, color: 0x9dff8a, scale: 1.3, trail: 0x5aff4a, light: 0x7dff6a },
+};
+const FIRE_COL = new THREE.Color(0xff7a2a);
+
 export type EndHow = 'ko' | 'ringout' | 'finisher';
 
+export type ProjKind = 'bolt' | 'snare' | 'bigbolt' | 'fireball' | 'rift';
 interface Projectile {
-  kind: 'bolt' | 'snare' | 'bigbolt';
+  kind: ProjKind;
   owner: Fighter;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
@@ -215,22 +225,23 @@ export class Match {
     this.mines = this.mines.filter((m) => m.t >= 0);
   }
 
-  spawnProjectile(owner: Fighter, kind: 'bolt' | 'snare' | 'bigbolt', angle = 0) {
+  spawnProjectile(owner: Fighter, kind: ProjKind, angle = 0, from?: THREE.Vector3, dirOverride?: THREE.Vector3) {
     const mesh = this.projPool.find((m) => !m.visible);
     if (!mesh) return;
     const o = owner.opp;
-    const origin = owner.hand();
+    const origin = from ? from.clone() : owner.hand();
     const aim = o.center.sub(origin);
-    const dir = aim.lengthSq() > 0 && aim.clone().setY(0).normalize().dot(owner.forward) > 0.5 ? aim.normalize() : owner.forward.clone().setY(0);
+    const dir = dirOverride ? dirOverride.clone().normalize()
+      : aim.lengthSq() > 0 && aim.clone().setY(0).normalize().dot(owner.forward) > 0.5 ? aim.normalize() : owner.forward.clone().setY(0);
     if (angle) dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), angle);
-    const speed = kind === 'bolt' ? 30 : kind === 'bigbolt' ? 24 : 22;
-    (mesh.material as THREE.MeshBasicMaterial).color.setHex(kind === 'snare' ? 0xeaffff : 0xc9a8ff);
-    mesh.scale.setScalar(kind === 'bolt' ? 1.1 : kind === 'bigbolt' ? 2.6 : 1.4);
+    const speed = PROJ[kind].speed;
+    (mesh.material as THREE.MeshBasicMaterial).color.setHex(PROJ[kind].color);
+    mesh.scale.setScalar(PROJ[kind].scale);
     mesh.visible = true;
     mesh.position.copy(origin);
-    const proj = { kind, owner, pos: origin.clone(), vel: dir.multiplyScalar(speed), life: 1.3, mesh, alive: true };
+    const proj = { kind, owner, pos: origin.clone(), vel: dir.multiplyScalar(speed), life: kind === 'fireball' ? 1.6 : 1.3, mesh, alive: true };
     this.projectiles.push(proj);
-    if (kind !== 'snare') this.fx.light(origin, 0xb48cff, kind === 'bigbolt' ? 14 : 6, 1.2, 6, () => (proj.alive ? proj.pos : null));
+    if (kind !== 'snare') this.fx.light(origin, PROJ[kind].light, kind === 'bigbolt' || kind === 'fireball' ? 14 : 6, 1.2, 6, () => (proj.alive ? proj.pos : null));
     sfx.zap();
   }
 
@@ -240,7 +251,8 @@ export class Match {
       p.life -= dt;
       p.pos.addScaledVector(p.vel, dt);
       p.mesh.position.copy(p.pos);
-      this.fx.trail(p.pos, p.kind === 'snare' ? 0xeaffff : 0xa070ff, p.kind === 'bigbolt' ? 0.25 : 0.1, 0.2);
+      this.fx.trail(p.pos, PROJ[p.kind].trail, p.kind === 'bigbolt' || p.kind === 'fireball' ? 0.25 : 0.1, 0.2);
+      if (p.kind === 'fireball') { p.mesh.scale.setScalar(PROJ.fireball.scale * (0.85 + Math.random() * 0.3)); this.fx.wisp(p.pos, FIRE_COL, 0.55); }
       const kill = () => { p.alive = false; p.mesh.visible = false; };
       if (p.life <= 0) { kill(); continue; }
       for (const f of this.fighters) {
@@ -256,7 +268,15 @@ export class Match {
           this.log(`${f.def.id} deflects ${p.kind}`);
           break;
         }
-        if (p.kind === 'bigbolt') {
+        if (p.kind === 'fireball') {
+          // Burns via the owner's passive; a small blast on contact.
+          f.receiveHit(p.owner, { fwd: 0, up: 0, radius: 0, stamina: 8, health: 9, kbF: 9, kbU: 6, stun: 30, launch: true, heavy: true }, dir, { source: 'projectile' });
+          this.fx.fireball(p.pos.clone(), 1.3);
+          sfx.explosion();
+        } else if (p.kind === 'rift') {
+          f.receiveHit(p.owner, { fwd: 0, up: 0, radius: 0, stamina: 4, health: 4, kbF: 5, kbU: 4, stun: 22, launch: !f.onGround }, dir, { source: 'projectile' });
+          this.fx.flash(p.pos, 0.9, 0x7dff6a, 0.15);
+        } else if (p.kind === 'bigbolt') {
           f.receiveHit(p.owner, { fwd: 0, up: 0, radius: 0, stamina: 8, health: 12, kbF: 10, kbU: 7, stun: 34, launch: true, heavy: true }, dir, { source: 'projectile' });
           this.fx.flash(p.pos, 1.4, 0xc9a8ff, 0.2);
         } else if (p.kind === 'bolt') {
@@ -271,12 +291,14 @@ export class Match {
       if (!p.alive) continue;
       const w = this.arena.wallAt(p.pos, 0.2);
       if (w) {
-        if (w.damage(p.kind === 'bolt' ? 12 : p.kind === 'bigbolt' ? 45 : 4, this.fx, p.vel.clone().normalize())) this.arena.spawnRubble(w.center.clone().setY(0.6).addScaledVector(w.outward, -1.2));
+        if (p.kind === 'fireball') this.fx.fireball(p.pos.clone(), 1.2);
+        if (w.damage(p.kind === 'bolt' || p.kind === 'rift' ? 12 : p.kind === 'bigbolt' || p.kind === 'fireball' ? 45 : 4, this.fx, p.vel.clone().normalize())) this.arena.spawnRubble(w.center.clone().setY(0.6).addScaledVector(w.outward, -1.2));
         this.fx.sparksAt(p.pos, 8, 0xc9a8ff, 5);
         kill();
         continue;
       }
       const g = this.arena.groundAt(p.pos.x, p.pos.z, p.pos.y, 0);
+      if (p.pos.y <= g && p.kind === 'fireball') { this.fx.fireball(p.pos.clone(), 1.0); kill(); continue; }
       if (p.pos.y <= g) { this.fx.sparksAt(p.pos, 6, 0xc9a8ff, 4); kill(); }
     }
     this.projectiles = this.projectiles.filter((p) => p.alive);

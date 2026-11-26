@@ -324,6 +324,7 @@ const RATINGS: Record<string, { power: number; speed: number; range: number; tou
   vanta: { power: 3, speed: 5, range: 2, toughness: 2, difficulty: 'Medium' },
   magna: { power: 4, speed: 2, range: 5, toughness: 3, difficulty: 'Medium' },
   ember: { power: 4, speed: 3, range: 3, toughness: 4, difficulty: 'Easy' },
+  rift: { power: 3, speed: 4, range: 4, toughness: 2, difficulty: 'Hard' },
 };
 const ICON = { ground: '⛰', swing: '🪢', flight: '🪽', teleport: '✦' } as Record<string, string>;
 const LIFT = ['Light objects', 'Medium objects', 'Anything — even cars'];
@@ -711,6 +712,7 @@ const hooks = {
   setSpeed(s: number) { simSpeed = s; },
   disableCPU() { cpus = [null, null]; },
   enableCPU(diff: Difficulty = 'normal') { if (match) cpus = [null, new CPU(match.fighters[1], match, diff)]; },
+  getCPUs() { return cpus; },
   enableCPUs(diff: Difficulty = 'normal') { if (match) cpus = [new CPU(match.fighters[0], match, diff), new CPU(match.fighters[1], match, diff)]; },
   perfStats,
   emptyRaw,

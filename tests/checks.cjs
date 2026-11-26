@@ -402,7 +402,7 @@ const URL = process.argv[2] || 'http://localhost:5173/';
 
   await check('Power grapples: each fighter has its own R+X throw', () => {
     const out = [];
-    for (const id of ['basalt', 'tether', 'aerin', 'shunt', 'vanta', 'magna', 'ember']) {
+    for (const id of ['basalt', 'tether', 'aerin', 'shunt', 'vanta', 'magna', 'ember', 'rift']) {
       const m = T.setup(id, 'basalt');
       const [a, b] = m.fighters;
       T.faceEachOther(m, a.def.radius + b.def.radius + 0.6);
@@ -414,6 +414,29 @@ const URL = process.argv[2] || 'http://localhost:5173/';
       out.push(`${id}:${a.def.powerGrapple}:${seen ? 'ok' : 'NO'}:hp${b.health.toFixed(0)}:moved${b.pos.distanceTo(p0).toFixed(1)}`);
     }
     return { pass: out.every((o) => o.includes(':ok:') && !o.includes('hp100')), info: out.join(' ; ') };
+  });
+
+  await check('Signature specials: swap, portal punch, rift storm, shade rend, implosion, fireball', () => {
+    const run = (id, key, dist, ticks) => {
+      const m = T.setup(id, 'basalt');
+      const [a, b] = m.fighters;
+      T.faceEachOther(m, dist);
+      a.energy = 100;
+      const pa = a.pos.clone(), pb = b.pos.clone(), hp = b.health;
+      a.startMove(a.def.moves[key]);
+      let minD = 99;
+      for (let i = 0; i < ticks; i++) { T.idle(1); minD = Math.min(minD, a.pos.distanceTo(b.pos)); }
+      return { a, b, pa, pb, dmg: hp - b.health, minD };
+    };
+    const sw = run('rift', 'power', 8, 30);
+    const swapped = sw.a.pos.distanceTo(sw.pb) < 1.5 && sw.b.pos.distanceTo(sw.pa) < 2.5;
+    const pp = run('rift', 'dashPower', 9, 30);
+    const rs = run('rift', 'chargePower', 8, 70);
+    const sr = run('vanta', 'chargePower', 4, 60);
+    const im = run('magna', 'chargePower', 6, 50);
+    const fb = run('ember', 'power', 8, 60);
+    const info = `swap=${swapped} punch=${pp.dmg.toFixed(0)} storm=${rs.dmg.toFixed(0)} rend=${sr.dmg.toFixed(0)} implode=${im.dmg.toFixed(0)} minD=${im.minD.toFixed(1)} fireball=${fb.dmg.toFixed(0)} burn=${fb.b.burnT}`;
+    return { pass: swapped && pp.dmg > 0 && rs.dmg > 0 && sr.dmg > 0 && im.dmg > 0 && im.minD < 4 && fb.dmg > 0, info };
   });
 
   await check('SHUNT Displace drops the victim off an open edge for a ring-out', () => {
@@ -466,7 +489,7 @@ const URL = process.argv[2] || 'http://localhost:5173/';
 
   await check('New fighters: CPU bouts resolve (VANTA, MAGNA, EMBER)', () => {
     const outcomes = [];
-    for (const [p, q, ar] of [['vanta', 'basalt', 'rooftop'], ['magna', 'ember', 'overpass'], ['ember', 'vanta', 'rooftop']]) {
+    for (const [p, q, ar] of [['vanta', 'basalt', 'rooftop'], ['magna', 'ember', 'overpass'], ['ember', 'vanta', 'rooftop'], ['rift', 'shunt', 'rooftop']]) {
       const m = T.setup(p, q, ar);
       T.G.forced[0] = null; T.G.forced[1] = null;
       T.G.enableCPUs('hard');

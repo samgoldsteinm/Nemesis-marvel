@@ -81,14 +81,15 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
   - **Building detail:** belt-course ledges, cornices and parapets, stepped-back upper floors, pilasters, fire escapes on buildings facing the fight, and rooftop clutter (water towers, AC units, antennas, stair huts). Everything is merged per material, so the whole city costs only a few draw calls.
   - **Skyline:** a mid-distance ring of varied towers plus a painted far panorama with lit windows that fades into each venue's haze. Soft light shafts hang between the buildings.
   - **Props:** sculpted car bodies with glass, rims, bumpers and lights; slatted crates; AC units with grilles and fans; ribbed, labelled barrels; a domed fuel tank; and jersey barriers with reflectors. Overpass pile-ups are built from a box truck, burnt cars and barriers.
-  - **Fighters (7):**
-  - **Basalt:** heavy, ground recovery.
-  - **Tether:** swing recovery, line yank.
-  - **Aerin Volt:** flight and bolts.
-  - **Shunt:** teleport, displace.
-  - **Vanta:** fast claw striker with a 4-hit combo, ground recovery.
-  - **Magna:** magnetic flier who pulls opponents and *any* object, cars included, to his hands from range.
-  - **Ember:** fire bruiser whose heavy hits set the target burning, a damage-over-time effect that can't K.O. on its own.
+  - **Fighters (8):**
+  - **Basalt:** heavy, ground recovery. Thunderclap, Avalanche Charge, Tectonic Slam, Piledriver.
+  - **Tether:** swing recovery, line yank. Snare bolts, Line Slingshot, Line Spin ring-out throw.
+  - **Aerin Volt:** flight and bolts. Storm Dash, Chain Lightning, Skyfall Drop.
+  - **Shunt (teleporter):** L hops or flanks behind the opponent, L+A Blink Strike, Phase Lunge, Pulse Mines, Displace (teleports the victim, off an edge if aimed there).
+  - **Rift (teleporter):** portal fighter. L portal hop / step behind, **Swap Gate** (trade places with the opponent — use it when you're near an edge), **Portal Punch** (hits from behind at range and pulls them in), **Rift Storm** (three portals fire on the opponent), **Portal Drop** grapple (drops them from the sky).
+  - **Vanta:** fast claw striker with a 4-hit combo, ground recovery. **Shade Rend**: phases through the opponent three times.
+  - **Magna:** magnetic flier who pulls opponents and *any* object, cars included, to his hands from range. **Implosion**: drags the opponent in, then blasts.
+  - **Ember:** fire bruiser whose heavy hits set the target burning, a damage-over-time effect that can't K.O. on its own. **Fireball**: an exploding, burning projectile.
 - **Auras:** Rage and charging are shown as flickering flame wisps spawned across the fighter's skeleton, so the aura hugs the body and moves with the animation.
 - **Lighting:** an environment map built from each venue's sky gives car paint, glass, metal and puddles real reflections. Contact shading comes from the lighting features described above.
 - **Lighting:**
