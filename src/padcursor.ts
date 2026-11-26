@@ -49,7 +49,7 @@ function scroller(start: Element | null): HTMLElement | null {
  * jumps to the main button only when it changes), `onBack` handles B.
  * Returns true if a controller drove the menu this frame (so the caller can skip its own pad handling).
  */
-export function updatePadCursor(root: HTMLElement, screenKey: string, dtMs: number, onBack: () => void, primarySel: string[] = ['[data-act="fight"]', '.bigbtn.primary', '.focus', '[data-nav]:not([data-act="back"]):not([data-act="title"])']): boolean {
+export function updatePadCursor(root: HTMLElement, screenKey: string, dtMs: number, onBack: () => void, primarySel: string[] = ['[data-act="fight"]', '[data-act="confirm"]', '.bigbtn.primary', '.focus', '[data-nav]:not([data-act="back"]):not([data-act="title"])']): boolean {
   let pads: (Gamepad | null)[] = [];
   try { pads = navigator.getGamepads ? Array.from(navigator.getGamepads()) : []; } catch { return false; }
   // The most recently used pad drives the arrow.

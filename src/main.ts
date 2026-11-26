@@ -339,6 +339,8 @@ function showScreen(s: Screen) {
 }
 
 let selectSide: 0 | 1 = 0; // which player is choosing on the fighter screen
+/** Whether each side has locked in its fighter. Tapping a card only previews it until it's confirmed. */
+const locked: [boolean, boolean] = [false, false];
 let howTab: 'controls' | 'combat' | 'fighters' = 'controls';
 const RATINGS: Record<string, { power: number; speed: number; range: number; toughness: number; difficulty: string }> = {
   basalt: { power: 5, speed: 2, range: 2, toughness: 5, difficulty: 'Easy' },
@@ -368,7 +370,7 @@ function sidePanel(side: 0 | 1) {
   const active = selectSide === side;
   return `
     <div class="side ${active ? 'active' : ''} s${side}" style="--c:${def.color}" data-act="side" data-arg="${side}">
-      <div class="side-who"><span class="badge p${side}">${who}</span>${active ? '<span class="choosing">choosing…</span>' : ''}</div>
+      <div class="side-who"><span class="badge p${side}">${who}</span>${locked[side] ? '<span class="lockd">✓ Locked in</span>' : active ? '<span class="choosing">previewing…</span>' : ''}</div>
       <div class="side-art">${por(def, 'side-img')}</div>
       <div class="side-name">${def.name}</div>
       <div class="side-title">${def.title}</div>
@@ -400,7 +402,7 @@ function render(s: Screen): string {
       <div class="topbar">
         <button class="pill" data-nav data-act="title">← Back</button>
         <h2>Choose fighters</h2>
-        <span class="hintline">Picking for <b>${who}</b></span>
+        <span class="hintline">${locked[0] && locked[1] ? 'Ready to <b>fight</b>' : `Picking for <b>${who}</b> · tap to preview`}</span>
       </div>
       <div class="select-grid">
         ${sidePanel(0)}
@@ -418,7 +420,9 @@ function render(s: Screen): string {
       <div class="options">
         <div class="opt"><span class="opt-label">Arena</span><div class="seg">${LAYOUTS.map((l) => `<button class="segbtn ${setup.arena === l.id ? 'on' : ''}" data-nav data-act="arena" data-arg="${l.id}"><span class="arena-sw ${l.id}"></span>${l.name}</button>`).join('')}</div></div>
         ${setup.mode === 'cpu' ? `<div class="opt"><span class="opt-label">CPU level</span><div class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="segbtn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div></div>` : ''}
-        <button class="fight" data-nav data-act="fight">FIGHT ▶</button>
+        ${locked[0] && locked[1]
+          ? '<button class="fight" data-nav data-act="fight">FIGHT ▶</button>'
+          : `<button class="fight confirm" data-nav data-act="confirm">✓ Confirm ${charById(selectSide === 0 ? setup.p1 : setup.p2).name}</button>`}
       </div>
     </div>`;
   }
@@ -510,17 +514,25 @@ function rerender(keepFocus = true) {
 function act(a: string, arg?: string) {
   sfx.select();
   switch (a) {
-    case 'mode': setup.mode = arg as Mode; selectSide = 0; showScreen('select'); break;
-    case 'side': selectSide = Number(arg) as 0 | 1; rerender(); break;
+    case 'mode': setup.mode = arg as Mode; selectSide = 0; locked[0] = locked[1] = false; showScreen('select'); break;
+    case 'side': selectSide = Number(arg) as 0 | 1; locked[selectSide] = false; rerender(); break;
     case 'pick': {
-      if (selectSide === 0) { setup.p1 = arg!; selectSide = 1; rerender(); }
-      else {
-        setup.p2 = arg!;
-        showScreen('select');
-        // Both chosen: jump to the FIGHT button.
-        const f = focusables();
-        setFocus(f.findIndex((e) => e.dataset.act === 'fight'));
-      }
+      // Tap = preview (stats, trait, portrait). Tapping the previewed fighter again confirms it.
+      const cur = selectSide === 0 ? setup.p1 : setup.p2;
+      if (cur === arg) { act('confirm'); return; }
+      if (selectSide === 0) setup.p1 = arg!; else setup.p2 = arg!;
+      locked[selectSide] = false;
+      rerender();
+      break;
+    }
+    case 'confirm': {
+      locked[selectSide] = true;
+      if (!locked[1]) selectSide = 1;
+      else if (!locked[0]) selectSide = 0;
+      showScreen('select');
+      const f = focusables();
+      // Both locked: jump to FIGHT; otherwise to the next confirm button.
+      setFocus(f.findIndex((e) => e.dataset.act === 'fight' || e.dataset.act === 'confirm'));
       break;
     }
     case 'fight': goLandscape(); startMatch(); break;
@@ -528,7 +540,7 @@ function act(a: string, arg?: string) {
     case 'diff': setup.diff = arg as Difficulty; rerender(); break;
     case 'tab': howTab = arg as typeof howTab; rerender(); break;
     case 'title': if (match) { match.dispose(); match = null; } hud.show(false); stopMusic(); touchRoot.classList.add('off'); showScreen('title'); break;
-    case 'select': selectSide = 0; if (match) { match.dispose(); match = null; } hud.show(false); showScreen('select'); break;
+    case 'select': selectSide = 0; locked[0] = locked[1] = false; if (match) { match.dispose(); match = null; } hud.show(false); showScreen('select'); break;
     case 'rematch': rematch(false); break;
     case 'swap': rematch(true); break;
     case 'resume': paused = false; showScreen('none'); break;
@@ -542,7 +554,13 @@ function act(a: string, arg?: string) {
 const menuTrack = [new EdgeTracker(), new EdgeTracker()];
 let navCooldown = 0; // ms
 function menuBack() {
-  if (screen === 'select') { if (selectSide === 1) { selectSide = 0; rerender(); } else act('title'); }
+  if (screen === 'select') {
+    // Back steps out of the last lock-in first, then leaves the screen.
+    if (locked[1]) { locked[1] = false; selectSide = 1; rerender(); }
+    else if (locked[0]) { locked[0] = false; selectSide = 0; rerender(); }
+    else if (selectSide === 1) { selectSide = 0; rerender(); }
+    else act('title');
+  }
   else if (screen === 'moves') act('back');
   else if (screen === 'pause') act('resume');
 }
