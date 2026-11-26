@@ -228,12 +228,30 @@ const markers = [0x3aa0ff, 0xff4a4a].map((c) => {
   return m;
 });
 
-window.addEventListener('resize', () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  composer.setSize(window.innerWidth, window.innerHeight);
-  vcam.cam.aspect = window.innerWidth / window.innerHeight;
+function fitView() {
+  const w = window.innerWidth, h = window.innerHeight, aspect = w / h;
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+  vcam.cam.aspect = aspect;
+  // Wide landscape: the horizontal view is wider, so frame closer (fighters read bigger on phones).
+  // Small screens get a little extra zoom; portrait pulls back so both fighters fit.
+  const wide = aspect > 1.6 ? THREE.MathUtils.clamp(Math.sqrt(1.6 / aspect), 0.8, 1) : aspect < 1 ? 1.25 : 1;
+  vcam.zoomMul = wide * (h < 500 && aspect > 1 ? 0.92 : 1);
+  vcam.cam.fov = aspect < 1 ? 66 : 57;
   vcam.cam.updateProjectionMatrix();
-});
+  document.body.classList.toggle('landscape-short', aspect > 1 && h < 560);
+}
+window.addEventListener('resize', fitView);
+window.addEventListener('orientationchange', () => setTimeout(fitView, 250));
+fitView();
+
+/** On phones: go fullscreen and lock to landscape when a match starts (needs a user gesture; silently ignored where unsupported). */
+function goLandscape() {
+  if (!(('ontouchstart' in window) || navigator.maxTouchPoints > 0)) return;
+  const el = document.documentElement as any;
+  if (document.fullscreenElement || !el.requestFullscreen) return;
+  el.requestFullscreen({ navigationUI: 'hide' }).then(() => (window.screen.orientation as any)?.lock?.('landscape')).catch(() => {});
+}
 
 // ============================================================ app state
 type Mode = 'cpu' | 'versus';
@@ -286,6 +304,7 @@ function updateControlOverlay() {
   const inMatch = !!match && screen === 'none';
   touchRoot.classList.toggle('off', !(inMatch && lastInputKind === 'touch'));
   keysHint.style.display = inMatch && lastInputKind === 'keys' ? '' : 'none';
+  document.body.classList.toggle('in-match', inMatch);
 }
 window.addEventListener('gamepadconnected', () => { noteInput('pad'); updateControlOverlay(); });
 window.addEventListener('gamepaddisconnected', () => {
@@ -503,7 +522,7 @@ function act(a: string, arg?: string) {
       }
       break;
     }
-    case 'fight': startMatch(); break;
+    case 'fight': goLandscape(); startMatch(); break;
     case 'arena': setup.arena = arg as LayoutId; rerender(); break;
     case 'diff': setup.diff = arg as Difficulty; rerender(); break;
     case 'tab': howTab = arg as typeof howTab; rerender(); break;

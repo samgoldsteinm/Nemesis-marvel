@@ -17,6 +17,8 @@ export class VersusCamera {
   punch = 0;
   /** Keep the camera inside a corridor (narrow venues): max |z|. */
   zLimit = Infinity;
+  /** Framing distance multiplier: wide landscape screens can sit closer and still keep both fighters in shot. */
+  zoomMul = 1;
   right = new THREE.Vector3(1, 0, 0);
 
   constructor(aspect: number) {
@@ -77,7 +79,7 @@ export class VersusCamera {
         }
       }
       // Low, close framing near shoulder height; pulls wide only as the fighters separate.
-      wantDist = THREE.MathUtils.clamp(6.5 + spread * 1.25 + vspan * 0.6, 8, 28);
+      wantDist = THREE.MathUtils.clamp(6.5 + spread * 1.25 + vspan * 0.6, 8, 28) * this.zoomMul;
       wantH = 1.6 + wantDist * 0.2 + vspan * 0.35;
     }
     if (snap) {

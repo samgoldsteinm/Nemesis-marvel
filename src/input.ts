@@ -188,8 +188,8 @@ export function installTouch(root: HTMLElement) {
       <button data-a="jump" class="tb tbb">B</button>
       <button data-a="mobility+power" class="tb tchord tc1">L+R<small>recover</small></button>
       <button data-a="power+guard" class="tb tchord tc2">R+Y<small>s.block</small></button>
-      <button data-a="pause" class="tb tpause">II</button>
-    </div>`;
+    </div>
+    <button data-a="pause" class="tb tpause">II</button>`;
   if (!isTouch) root.style.display = 'none';
   const stick = root.querySelector('#tstick') as HTMLElement;
   const knob = root.querySelector('#tknob') as HTMLElement;
