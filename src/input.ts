@@ -99,6 +99,7 @@ export function installKeyboard() {
   inputListenersInstalled = true;
   window.addEventListener('keydown', (e) => {
     keys.add(e.code);
+    noteInput('keys');
     tapped.add(e.code);
     if (GAME_KEYS.has(e.code) && !(e.target instanceof HTMLInputElement)) e.preventDefault();
   });
@@ -128,6 +129,21 @@ function readKeyboard(layout: number, out: RawState) {
 // ---------------------------------------------------------------- gamepad
 // Standard mapping: face buttons are mapped by label position, which matches GameCube semantics
 // on an Xbox-style pad (A attack, B jump, X grab, Y guard). LB/LT = L, RB/RT = R.
+/** Which kind of device the player used most recently: drives which on-screen hints are shown. */
+export let lastInputKind: 'touch' | 'pad' | 'keys' = (('ontouchstart' in window) || navigator.maxTouchPoints > 0) ? 'touch' : 'keys';
+export function noteInput(kind: 'touch' | 'pad' | 'keys') { lastInputKind = kind; }
+
+/** True if any connected pad shows button or stick activity right now. */
+export function padActivity(): boolean {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const gp of pads) {
+    if (!gp || !gp.connected) continue;
+    if (gp.buttons.some((b) => b.pressed || b.value > 0.4)) return true;
+    if (gp.axes.some((a) => Math.abs(a) > 0.35)) return true;
+  }
+  return false;
+}
+
 export function readGamepad(index: number, out: RawState): boolean {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   const gp = pads[index];
@@ -159,6 +175,7 @@ export function isTouchActive() {
 }
 
 export function installTouch(root: HTMLElement) {
+  window.addEventListener('touchstart', () => noteInput('touch'), { passive: true });
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
   root.innerHTML = `
     <div class="tstick" id="tstick"><div class="tknob" id="tknob"></div></div>

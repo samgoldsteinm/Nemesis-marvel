@@ -12,7 +12,7 @@ import { Match } from './match';
 import { HUD } from './hud';
 import { CPU, Difficulty } from './ai';
 import { ROSTER, CharacterDef, charById } from './characters';
-import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, keyDown, endInputRead } from './input';
+import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, keyDown, endInputRead, padActivity, noteInput, lastInputKind } from './input';
 import { initAudio, sfx, startMusic, stopMusic, setMuted, muted } from './audio';
 import { TUNING } from './fighter';
 import { RIM_COLOR } from './characters';
@@ -263,9 +263,8 @@ function startMatch() {
   hud.setNames(match, setup.mode === 'cpu' ? ['YOU', `CPU · ${setup.diff}`] : ['PAD 1 / WASD', 'PAD 2 / ARROWS']);
   hud.show(true);
   keysHint.innerHTML = 'Move <b>WASD</b> · A attack <b>J</b> · B jump <b>K</b> · X grab <b>L</b> · Y guard <b>I</b> · L mobility <b>U</b> · R power <b>O</b> · Pause <b>Esc</b>' + (setup.mode === 'versus' ? '<br>P2: Arrows · A <b>.</b> · B <b>/</b> · X <b>,</b> · Y <b>;</b> · L <b>R-Shift</b> · R <b>Enter</b> (or numpad 1 2 3 5 4 6)' : '');
-  const touchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
-  touchRoot.classList.toggle('off', !touchDevice);
-  keysHint.style.display = touchDevice ? 'none' : '';
+  if (connectedPads().length) noteInput('pad');
+  updateControlOverlay();
   paused = false;
   showScreen('none');
   startMusic();
@@ -276,6 +275,19 @@ function rematch(swap = false) {
   if (swap || !match) startMatch();
   else { match.restart(); cpus = [null, setup.mode === 'cpu' ? new CPU(match.fighters[1], match, setup.diff) : null]; trackers.forEach((t) => t.reset()); paused = false; showScreen('none'); }
 }
+
+/** Show touch buttons only for touch players and key hints only for keyboard players; a gamepad hides both. */
+function updateControlOverlay() {
+  if (padActivity()) noteInput('pad');
+  const inMatch = !!match && screen === 'none';
+  touchRoot.classList.toggle('off', !(inMatch && lastInputKind === 'touch'));
+  keysHint.style.display = inMatch && lastInputKind === 'keys' ? '' : 'none';
+}
+window.addEventListener('gamepadconnected', () => { noteInput('pad'); updateControlOverlay(); });
+window.addEventListener('gamepaddisconnected', () => {
+  if (!connectedPads().length) noteInput(('ontouchstart' in window) || navigator.maxTouchPoints > 0 ? 'touch' : 'keys');
+  updateControlOverlay();
+});
 
 // ============================================================ menus
 const menu = document.getElementById('menu')!;
@@ -623,6 +635,7 @@ function frame(now: number) {
     fx.update(rawDt);
   }
 
+  updateControlOverlay();
   if (match) {
     for (const f of match.fighters) f.animate(rawDt, time);
     vcam.update(match.fighters, rawDt, fx.shake);

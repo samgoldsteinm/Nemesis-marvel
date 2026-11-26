@@ -36,7 +36,7 @@ node tests/checks.cjs
 | Super block | R+Y | O+I | | **R+Y** chord button |
 | Pause | Start | Esc | Backspace | ‖ |
 
-In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A or Enter to confirm, and B or Esc to go back. Unplugging a human player's pad mid-bout pauses the game.
+In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A or Enter to confirm, and B or Esc to go back. Unplugging a human player's pad mid-bout pauses the game. On-screen touch buttons and keyboard hints only show for the input you last used, so they disappear as soon as a gamepad is used.
 
 ## What's in this build
 
@@ -101,6 +101,8 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
 - **Animated bodies (CC0):**
   - Fighters use the Quaternius *Universal Animation Library* mannequins, male and female (Aerin), from `public/models`.
   - Authored clips drive idle, walk, jog and sprint, jumps, jab, cross and hook, guard, roll, hit reactions, getting up off the ground, throws and pick-ups, dashes, slides, projectile casts, carrying and victory. One-shot clips are time-fitted to each move's gameplay frames.
+  - Each fighter has its own animation set: idle stance, three-hit chain clips, running attack, dash and victory (Basalt shield-bashes, Shunt and Vanta fight with blade swings, Tether moves like a ninja, Aerin and Magna cast).
+  - Fighting feel: a 10-frame input buffer, jump/guard/mobility cancels out of chain hits, smooth turning instead of instant snaps, momentum lean when running and changing direction, landing recoveries, block-impact reactions and faster rolls and get-ups.
   - Moves the library doesn't cover (kicks, swings, flight, wall-cling, finishers, power grapples, tumbling launches) use the procedural rig, retargeted onto the same skeleton and blended in smoothly.
   - Each fighter is recoloured with original bone-attached armour and accessories. If the models fail to load, the game falls back to the procedural bodies.
 - **City Props (CC0):** jersey barriers, barrels, cones, road barricades, trash cans, wheelie bins and pallets from Coding Creature's *City Props 1*, used as throwable objects. The code-built props remain as fallbacks.

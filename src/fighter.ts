@@ -255,6 +255,29 @@ export class Fighter {
     if (this.hitFlash > 0) this.hitFlash--;
     const inp = this.input;
     if (inp.b.guard.pressed) this.guardPressedAt = this.tick;
+    if (this.landT > 0) this.landT--;
+    if (this.blockT > 0) this.blockT--;
+    // Input buffer: presses made during an action come out as soon as the fighter is free (within ~10 frames).
+    const free = this.state === 'ground' || this.state === 'air' || this.state === 'fly';
+    for (const a of ['attack', 'grab', 'jump', 'guard'] as const) {
+      if (inp.b[a].pressed && !free) this.buf[a] = this.tick;
+    }
+    if (free) {
+      for (const a of ['attack', 'grab', 'jump', 'guard'] as const) {
+        const at = this.buf[a];
+        if (at !== undefined && this.tick - at <= 10 && !inp.b[a].pressed) { inp.b[a].pressed = true; if (a === 'guard') inp.b[a].down = true; }
+      }
+      this.buf = {};
+    }
+    // Smooth turning toward an attack target (no instant snaps).
+    if (this.turnTarget !== null) {
+      let d = this.turnTarget - this.yaw;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      const step = 0.55;
+      if (Math.abs(d) <= step || (this.state !== 'attack' && this.state !== 'throw')) { this.yaw += Math.abs(d) <= step ? d : Math.sign(d) * step; this.turnTarget = Math.abs(d) <= step ? null : this.turnTarget; if (this.state !== 'attack' && this.state !== 'throw') this.turnTarget = null; }
+      else this.yaw += Math.sign(d) * step;
+    }
     if (inp.b.power.pressed) this.rUsed = false;
 
     this.updateResources(dt);
@@ -275,7 +298,7 @@ export class Fighter {
       case 'stunned': this.stStunned(dt); break;
       case 'launched': this.stLaunched(dt); break;
       case 'down': this.stDown(dt); break;
-      case 'getup': if (this.t > 26) this.setState('ground'); this.friction(dt, 20); break;
+      case 'getup': if (this.t > 38) this.setState('ground'); this.friction(dt, 20); break;
       case 'swing': this.stSwing(dt); break;
       case 'cling': this.stCling(dt); break;
       case 'teleport': this.stTeleport(dt); break;
@@ -424,7 +447,7 @@ export class Fighter {
     if (impact > 4) this.match.fx.dust(this.pos, this.def.heavy ? 8 : 4, this.def.heavy ? 0.55 : 0.35, impact * 0.15);
     if (impact > 8 && this.def.heavy) this.match.fx.shake = Math.max(this.match.fx.shake, 0.25);
     switch (this.state) {
-      case 'air': this.setState('ground'); break;
+      case 'air': this.setState('ground'); this.landT = 12; this.landSerial++; break;
       case 'launched':
         if (this.health <= 0) { this.setState('ko'); break; }
         this.match.fx.burstDebris(this.pos.clone(), 6, 0x777777, 3, 0.15);
@@ -539,6 +562,7 @@ export class Fighter {
     // B: jump.
     if (b.jump.pressed && ground) {
       this.vel.y = this.def.jumpV;
+      this.jumpSerial++;
       this.onGround = false;
       this.setState('air');
       sfx.jump();
@@ -803,7 +827,7 @@ export class Fighter {
     const o = this.opp;
     const to = o.pos.clone().sub(this.pos).setY(0);
     if (to.length() < 7 || this.stickMag() < 0.2 || m.special === 'bolt' || m.special === 'snare') {
-      if (o.alive && to.length() < 40) this.yaw = Math.atan2(to.x, to.z);
+      if (o.alive && to.length() < 40) this.turnTarget = Math.atan2(to.x, to.z);
     }
     this.setState('attack');
     if (m.special === 'blinkStrike') {
@@ -865,6 +889,13 @@ export class Fighter {
     }
     if (t >= activeStart && t < activeEnd && m.hit && !['groundPound', 'thunderclap', 'pulse'].includes(m.special ?? '')) {
       this.match.resolveMelee(this, m);
+    }
+    // Cancel windows: ordinary attacks can be cancelled into jump, guard/evade or mobility once the hit is out.
+    const cancellable = this.def.moves.chain.includes(m) || m === this.def.moves.runAttack || m.id === 'airRise';
+    if (cancellable && t >= activeEnd + 3 && !this.chainQueued) {
+      if (b.jump.pressed && this.onGround) { this.move = null; this.setState('ground'); this.vel.y = this.def.jumpV; this.onGround = false; this.setState('air'); this.jumpSerial++; sfx.jump(); return; }
+      if (b.guard.pressed && this.onGround) { this.move = null; this.setState('guard'); return; }
+      if (b.mobility.pressed) { this.move = null; this.setState(this.onGround ? 'ground' : 'air'); return; }
     }
     if (t >= activeEnd + 2 && this.chainQueued && m === this.def.moves.chain[this.chainIdx]) {
       this.chainIdx++;
@@ -946,6 +977,7 @@ export class Fighter {
         this.vel.copy(d.multiplyScalar(this.def.heavy ? 9 : 12));
         this.invuln = 10;
         this.setState('evade');
+        this.evadeSerial++;
         sfx.jump();
         return;
       }
@@ -959,8 +991,8 @@ export class Fighter {
       this.invuln = 4;
       return;
     }
-    this.friction(dt, this.t < 8 ? 2 : 14);
-    if (this.t > 16) this.setState(this.onGround ? 'ground' : 'air');
+    this.friction(dt, this.t < 12 ? 2.5 : 10);
+    if (this.t > 26) this.setState(this.onGround ? 'ground' : 'air');
   }
 
   private stCharge(dt: number) {
@@ -1325,11 +1357,18 @@ export class Fighter {
   /** Pick the authored clip for the current state, or null to use the procedural pose. */
   private clipFor(): ClipPlay | null {
     const hs = Math.hypot(this.vel.x, this.vel.z);
-    const sc = this.def.height / 1.8;
-    const loop = (name: string, speed = 1): ClipPlay => ({ name, loop: true, speed, key: name });
-    const once = (name: string, durTicks: number, tag = ''): ClipPlay | null => {
+    const st = STYLE[this.def.id] ?? STYLE.default;
+    const sc = (this.def.height / 1.8) * (st.locoScale ?? 1);
+    const loop = (name: string, speed = 1, fade = 0.22): ClipPlay => ({ name, loop: true, speed, key: name, fade });
+    // One-shot clip time-fitted to `ticks`, aligned so the clip's impact lands on the hit frame when known.
+    const once = (name: string, ticks: number, tag: string, impactTicks?: number, fade = 0.1): ClipPlay | null => {
       if (!hasClip(name)) return null;
-      return { name, loop: false, speed: 1, key: `${name}#${tag}`, ...{ durTicks } } as ClipPlay & { durTicks: number };
+      const dur = this.skinned!.clipDuration(name);
+      const impact = CLIP_IMPACT[name];
+      let speed: number;
+      if (impact !== undefined && impactTicks !== undefined) speed = THREE.MathUtils.clamp(impact / Math.max(0.05, impactTicks / 60), 0.85, 2.3);
+      else speed = THREE.MathUtils.clamp(dur / Math.max(0.05, ticks / 60), 0.85, 2.3);
+      return { name, loop: false, speed, key: `${name}#${tag}`, fade };
     };
     if (this.move !== this.lastMoveRef) { this.lastMoveRef = this.move; this.moveSerial++; }
     const ms = String(this.moveSerial);
@@ -1337,42 +1376,51 @@ export class Fighter {
       case 'ground':
       case 'idleLock': {
         if (this.heldProp) return loop('Walk_Carry_Loop', Math.max(0.25, hs / (1.5 * sc)));
-        if (hs < 0.5) return loop('Idle_Loop');
-        if (hs < 3.2) return loop('Walk_Loop', hs / (1.5 * sc));
-        if (hs < 6.8) return loop('Jog_Fwd_Loop', hs / (3.8 * sc));
-        return loop('Sprint_Loop', hs / (6.2 * sc));
+        if (this.landT > 0 && st.land) return once(st.land, 14, 'land' + this.landSerial, undefined, 0.08);
+        if (hs < 0.5) return loop(st.idle, st.idleSpeed ?? 1, 0.3);
+        if (hs < 3.2) return loop(st.walk ?? 'Walk_Loop', hs / (1.5 * sc), 0.25);
+        if (hs < 6.8) return loop('Jog_Fwd_Loop', hs / (3.8 * sc), 0.25);
+        return loop('Sprint_Loop', hs / (6.2 * sc), 0.25);
       }
-      case 'air': return this.heldProp ? null : this.vel.y > 2 && this.t < 14 ? once('Jump_Start', 14, 's' + ms) : loop('Jump_Loop');
-      case 'recover': return once('Jump_Land', 10, 'l' + this.tick);
-      case 'guard': case 'sblock': return loop('Idle_Shield_Loop');
-      case 'evade': return once('Roll', 16, 'r' + this.tick);
-      case 'charge': return loop('Spell_Simple_Idle_Loop');
+      case 'air': return this.heldProp ? null : this.vel.y > 2 && this.t < 16 ? once(st.jumpStart ?? 'Jump_Start', 16, 's' + this.jumpSerial, undefined, 0.08) : loop('Jump_Loop', 1, 0.3);
+      case 'recover': return once(st.land ?? 'Jump_Land', 10, 'l' + this.landSerial);
+      case 'guard': case 'sblock': return this.blockT > 0 ? once('Idle_Shield_Break', 16, 'b' + this.blockSerial, undefined, 0.06) : loop('Idle_Shield_Loop', 1, 0.12);
+      case 'evade': return once('Roll', 28, 'r' + this.evadeSerial, undefined, 0.08);
+      case 'charge': return loop('Spell_Simple_Idle_Loop', 1, 0.2);
       case 'powerCharge': return once('Spell_Simple_Enter', 18, 'pc' + ms);
-      case 'lift': return once('PickUp_Table', this.heldProp?.cls === 2 ? 26 : 14, 'lift');
-      case 'throw': return once('OverhandThrow', this.throwWind + 14, 'th' + ms);
-      case 'grabbing': return this.pummelT > 0 ? once('Melee_Hook', 10, 'pm' + this.pummels) : loop('Push_Loop', 0.5);
-      case 'hitstun': return once(this.hitSide > 0 ? 'Hit_Chest' : 'Hit_Head', Math.max(16, this.stun), 'h' + this.lastHitSerial);
+      case 'lift': return once('PickUp_Table', this.heldProp?.cls === 2 ? 26 : 14, 'lift' + ms, undefined, 0.12);
+      case 'throw': return once('OverhandThrow', this.throwWind + 14, 'th' + ms, this.throwWind);
+      case 'grabbing': return this.pummelT > 0 ? once('Melee_Hook', 10, 'pm' + this.pummels, 4, 0.06) : loop('Push_Loop', 0.5, 0.15);
+      case 'hitstun': return once(this.hitSide > 0 ? 'Hit_Chest' : 'Hit_Head', Math.max(16, this.stun), 'h' + this.lastHitSerial, undefined, 0.05);
       case 'stunned': return loop('Hit_Head', 0.35);
-      case 'getup': return once('LayToIdle', 30, 'gu');
-      case 'victory': return loop(this.def.id === 'tether' ? 'Dance_Loop' : this.def.id === 'aerin' ? 'Yes' : 'Idle_FoldArms_Loop');
+      case 'launched': return this.lastLaunchSpeed < 11 && this.t < 40 ? once('Hit_Knockback', 50, 'kb' + this.lastHitSerial, undefined, 0.05) : null;
+      case 'getup': return once('LayToIdle', 40, 'gu' + this.lastHitSerial, undefined, 0.12);
+      case 'victory': return loop(st.victory, 1, 0.3);
       case 'attack': {
         const m = this.move;
         if (!m) return null;
         const dur = m.startup + m.active + m.recovery;
-        const byId: Record<string, string> = {
-          jab: 'Punch_Jab', cross: 'Punch_Cross', launcher: 'Melee_Hook', hammer: 'Melee_Hook', lariat: 'Melee_Hook', phaseElbow: 'Punch_Cross',
-          propSwing: 'Sword_Regular_A', throwFighter: 'OverhandThrow', pgEnd: 'OverhandThrow', shoulder: 'Shield_Dash', avalanche: 'Shield_Dash',
-          slideKick: 'Slide_Start', whiffGrab: 'Push_Loop', bolt: 'Spell_Simple_Shoot', boltAir: 'Spell_Simple_Shoot', snare: 'Spell_Simple_Shoot',
-          snareAir: 'Spell_Simple_Shoot', chainLightning: 'Spell_Simple_Shoot', tripleSnare: 'Spell_Simple_Shoot', mineTrail: 'Spell_Simple_Shoot',
-        };
-        const name = byId[m.id];
-        if (!name || (!this.onGround && !m.special)) return null;
-        return once(name, dur, 'm' + ms);
+        let name: string | undefined;
+        const ci = this.def.moves.chain.indexOf(m);
+        if (ci >= 0) name = st.chain[ci] || undefined;
+        else if (m === this.def.moves.runAttack) name = st.run;
+        else if (m === this.def.moves.dashPower) name = st.dash;
+        else name = MOVE_CLIP[m.id];
+        if (!name || (!this.onGround && !m.special && ci < 0)) return null;
+        return once(name, dur, 'm' + ms, m.startup + 1, 0.07);
       }
       default: return null;
     }
   }
   lastHitSerial = 0;
+  landT = 0; landSerial = 0; jumpSerial = 0; evadeSerial = 0; blockT = 0; blockSerial = 0;
+  /** Buffered button presses (tick pressed) so inputs made slightly early still come out. */
+  private buf: Partial<Record<'attack' | 'grab' | 'jump' | 'guard', number>> = {};
+  /** Smooth turn target for attacks (radians) — no instant snaps. */
+  turnTarget: number | null = null;
+  private leanZ = 0;
+  private leanX = 0;
+  private prevVel = new THREE.Vector3();
 
   private liftProp(p: Prop) {
     p.state = 'held';
@@ -1525,6 +1573,7 @@ export class Fighter {
       this.applyDamage(spec.stamina * 0.2, 0);
       this.vel.addScaledVector(dir, spec.kbF * 0.35 / this.def.weight);
       sfx.block();
+      this.blockT = 14; this.blockSerial++;
       this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.5), 6, 0xffffff, 4);
       att.rage = Math.min(100, att.rage + 2);
       return 'block';
@@ -1633,7 +1682,7 @@ export class Fighter {
     if (this.health <= 0) { this.setState('ko'); return; }
     const b = this.input.b;
     const quick = this.t > 14 && (b.jump.pressed || b.guard.pressed || b.attack.pressed);
-    if (this.t > 40 || quick) { this.setState('getup'); this.invuln = 22; }
+    if (this.t > 40 || quick) { this.setState('getup'); this.invuln = 34; }
   }
 
   private stKO(dt: number) {
@@ -1783,6 +1832,21 @@ export class Fighter {
       // One-shot clips are time-fitted to the gameplay duration of the state.
       this.skinned.drive(play ? { ...play, speed: play.durTicks ? this.fitSpeed(play.name, play.durTicks) : play.speed } : null);
       this.skinned.update(dt);
+      // Weight: lean into acceleration and turns, tip forward at speed.
+      if (dt > 0) {
+        const acc = this.vel.clone().sub(this.prevVel).divideScalar(Math.max(dt, 1 / 120));
+        const fwd = this.forward, right = new THREE.Vector3(fwd.z, 0, -fwd.x);
+        const grounded = this.onGround && (this.state === 'ground' || this.state === 'attack');
+        const latA = grounded ? acc.dot(right) : 0, fwdA = grounded ? acc.dot(fwd) : 0;
+        const hsp = Math.hypot(this.vel.x, this.vel.z);
+        const targetZ = THREE.MathUtils.clamp(-latA * 0.006, -0.2, 0.2);
+        const targetX = THREE.MathUtils.clamp(fwdA * 0.004 + (grounded ? (hsp / this.def.speed) * 0.05 : 0), -0.14, 0.18);
+        const k = 1 - Math.exp(-dt * 7);
+        this.leanZ += (targetZ - this.leanZ) * k;
+        this.leanX += (targetX - this.leanX) * k;
+        this.skinned.model.rotation.set(this.leanX, 0, this.leanZ);
+        this.prevVel.copy(this.vel);
+      }
     }
     // Strike swoosh along the attacking limb during the active window.
     const m = this.state === 'attack' ? this.move : null;
@@ -1936,3 +2000,29 @@ function contactMat() {
   }
   return _contact.clone();
 }
+
+
+/** Per-fighter animation style: stance, combo clips, dash, landing and victory. */
+interface AnimStyle { idle: string; idleSpeed?: number; walk?: string; chain: string[]; run?: string; dash?: string; victory: string; jumpStart?: string; land?: string; locoScale?: number }
+const STYLE: Record<string, AnimStyle> = {
+  default: { idle: 'Idle_Loop', chain: ['Punch_Jab', 'Punch_Cross', 'Melee_Hook'], victory: 'Yes' },
+  basalt: { idle: 'Idle_Loop', idleSpeed: 0.7, chain: ['Shield_OneShot', 'Melee_Hook', 'Sword_Attack'], run: 'Melee_Hook', dash: 'Shield_Dash', victory: 'Idle_FoldArms_Loop', locoScale: 0.85 },
+  tether: { idle: 'NinjaJump_Idle_Loop', chain: ['Punch_Jab', 'Punch_Cross', ''], run: 'Slide_Start', dash: '', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land' },
+  aerin: { idle: 'Spell_Simple_Idle_Loop', chain: ['Spell_Simple_Shoot', 'Sword_Regular_A', 'Melee_Hook'], run: 'Sword_Regular_B', victory: 'Yes' },
+  shunt: { idle: 'Sword_Idle', chain: ['Sword_Regular_A', 'Sword_Regular_B', 'Sword_Regular_C'], run: 'Sword_Regular_A', dash: 'Sword_Dash', victory: 'Idle_FoldArms_Loop' },
+  vanta: { idle: 'Crouch_Idle_Loop', walk: 'Crouch_Fwd_Loop', chain: ['Sword_Regular_A', 'Sword_Regular_B', 'Zombie_Scratch', 'Melee_Hook'], run: 'Sword_Regular_B', dash: 'Sword_Dash', victory: 'Dance_Loop', jumpStart: 'NinjaJump_Start', land: 'NinjaJump_Land' },
+  magna: { idle: 'Idle_FoldArms_Loop', chain: ['Spell_Simple_Shoot', 'Punch_Cross', 'Melee_Hook'], run: 'Punch_Cross', victory: 'Idle_FoldArms_Loop' },
+  ember: { idle: 'Idle_Loop', idleSpeed: 0.85, chain: ['Punch_Jab', 'Melee_Hook', 'Shield_OneShot'], run: 'Melee_Hook', dash: 'Shield_Dash', victory: 'Yes', locoScale: 0.92 },
+};
+/** Clips for non-chain moves shared across fighters. */
+const MOVE_CLIP: Record<string, string> = {
+  propSwing: 'Sword_Attack', throwFighter: 'OverhandThrow', pgEnd: 'OverhandThrow', shoulder: 'Shield_Dash', blazeShoulder: 'Shield_Dash',
+  whiffGrab: 'Push_Loop', bolt: 'Spell_Simple_Shoot', boltAir: 'Spell_Simple_Shoot', shards: 'Spell_Simple_Shoot', shardsAir: 'Spell_Simple_Shoot',
+  snare: 'Spell_Simple_Shoot', snareAir: 'Spell_Simple_Shoot', chainLightning: 'Spell_Simple_Shoot', tripleSnare: 'Spell_Simple_Shoot', mineTrail: 'Spell_Simple_Shoot',
+  clawFrenzy: 'Zombie_Scratch', pounce: 'Sword_Dash', counter: 'Melee_Hook',
+};
+/** Seconds into each clip where the blow lands (estimated by eye); used to align clips to hit frames. */
+const CLIP_IMPACT: Record<string, number> = {
+  Punch_Jab: 0.22, Punch_Cross: 0.3, Melee_Hook: 0.2, Sword_Regular_A: 0.18, Sword_Regular_B: 0.22, Sword_Regular_C: 0.5, Shield_OneShot: 0.32,
+  Sword_Attack: 0.6, Zombie_Scratch: 0.42, Spell_Simple_Shoot: 0.2, OverhandThrow: 0.55, Shield_Dash: 0.25, Sword_Dash: 0.35, Slide_Start: 0.3,
+};

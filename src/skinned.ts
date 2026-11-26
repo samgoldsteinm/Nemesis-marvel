@@ -77,6 +77,8 @@ export interface ClipPlay {
   loop: boolean;
   speed: number;
   key: string; // a change of key restarts / crossfades
+  fade?: number; // crossfade seconds into this clip
+  startAt?: number; // seconds into the clip to start from
 }
 
 export class SkinnedBody {
@@ -264,9 +266,11 @@ export class SkinnedBody {
     action.clampWhenFinished = !play.loop;
     action.setEffectiveTimeScale(play.speed);
     action.setEffectiveWeight(1);
+    if (play.startAt) action.time = play.startAt;
     action.play();
-    if (this.current && this.current.action !== action) this.current.action.crossFadeTo(action, 0.12, false);
-    else if (this.procW > 0.5) action.fadeIn(0.1);
+    const fade = play.fade ?? 0.15;
+    if (this.current && this.current.action !== action) this.current.action.crossFadeTo(action, fade, true);
+    else if (this.procW > 0.5) action.fadeIn(fade * 0.8);
     this.current = { key: play.key, action };
   }
 
@@ -274,7 +278,7 @@ export class SkinnedBody {
   update(dt: number) {
     const rig = this.rig;
     if (!rig) return;
-    const k = 1 - Math.exp(-dt / 0.06);
+    const k = 1 - Math.exp(-dt / 0.085);
     this.procW += (this.procTarget - this.procW) * k;
     if (Math.abs(this.procW - this.procTarget) < 0.01) this.procW = this.procTarget;
     if (this.procW < 1) this.mixer.update(dt);
