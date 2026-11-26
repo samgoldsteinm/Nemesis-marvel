@@ -192,6 +192,11 @@
   .p1 .pips b i { left: auto; right: 0; }
   .pips.unlimited b i { background: linear-gradient(180deg, #fff0b0, #ff5a1c); }
   .pips.flash b { box-shadow: 0 0 0 1px #ff3030; background: #400; }
+  .pips .lives { display: inline-flex; gap: 3px; margin: 0 4px; }
+  .pips .lives u { width: 9px; height: 9px; transform: rotate(45deg); background: rgba(255,255,255,0.12); border: 1px solid #000; }
+  .pips .lives u.on { background: #ff4a5a; box-shadow: 0 0 6px rgba(255,74,90,.7); }
+  .pips .lives u.go { background: #ff4a5a; animation: lifego .5s ease-in-out infinite alternate; }
+  @keyframes lifego { to { opacity: .15; transform: rotate(45deg) scale(.6); } }
   .pips .nm { margin: 0 6px; font-size: 12px; letter-spacing: 0.06em; white-space: nowrap; text-shadow: 1px 1px 0 #000; }
   .bar { position: relative; height: 8px; background: #050508; margin-top: 4px; overflow: hidden; border: 1px solid #000; transform: skew(-20deg); box-shadow: 1px 1px 0 rgba(0,0,0,0.6); }
   .bar.vit { height: 8px; }
@@ -287,6 +292,9 @@
     .select-grid { gap: 8px; }
     .rcard { height: 27vh; }
     .rname { font-size: 12px; }
+    .options .segbtn { white-space: nowrap; padding: 6px 7px; font-size: 11px; }
+    .options { gap: 6px; }
+    .fight.confirm { font-size: 15px; padding: 8px 14px; }
     .fcards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
   }
   /* Phones held upright: ask for landscape during a match. */

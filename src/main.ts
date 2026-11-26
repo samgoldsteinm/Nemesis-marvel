@@ -17,7 +17,7 @@ import { HUD } from './hud';
 import { CPU, Difficulty } from './ai';
 import { ROSTER, CharacterDef, charById } from './characters';
 import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, keyDown, endInputRead, padActivity, noteInput, lastInputKind } from './input';
-import { initAudio, sfx, startMusic, stopMusic, setMuted, muted } from './audio';
+import { initAudio, sfx, startMusic, stopMusic, setMuted, muted, setIntensity } from './audio';
 import { TUNING } from './fighter';
 import { RIM_COLOR } from './characters';
 import { renderPortraits, portraitOf } from './portraits';
@@ -257,8 +257,9 @@ function goLandscape() {
 
 // ============================================================ app state
 type Mode = 'cpu' | 'versus';
-interface Setup { mode: Mode; p1: string; p2: string; diff: Difficulty; p1Human: boolean; arena: LayoutId }
-const setup: Setup = { mode: 'cpu', p1: 'tether', p2: 'basalt', diff: 'normal', p1Human: true, arena: 'rooftop' };
+interface Setup { mode: Mode; p1: string; p2: string; diff: Difficulty; p1Human: boolean; arena: LayoutId; lives: number }
+const setup: Setup = { mode: 'cpu', p1: 'tether', p2: 'basalt', diff: 'normal', p1Human: true, arena: 'rooftop', lives: 1 };
+try { const l = Number(localStorage.getItem('bl.lives')); if ([1, 2, 3, 5].includes(l)) setup.lives = l; } catch { /* storage optional */ }
 let match: Match | null = null;
 let cpus: (CPU | null)[] = [null, null];
 const trackers = [new EdgeTracker(), new EdgeTracker()];
@@ -276,6 +277,7 @@ function bindings(): DeviceBinding[] {
 }
 
 let intro: FightIntro | null = null;
+let lastIntroT = -1;
 let introsOn = true, voicesOn = true;
 try { introsOn = localStorage.getItem('bl.intros') !== '0'; voicesOn = localStorage.getItem('bl.voices') !== '0'; } catch { /* storage optional */ }
 const introEl = document.getElementById('intro')!;
@@ -288,6 +290,7 @@ function startMatch(withIntro = true) {
   applyPalette(setup.arena);
   vcam.zLimit = setup.arena === 'overpass' ? 5.8 : Infinity;
   match = new Match(scene, arena, fx, vcam, d);
+  match.setLives(setup.lives);
   cpus = [null, setup.mode === 'cpu' ? new CPU(match.fighters[1], match, setup.diff) : null];
   trackers.forEach((t) => t.reset());
   hud.setNames(match, setup.mode === 'cpu' ? ['YOU', `CPU · ${setup.diff}`] : ['PAD 1 / WASD', 'PAD 2 / ARROWS']);
@@ -297,7 +300,8 @@ function startMatch(withIntro = true) {
   updateControlOverlay();
   paused = false;
   showScreen('none');
-  startMusic();
+  startMusic('fight', setup.arena);
+  setIntensity(0);
   if (introsOn && withIntro) intro = new FightIntro(match, vcam, introEl, voicesOn);
 }
 
@@ -429,6 +433,7 @@ function render(s: Screen): string {
       </div>
       <div class="options">
         <div class="opt"><span class="opt-label">Arena</span><div class="seg">${LAYOUTS.map((l) => `<button class="segbtn ${setup.arena === l.id ? 'on' : ''}" data-nav data-act="arena" data-arg="${l.id}"><span class="arena-sw ${l.id}"></span>${l.name}</button>`).join('')}</div></div>
+        <div class="opt"><span class="opt-label">Lives</span><div class="seg">${[1, 2, 3, 5].map((n) => `<button class="segbtn ${setup.lives === n ? 'on' : ''}" data-nav data-act="lives" data-arg="${n}">${n} ♥</button>`).join('')}</div></div>
         ${setup.mode === 'cpu' ? `<div class="opt"><span class="opt-label">CPU level</span><div class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="segbtn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div></div>` : ''}
         ${locked[0] && locked[1]
           ? '<button class="fight" data-nav data-act="fight">FIGHT ▶</button>'
@@ -522,7 +527,7 @@ function rerender(keepFocus = true) {
   if (keepFocus) setFocus(i);
 }
 function act(a: string, arg?: string) {
-  sfx.select();
+  if (a === 'back' || a === 'title') sfx.back(); else if (a === 'confirm' || a === 'fight') sfx.lockIn(); else sfx.select();
   switch (a) {
     case 'mode': setup.mode = arg as Mode; selectSide = 0; locked[0] = locked[1] = false; showScreen('select'); break;
     case 'side': selectSide = Number(arg) as 0 | 1; locked[selectSide] = false; rerender(); break;
@@ -548,9 +553,10 @@ function act(a: string, arg?: string) {
     case 'fight': goLandscape(); startMatch(); break;
     case 'arena': setup.arena = arg as LayoutId; rerender(); break;
     case 'diff': setup.diff = arg as Difficulty; rerender(); break;
+    case 'lives': setup.lives = Number(arg); try { localStorage.setItem('bl.lives', String(setup.lives)); } catch { /* */ } rerender(); break;
     case 'tab': howTab = arg as typeof howTab; rerender(); break;
-    case 'title': endIntro(); if (match) { match.dispose(); match = null; } hud.show(false); stopMusic(); touchRoot.classList.add('off'); showScreen('title'); break;
-    case 'select': endIntro(); selectSide = 0; locked[0] = locked[1] = false; if (match) { match.dispose(); match = null; } hud.show(false); showScreen('select'); break;
+    case 'title': endIntro(); if (match) { match.dispose(); match = null; } hud.show(false); startMusic('menu'); touchRoot.classList.add('off'); showScreen('title'); break;
+    case 'select': startMusic('menu'); endIntro(); selectSide = 0; locked[0] = locked[1] = false; if (match) { match.dispose(); match = null; } hud.show(false); showScreen('select'); break;
     case 'rematch': rematch(false); break;
     case 'swap': rematch(true); break;
     case 'resume': paused = false; showScreen('none'); break;
@@ -640,7 +646,9 @@ function simTick() {
   match.camBasis.right = vcam.right;
   match.update(DT);
   fx.update(DT);
-  if (match.resultReady && screen === 'none') { showScreen('result'); }
+  // Music intensity follows the fight: Rage, Danger and low health raise the extra layer.
+  setIntensity(match.ended ? 0 : Math.max(...match.fighters.map((f) => (f.raging ? 1 : f.danger ? 0.8 : f.health < 40 ? 0.45 : 0))));
+  if (match.resultReady && screen === 'none') { showScreen('result'); startMusic('menu'); }
 }
 
 // ============================================================ performance monitor
@@ -681,6 +689,8 @@ function frame(now: number) {
   else hidePadCursor();
   if (intro && match && !paused && screen === 'none' && !intro.update(rawDt)) intro = null;
   (window as any).__introT = intro ? intro.t : 99;
+  // "FIGHT!" stinger the moment the banner appears (READY → FIGHT at introT 45; works for new rounds too).
+  if (match) { if (match.introT === 45 && lastIntroT !== 45) sfx.fightStart?.(); lastIntroT = match.introT; }
   if (match && !paused && screen === 'none' && !manualStep) {
     if (fx.hitstop > 0) fx.hitstop -= rawDt; // brief impact emphasis: sim holds, rendering continues
     else {
@@ -767,6 +777,7 @@ const hooks = {
   forced,
   cpus: () => cpus,
   start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal', arenaId: LayoutId = 'rooftop') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; setup.arena = arenaId; startMatch(false); },
+  setLives(n: number) { setup.lives = n; },
   startWithIntro(p1: string, p2: string) { setup.p1 = p1; setup.p2 = p2; setup.mode = 'cpu'; startMatch(true); },
   rematch,
   act,
@@ -793,5 +804,6 @@ Promise.all([loadBodyModels('./models'), loadPropModels('./models/props', PROP_M
     try { renderPortraits(renderer); } catch (e) { console.warn('portraits failed', e); }
     hud.portraits = (id: string) => portraitOf(charById(id));
     (window as any).__game = hooks;
+    startMusic('menu'); // begins as soon as audio is unlocked by the first tap/key
     showScreen('title');
   });

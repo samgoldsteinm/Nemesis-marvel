@@ -667,6 +667,7 @@ export class Fighter {
     if (fam === 'flight' && b.mobility.pressed && !this.heldProp) {
       if (!this.hasEnergy(5)) { this.noPower(); return true; }
       this.setState('fly');
+      sfx.ability(this.def.id, 'mobility');
       this.onGround = false;
       if (this.vel.y < 4) this.vel.y = 4;
       this.pos.y += 0.05;
@@ -703,7 +704,7 @@ export class Fighter {
     this.match.fx.sparksAt(this.center, 18, this.tpColor, 5);
     this.match.fx.flash(this.center, 0.9, this.tpColor, 0.2);
     this.match.fx.vfx?.cast(this.pos.clone().setY(this.pos.y + 0.05), this.tpColor, undefined, 0.9);
-    sfx.teleport();
+    sfx.ability(this.def.id, 'mobility');
     this.setState('teleport');
     this.invuln = 14;
   }
@@ -748,7 +749,7 @@ export class Fighter {
     this.vel.addScaledVector(dir, 3);
     this.setState('swing');
     this.anchor = anchor.clone();
-    sfx.line();
+    sfx.ability(this.def.id, 'mobility');
     return true;
   }
 
@@ -895,6 +896,12 @@ export class Fighter {
     if (m.special === 'blinkStrike') {
       sfx.teleport();
     }
+    // Signature sounds: each fighter's powers, dashes, charged moves and mobility attacks.
+    const mv = this.def.moves, id = this.def.id;
+    if (m === mv.power || m === mv.powerAir) sfx.ability(id, ['bolt', 'bigbolt', 'snare', 'tripleSnare', 'fireball'].includes(m.special ?? '') ? 'projectile' : 'power');
+    else if (m === mv.dashPower) { sfx.power(id); sfx.ability(id, 'dash'); }
+    else if (m === mv.chargePower) { sfx.power(id); sfx.ability(id, 'charged'); }
+    else if (m === mv.mobilityAtk) sfx.ability(id, 'mobility');
   }
 
   private stAttack(dt: number) {
@@ -978,7 +985,7 @@ export class Fighter {
   }
 
   private onActiveStart(m: MoveDef) {
-    sfx.whiff();
+    sfx.whiff(m.hit?.heavy ? 0.9 : Math.min(0.7, (m.hit?.stamina ?? 6) / 14));
     if (m.riseV !== undefined && !this.onGround) this.vel.y = m.riseV;
     if (m.special === 'thunderclap') {
       const c = this.pos.clone().addScaledVector(this.forward, m.hit!.fwd);
@@ -1354,6 +1361,7 @@ export class Fighter {
     this.pgT = 0;
     this.finisherData = { start: this.pos.clone(), yaw0: this.yaw };
     sfx.grab();
+    sfx.special(this.def.id);
   }
 
   private stPGrapple(_dt: number) {
@@ -1912,7 +1920,7 @@ export class Fighter {
       this.setState('hitstun');
     }
     this.yaw = Math.atan2(-dir.x, -dir.z);
-    sfx.hit(!!spec.heavy);
+    sfx.impact(spec.heavy ? 0.9 : Math.min(0.7, spec.stamina / 12), att.def.id, (att.move?.limb ?? '').endsWith('f'));
     this.match.fx.hitstop = spec.heavy ? 0.085 : 0.045;
     if (att.def.burns && spec.heavy && this.health > 0) { this.burnT = 150; this.say('BURNING'); }
     if (att.def.id === 'vanta' && opts.source === 'melee' && this.health > 0) { if (this.bleedT <= 0) this.say('BLEEDING'); this.bleedT = 140; }
@@ -1940,7 +1948,7 @@ export class Fighter {
       this.match.fx.sparksAt(contact, spec.heavy ? 16 : 8, spec.heavy ? 0xffc060 : 0xffffff, spec.heavy ? 9 : 6);
       if (spec.heavy) this.match.fx.flash(this.center, 0.7, 0xfff0d0, 0.1);
     }
-    if (brokeStamina) { this.say('STAMINA BREAK'); vfx?.shatter(this.center, 0xcfeeff, this.def.height * 0.8); }
+    if (brokeStamina) { this.say('STAMINA BREAK'); sfx.staminaBreak(); vfx?.shatter(this.center, 0xcfeeff, this.def.height * 0.8); }
     if (this.health <= 0) vfx?.shatter(this.center, hitCol, this.def.height);
     if (this.health <= 0) this.match.declare(att, this, 'ko');
     return 'hit';
@@ -2036,6 +2044,7 @@ export class Fighter {
     this.finisherData = { start: this.pos.clone(), yaw0: this.yaw };
     this.match.startCinematic(this, o);
     sfx.finisher();
+    sfx.special(this.def.id);
     this.say('FINISHER!');
   }
 

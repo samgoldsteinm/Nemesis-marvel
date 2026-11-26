@@ -39,6 +39,11 @@ export class Match {
   private projPool: THREE.Mesh[] = [];
   introT = 0;
   resultShown = false;
+  /** Lives (stocks) per fighter: losing a K.O., ring-out or finisher costs one; the last one ends the match. */
+  livesMax = 1;
+  lives: [number, number] = [1, 1];
+  round = 1;
+  setLives(n: number) { this.livesMax = Math.max(1, Math.round(n)); this.lives = [this.livesMax, this.livesMax]; this.round = 1; }
   events: string[] = [];
 
   constructor(public scene: THREE.Scene, public arena: Arena, public fx: FX, public camera: VersusCamera, defs: [CharacterDef, CharacterDef]) {
@@ -67,6 +72,8 @@ export class Match {
     this.resultShown = false;
     this.tick = 0;
     this.introT = 90;
+    this.lives = [this.livesMax, this.livesMax];
+    this.round = 1;
     this.events = [];
     for (const p of this.projectiles) { p.mesh.visible = false; p.vis?.stop(false); }
     for (const m of this.mines) this.scene.remove(m.mesh);
@@ -254,7 +261,7 @@ export class Match {
     } else (mesh.material as THREE.Material).visible = true;
     this.projectiles.push(proj);
     if (kind !== 'snare') this.fx.light(origin, PROJ[kind].light, kind === 'bigbolt' || kind === 'fireball' ? 14 : 6, 1.2, 6, () => (proj.alive ? proj.pos : null));
-    sfx.zap();
+    if (kind === 'rift') sfx.ability('rift', 'projectile');
   }
 
   private updateProjectiles(dt: number) {
@@ -356,7 +363,7 @@ export class Match {
       this.fx.burners.push({ p: w.pos, t: 9, size: 1.1 });
     }
     this.fx.shake = 1.2;
-    sfx.explosion();
+    sfx.explosion(p.kind === 'car' ? 1.5 : 1.2);
     this.log('explosion');
     const thrower: Fighter | null = p.thrower ?? null;
     for (const f of this.fighters) {
@@ -467,6 +474,8 @@ export class Match {
     this.updateThrownProps();
     this.updateProjectiles(dt);
     this.updateMines(dt);
+    // Lives left: after the K.O. beat, the loser drops a life and both reset for the next round.
+    if (this.ended && !this.finalBout && this.tick - this.ended.tick > 150) { this.nextRound(); return; }
     // Post-bout poses.
     if (this.ended && this.tick - this.ended.tick > 70) {
       const w = this.ended.winner;
@@ -480,7 +489,32 @@ export class Match {
   }
 
   get resultReady() {
-    return !!this.ended && this.tick - this.ended.tick > 150;
+    return !!this.ended && this.finalBout && this.tick - this.ended.tick > 150;
+  }
+
+  /** True when the current end costs the loser their last life (the match is over). */
+  get finalBout() {
+    return !this.ended || this.lives[this.ended.loser.idx] <= 1;
+  }
+
+  /** The loser loses a life; fighters, projectiles and mines reset, the arena keeps its damage. */
+  nextRound() {
+    if (!this.ended) return;
+    this.lives[this.ended.loser.idx]--;
+    this.round++;
+    this.ended = null;
+    this.introT = 90;
+    for (const p of this.projectiles) { p.mesh.visible = false; p.vis?.stop(false); }
+    for (const m of this.mines) this.scene.remove(m.mesh);
+    this.mines = [];
+    this.projectiles = [];
+    for (const p of this.arena.props) if (p.holder) { p.holder.heldProp = null; p.holder = null; }
+    const [s0, s1] = this.arena.spawns;
+    this.fighters[0].reset(s0, Math.PI / 2);
+    this.fighters[1].reset(s1, -Math.PI / 2);
+    this.camera.cinematic = null;
+    this.camera.snapTo(this.fighters);
+    this.log(`ROUND ${this.round} lives ${this.lives.join('/')}`);
   }
 
   /** Whether `f` currently has a valid X target, for on-screen feedback. */

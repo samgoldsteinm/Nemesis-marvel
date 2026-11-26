@@ -93,8 +93,9 @@ modifier. Gamepad (standard mapping), two keyboard layouts, and touch.
 | 11-26 | Select: tap previews, Confirm locks in (tap twice = confirm), Back undoes last lock |
 | 11-26 | Fix recycled particle sprites flashing at old size (Ember's hand "orange balls") |
 | 11-26 | Cinematic fight intros with lines, speech, power-ups; title toggles for intros/voices |
-| 11-26 | Lives/rounds (1/2/3/5 on select; HUD diamonds; "ROUND n"; arena damage persists) — pending commit |
-| 11-26 | In progress: synth sound design + grungy music (`audio.ts`); faces/masks + Fantasy Races/Bestiary bodies |
+| 11-26 | Lives/rounds (1/2/3/5 on select; HUD diamonds; "ROUND n"; arena damage persists) |
+| 11-26 | Sound design (`audio.ts`): buses + limiter, shared reverb/distortion, D Phrygian; menu + fight music with intensity layer; per-fighter ability palettes, impacts, Rage cue, power/special stingers, FIGHT stinger |
+| 11-26 | In progress: faces/masks + Fantasy Races/Bestiary bodies |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -138,6 +139,10 @@ modifier. Gamepad (standard mapping), two keyboard layouts, and touch.
 - Test-harness matches (`__game.start`) must not run the intro (it locks inputs) → `startMatch(false)`;
   `startWithIntro` exists for intro screenshots.
 
+**Audio**
+- Audio only starts after a user gesture; `startMusic` before unlock is remembered and starts on the first tap/key.
+- Verify audio offline (`renderOffline` → WAV + levels); we can't listen in this environment.
+
 **Process**
 - Background agents editing files while tests run make Vite hot-reload the page mid-test → failures that say
   "Execution context was destroyed" / "T is not defined" are not real; re-run when files are quiet, or test in
@@ -148,7 +153,7 @@ modifier. Gamepad (standard mapping), two keyboard layouts, and touch.
 - The user declined an API-key credential prompt once; don't re-ask for that.
 
 ## 6. Open items / ideas
-- Commit lives + audio + faces work once the background jobs finish; re-run the full test suite.
+- Commit the faces work once its job finishes; re-run the full test suite.
 - Tune `CLIP_IMPACT` timings by eye for a few Motifect clips.
 - Overpass triangle count roughly doubled with the MegaKit; watch low-end phones.
 - iPhone Safari doesn't allow fullscreen/orientation lock; the rotate prompt covers it.

@@ -439,6 +439,21 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     return { pass: swapped && pp.dmg > 0 && rs.dmg > 0 && sr.dmg > 0 && im.dmg > 0 && im.minD < 4 && fb.dmg > 0, info };
   });
 
+  await check('Lives: losing a life starts the next round; the last life ends the match', () => {
+    const m = T.setup('basalt', 'tether');
+    m.setLives(2);
+    const [a, b] = m.fighters;
+    b.applyDamage(500, 500); m.declare(a, b, 'ko');
+    T.idle(170);
+    const afterFirst = { ended: !!m.ended, lives: m.lives.join('/'), round: m.round, bHp: Math.round(b.health), result: m.resultReady };
+    T.idle(100);
+    b.applyDamage(500, 500); m.declare(a, b, 'ko');
+    T.idle(170);
+    const afterSecond = { ended: !!m.ended, result: m.resultReady, lives: m.lives.join('/') };
+    const pass = !afterFirst.ended && afterFirst.lives === '2/1' && afterFirst.round === 2 && afterFirst.bHp === 100 && !afterFirst.result && afterSecond.ended && afterSecond.result;
+    return { pass, info: JSON.stringify({ afterFirst, afterSecond }) };
+  });
+
   await check('SHUNT Displace drops the victim off an open edge for a ring-out', () => {
     const m = T.setup('shunt', 'basalt');
     const [a, b] = m.fighters;

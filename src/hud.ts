@@ -23,7 +23,7 @@ export class HUD {
       p.innerHTML = `
         <div class="por"><span class="ini"></span><span class="tag">P${i + 1}</span></div>
         <div class="meters">
-          <div class="pips">${'<b><i></i></b>'.repeat(4)}<span class="nm"></span></div>
+          <div class="pips">${'<b><i></i></b>'.repeat(4)}<span class="nm"></span><span class="lives"></span></div>
           <div class="bar vit"><div class="hp"></div><div class="st"></div></div>
           <div class="bar rg"><div class="fill"></div></div>
           <div class="flags"><span class="danger">DANGER</span><span class="rage">RAGE</span><span class="fin"><kbd>R</kbd>+<kbd>X</kbd> FINISH</span><span class="note"></span></div>
@@ -57,12 +57,16 @@ export class HUD {
   update(m: Match, time: number) {
     m.fighters.forEach((f, i) => this.updatePanel(this.panels[i], f, time));
     let big = '', sub = '';
-    if (m.introT > 45) big = 'READY';
+    if (m.introT > 45) { big = m.livesMax > 1 ? `ROUND ${m.round}` : 'READY'; if (m.livesMax > 1) sub = `${m.lives[0]} ♥  vs  ${m.lives[1]} ♥`; }
     else if (m.introT > 0) big = 'FIGHT!';
     if (m.ended) {
       const how = m.ended.how === 'ko' ? 'K.O.' : m.ended.how === 'ringout' ? 'RING OUT' : 'FINISHER';
       big = how;
-      sub = `${m.ended.winner.def.name} WINS`;
+      if (m.finalBout) sub = `${m.ended.winner.def.name} WINS`;
+      else {
+        const left = m.lives[m.ended.loser.idx] - 1;
+        sub = `${m.ended.loser.def.name} · ${left} ${left === 1 ? 'LIFE' : 'LIVES'} LEFT`;
+      }
     }
     this.center.textContent = big;
     this.sub.textContent = sub;
@@ -70,6 +74,15 @@ export class HUD {
   }
 
   private updatePanel(p: HTMLElement, f: Fighter, time: number) {
+    const lv = p.querySelector('.lives') as HTMLElement;
+    const m = f.match;
+    if (m.livesMax > 1) {
+      // Lives still in hand; the one being lost right now dims.
+      const losing = m.ended && m.ended.loser === f ? 1 : 0;
+      const n = m.lives[f.idx];
+      const key = `${n}/${m.livesMax}/${losing}`;
+      if (lv.dataset.k !== key) { lv.dataset.k = key; lv.innerHTML = Array.from({ length: m.livesMax }, (_, k) => `<u class="${k < n - losing ? 'on' : k < n ? 'go' : ''}"></u>`).join(''); }
+    } else if (lv.dataset.k) { lv.dataset.k = ''; lv.innerHTML = ''; }
     const hp = p.querySelector('.hp') as HTMLElement;
     const st = p.querySelector('.st') as HTMLElement;
     hp.style.width = `${f.health}%`;
