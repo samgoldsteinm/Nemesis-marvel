@@ -31,6 +31,10 @@ export class CPU {
   private lastHits = 0;
   private sinceHit = 0;
   private noPropsUntil = 0;
+  private lastPos = new THREE.Vector3();
+  private stuckTicks = 0;
+  private detourUntil = 0;
+  private detourDir = new THREE.Vector3();
   constructor(public f: Fighter, public match: Match, public diff: Difficulty = 'normal') {}
 
   get p() {
@@ -54,6 +58,24 @@ export class CPU {
       this.nextThink = this.tick + this.p.react + Math.floor(Math.random() * this.p.react * 0.6);
     }
     const plan = this.plan;
+    // Unstick: if we're steering but not getting anywhere (an object in the way), detour sideways.
+    if (this.tick % 15 === 0) {
+      const moved = f.pos.distanceTo(this.lastPos);
+      const wantsMove = !!plan?.move && f.state === 'ground';
+      this.stuckTicks = wantsMove && moved < 0.25 && f.pos.distanceTo(f.opp.pos) > 1.8 ? this.stuckTicks + 15 : 0;
+      this.lastPos.copy(f.pos);
+      if (this.stuckTicks >= 30) {
+        const to = f.opp.pos.clone().sub(f.pos).setY(0).normalize();
+        this.detourDir.set(to.z, 0, -to.x).multiplyScalar(Math.random() < 0.5 ? 1 : -1).addScaledVector(to, 0.3).normalize();
+        this.detourUntil = this.tick + 40;
+        this.stuckTicks = 0;
+      }
+    }
+    if (this.tick < this.detourUntil && f.state === 'ground') {
+      this.stick(out, this.detourDir);
+      if (this.tick % 20 === 0 && f.def.lift >= 1) out.down.grab = true; // heavies may just pick the obstacle up
+      return out;
+    }
     // Dash power: run in, then R+A once at speed.
     if (this.dashPending > 0 && --this.dashPending === 0 && f.onGround) { out.down.power = true; out.down.attack = true; }
     if (plan) {

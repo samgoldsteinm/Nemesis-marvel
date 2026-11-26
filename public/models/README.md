@@ -1,7 +1,12 @@
-# Character model
+# Models and animation
 
-`xbot.glb` is the rigged humanoid used for every fighter's body. It was taken from the three.js examples
-(`examples/models/gltf/Xbot.glb`, three.js r170), and originally comes from Adobe Mixamo.
-Mixamo characters can be used royalty-free in games and other projects, but may not be
-redistributed as standalone assets. The game recolours the model per fighter, attaches its own
-original armour and accessories to the bones, and drives the skeleton with its own animation system.
+All assets in this folder are released under **CC0 1.0 (public domain)**.
+
+- `ual_male.glb`, `ual_female.glb`, `ual_anims2.glb`: mannequins and animation clips from the
+  **Universal Animation Library** and **Universal Animation Library 2** by Quaternius
+  (https://quaternius.com). They were trimmed to the clips the game uses and meshopt-compressed.
+  Licence: `LICENSE-Quaternius-UAL.txt`.
+- `props/*.glb`: a selection from **City Props 1 (free)** by Coding Creature
+  (https://www.codingcreature.com), meshopt-compressed. Licence: `props/LICENSE.txt`.
+
+The game recolours the mannequins per fighter and attaches its own original armour and accessories.

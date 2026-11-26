@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CharacterDef, MoveDef, HitSpec, PROP_SWING, finishMaterial } from './characters';
-import { SkinnedBody, hasBodyModel } from './skinned';
+import { SkinnedBody, hasBodyModel, ClipPlay, hasClip } from './skinned';
 import { Rig, P, Pose } from './rig';
 import { InputFrame, emptyFrame } from './input';
 import { Prop, BOUNDS, KILL_Y, WallSeg } from './arena';
@@ -95,6 +95,12 @@ export class Fighter {
   hitSide = 1;
 
   ribbon: Ribbon;
+  private limbPrev = new Map<string, THREE.Vector3>();
+  /** Playback speed that fits a clip's length to a number of gameplay ticks. */
+  private fitSpeed(name: string, ticks: number) {
+    const clip = this.skinned?.clipDuration(name) ?? 1;
+    return THREE.MathUtils.clamp(clip / Math.max(0.05, ticks / 60), 0.6, 3.5);
+  }
   skinned: SkinnedBody | null = null;
   private mats: THREE.MeshStandardMaterial[] = [];
   private flashOn = false;
@@ -248,7 +254,7 @@ export class Fighter {
       case 'stunned': this.stStunned(dt); break;
       case 'launched': this.stLaunched(dt); break;
       case 'down': this.stDown(dt); break;
-      case 'getup': if (this.t > 18) this.setState('ground'); this.friction(dt, 20); break;
+      case 'getup': if (this.t > 26) this.setState('ground'); this.friction(dt, 20); break;
       case 'swing': this.stSwing(dt); break;
       case 'cling': this.stCling(dt); break;
       case 'teleport': this.stTeleport(dt); break;
@@ -1273,9 +1279,65 @@ export class Fighter {
 
   hand() {
     const v = new THREE.Vector3();
+    if (this.skinned) return this.skinned.boneWorld('hand_r', v);
     this.rig.hand.r.getWorldPosition(v);
     return v;
   }
+
+  // ======================================================================== authored clips
+  private moveSerial = 0;
+  private lastMoveRef: MoveDef | null = null;
+  /** Pick the authored clip for the current state, or null to use the procedural pose. */
+  private clipFor(): ClipPlay | null {
+    const hs = Math.hypot(this.vel.x, this.vel.z);
+    const sc = this.def.height / 1.8;
+    const loop = (name: string, speed = 1): ClipPlay => ({ name, loop: true, speed, key: name });
+    const once = (name: string, durTicks: number, tag = ''): ClipPlay | null => {
+      if (!hasClip(name)) return null;
+      return { name, loop: false, speed: 1, key: `${name}#${tag}`, ...{ durTicks } } as ClipPlay & { durTicks: number };
+    };
+    if (this.move !== this.lastMoveRef) { this.lastMoveRef = this.move; this.moveSerial++; }
+    const ms = String(this.moveSerial);
+    switch (this.state) {
+      case 'ground':
+      case 'idleLock': {
+        if (this.heldProp) return loop('Walk_Carry_Loop', Math.max(0.25, hs / (1.5 * sc)));
+        if (hs < 0.5) return loop('Idle_Loop');
+        if (hs < 3.2) return loop('Walk_Loop', hs / (1.5 * sc));
+        if (hs < 6.8) return loop('Jog_Fwd_Loop', hs / (3.8 * sc));
+        return loop('Sprint_Loop', hs / (6.2 * sc));
+      }
+      case 'air': return this.heldProp ? null : this.vel.y > 2 && this.t < 14 ? once('Jump_Start', 14, 's' + ms) : loop('Jump_Loop');
+      case 'recover': return once('Jump_Land', 10, 'l' + this.tick);
+      case 'guard': case 'sblock': return loop('Idle_Shield_Loop');
+      case 'evade': return once('Roll', 16, 'r' + this.tick);
+      case 'charge': return loop('Spell_Simple_Idle_Loop');
+      case 'powerCharge': return once('Spell_Simple_Enter', 18, 'pc' + ms);
+      case 'lift': return once('PickUp_Table', this.heldProp?.cls === 2 ? 26 : 14, 'lift');
+      case 'throw': return once('OverhandThrow', this.throwWind + 14, 'th' + ms);
+      case 'grabbing': return this.pummelT > 0 ? once('Melee_Hook', 10, 'pm' + this.pummels) : loop('Push_Loop', 0.5);
+      case 'hitstun': return once(this.hitSide > 0 ? 'Hit_Chest' : 'Hit_Head', Math.max(16, this.stun), 'h' + this.lastHitSerial);
+      case 'stunned': return loop('Hit_Head', 0.35);
+      case 'getup': return once('LayToIdle', 30, 'gu');
+      case 'victory': return loop(this.def.id === 'tether' ? 'Dance_Loop' : this.def.id === 'aerin' ? 'Yes' : 'Idle_FoldArms_Loop');
+      case 'attack': {
+        const m = this.move;
+        if (!m) return null;
+        const dur = m.startup + m.active + m.recovery;
+        const byId: Record<string, string> = {
+          jab: 'Punch_Jab', cross: 'Punch_Cross', launcher: 'Melee_Hook', hammer: 'Melee_Hook', lariat: 'Melee_Hook', phaseElbow: 'Punch_Cross',
+          propSwing: 'Sword_Regular_A', throwFighter: 'OverhandThrow', pgEnd: 'OverhandThrow', shoulder: 'Shield_Dash', avalanche: 'Shield_Dash',
+          slideKick: 'Slide_Start', whiffGrab: 'Push_Loop', bolt: 'Spell_Simple_Shoot', boltAir: 'Spell_Simple_Shoot', snare: 'Spell_Simple_Shoot',
+          snareAir: 'Spell_Simple_Shoot', chainLightning: 'Spell_Simple_Shoot', tripleSnare: 'Spell_Simple_Shoot', mineTrail: 'Spell_Simple_Shoot',
+        };
+        const name = byId[m.id];
+        if (!name || (!this.onGround && !m.special)) return null;
+        return once(name, dur, 'm' + ms);
+      }
+      default: return null;
+    }
+  }
+  lastHitSerial = 0;
 
   private liftProp(p: Prop) {
     p.state = 'held';
@@ -1450,6 +1512,7 @@ export class Fighter {
     const kb = dir.clone().setY(0).normalize().multiplyScalar(spec.kbF * (att.raging ? 1.15 : 1) / this.def.weight);
     const launch = spec.launch || brokeStamina || this.health <= 0 || !this.onGround && spec.kbU > 0;
     this.hitSide = Math.random() < 0.5 ? 1 : -1;
+    this.lastHitSerial++;
     if (launch) {
       this.vel.copy(kb);
       this.vel.y = Math.max(spec.kbU, brokeStamina ? 6 : 3) / Math.sqrt(this.def.weight);
@@ -1679,10 +1742,27 @@ export class Fighter {
     r.apply(pose, rate, dt);
     // Big launches tumble end over end.
     if ((this.state === 'launched' || this.state === 'ko' && !this.onGround) && this.lastLaunchSpeed > 11) r.body.rotation.x = -0.7 - this.t * 0.22;
-    this.skinned?.sync();
+    if (this.skinned) {
+      const play = this.clipFor() as (ClipPlay & { durTicks?: number }) | null;
+      // One-shot clips are time-fitted to the gameplay duration of the state.
+      this.skinned.drive(play ? { ...play, speed: play.durTicks ? this.fitSpeed(play.name, play.durTicks) : play.speed } : null);
+      this.skinned.update(dt);
+    }
     // Strike swoosh along the attacking limb during the active window.
     const m = this.state === 'attack' ? this.move : null;
-    if (m && m.hit && this.t >= m.startup - 1 && this.t <= m.startup + m.active + 1) {
+    if (m && m.hit && this.skinned && this.skinned.procW < 0.5 && this.t >= m.startup - 1 && this.t <= m.startup + m.active + 1) {
+      // Authored clip: trail whichever hand or foot is actually moving fastest.
+      const sk = this.skinned;
+      let best: [string, string] = ['hand_r', 'lowerarm_r'], bestV = -1;
+      for (const pair of [['hand_r', 'lowerarm_r'], ['hand_l', 'lowerarm_l'], ['foot_r', 'calf_r'], ['foot_l', 'calf_l']] as [string, string][]) {
+        const p = sk.boneWorld(pair[0]);
+        const prev = this.limbPrev.get(pair[0]);
+        const v = prev ? p.distanceTo(prev) : 0;
+        this.limbPrev.set(pair[0], p);
+        if (v > bestV) { bestV = v; best = pair; }
+      }
+      this.ribbon.push(sk.boneWorld(best[0]), sk.boneWorld(best[1]));
+    } else if (m && m.hit && this.t >= m.startup - 1 && this.t <= m.startup + m.active + 1) {
       const limb = m.limb ?? 'rh';
       const tip = new THREE.Vector3(), mid = new THREE.Vector3();
       const [endObj, midObj] = limb === 'lh' ? [r.hand.l, r.joints.lFore] : limb === 'rf' ? [r.foot.r, r.joints.rShin] : limb === 'lf' ? [r.foot.l, r.joints.lShin] : [r.hand.r, r.joints.rFore];

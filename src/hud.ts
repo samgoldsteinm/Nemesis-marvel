@@ -8,6 +8,8 @@ import { TUNING } from './fighter';
 export class HUD {
   el: HTMLElement;
   private panels: HTMLElement[] = [];
+  /** Lookup for fighter portrait images (set once portraits are rendered). */
+  portraits: ((id: string) => string) | null = null;
   private center: HTMLElement;
   private sub: HTMLElement;
   constructor(root: HTMLElement) {
@@ -40,7 +42,10 @@ export class HUD {
       (p.querySelector('.nm') as HTMLElement).style.color = f.def.color;
       const por = p.querySelector('.por') as HTMLElement;
       por.style.setProperty('--c', f.def.color);
-      (p.querySelector('.ini') as HTMLElement).textContent = f.def.name[0];
+      const url = this.portraits?.(f.def.id) ?? '';
+      const ini = p.querySelector('.ini') as HTMLElement;
+      ini.textContent = url ? '' : f.def.name[0];
+      por.style.backgroundImage = url ? `url(${url})` : '';
       (p.querySelector('.ctl') as HTMLElement).textContent = controllers[i];
     });
   }

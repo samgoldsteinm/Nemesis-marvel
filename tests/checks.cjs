@@ -182,7 +182,7 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     const rest = m2.arena.props.filter((p) => p.state === 'rest').length;
     const letters = m2.arena.letters.filter((l) => !l.down).length;
     const f = m2.fighters;
-    return { pass: brokeBefore > 0 && broken === 0 && rest === 9 && m2.arena.props.length === 9 && letters === 7 && !m2.ended && f.every((x) => x.health === 100 && x.state === 'ground' && !x.heldProp && x.rig.root.visible), info: `brokeBefore=${brokeBefore} broken=${broken} props=${m2.arena.props.length}/${rest} letters=${letters}` };
+    return { pass: brokeBefore > 0 && broken === 0 && rest === m2.arena.props.length && rest >= 9 && letters === 7 && !m2.ended && f.every((x) => x.health === 100 && x.state === 'ground' && !x.heldProp && x.rig.root.visible), info: `brokeBefore=${brokeBefore} broken=${broken} props=${m2.arena.props.length}/${rest} letters=${letters}` };
   });
 
   await check('BASALT lifts the fuel tank; TETHER cannot', () => {

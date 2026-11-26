@@ -16,7 +16,9 @@ import { ROSTER, CharacterDef, charById } from './characters';
 import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, keyDown, endInputRead } from './input';
 import { initAudio, sfx, startMusic, stopMusic, setMuted, muted } from './audio';
 import { TUNING } from './fighter';
-import { loadBodyModel } from './skinned';
+import { renderPortraits, portraitOf } from './portraits';
+import { loadBodyModels, loadPropModels } from './skinned';
+import { PROP_MODELS } from './arena';
 
 // ============================================================ renderer & scene
 const container = document.getElementById('app')!;
@@ -298,134 +300,198 @@ function showScreen(s: Screen) {
   setFocus(0);
 }
 
-let selectStage: 0 | 1 = 0;
+let selectSide: 0 | 1 = 0; // which player is choosing on the fighter screen
+let howTab: 'controls' | 'combat' | 'fighters' = 'controls';
+const RATINGS: Record<string, { power: number; speed: number; range: number; toughness: number; difficulty: string }> = {
+  basalt: { power: 5, speed: 2, range: 2, toughness: 5, difficulty: 'Easy' },
+  tether: { power: 2, speed: 5, range: 4, toughness: 2, difficulty: 'Hard' },
+  aerin: { power: 3, speed: 4, range: 5, toughness: 3, difficulty: 'Medium' },
+  shunt: { power: 3, speed: 4, range: 3, toughness: 3, difficulty: 'Hard' },
+};
+const ICON = { ground: '⛰', swing: '🪢', flight: '🪽', teleport: '✦' } as Record<string, string>;
+const LIFT = ['Light objects', 'Medium objects', 'Anything — even cars'];
+function por(def: CharacterDef, cls = 'pimg') {
+  const url = portraitOf(def);
+  return url ? `<img class="${cls}" src="${url}" alt="${def.name}">` : `<div class="${cls} ini" style="--c:${def.color}">${def.name[0]}</div>`;
+}
+function bars(id: string) {
+  const r = RATINGS[id];
+  const row = (label: string, v: number) => `<div class="stat"><span>${label}</span><i>${[1, 2, 3, 4, 5].map((k) => `<b class="${k <= v ? 'on' : ''}"></b>`).join('')}</i></div>`;
+  return row('Power', r.power) + row('Speed', r.speed) + row('Range', r.range) + row('Toughness', r.toughness);
+}
+function sidePanel(side: 0 | 1) {
+  const id = side === 0 ? setup.p1 : setup.p2;
+  const def = charById(id);
+  const who = side === 0 ? 'PLAYER 1' : setup.mode === 'cpu' ? 'CPU' : 'PLAYER 2';
+  const active = selectSide === side;
+  return `
+    <div class="side ${active ? 'active' : ''} s${side}" style="--c:${def.color}" data-act="side" data-arg="${side}">
+      <div class="side-who"><span class="badge p${side}">${who}</span>${active ? '<span class="choosing">choosing…</span>' : ''}</div>
+      <div class="side-art">${por(def, 'side-img')}</div>
+      <div class="side-name">${def.name}</div>
+      <div class="side-title">${def.title}</div>
+      <div class="stats">${bars(id)}</div>
+      <div class="chips"><span class="chip">${ICON[def.recovery]} ${def.recovery} recovery</span><span class="chip">💪 ${LIFT[def.lift]}</span><span class="chip">★ ${RATINGS[id].difficulty}</span></div>
+    </div>`;
+}
+
 function render(s: Screen): string {
   if (s === 'title') return `
-    <div class="screen">
+    <div class="screen title-screen">
       <h1 class="logo">BREAK<span>LINE</span></h1>
-      <div class="tagline">Rooftop superpowered brawler · original characters</div>
-      <div class="btns">
-        <button class="btn" data-nav data-act="mode" data-arg="cpu">Versus CPU<small>One player against the computer</small></button>
-        <button class="btn" data-nav data-act="mode" data-arg="versus">Versus 2P<small>Shared screen: two pads, or keyboard + pad</small></button>
-        <button class="btn" data-nav data-act="moves">Controls &amp; Move Sheets</button>
-        <button class="btn" data-nav data-act="mute">Sound: ${muted ? 'Off' : 'On'}</button>
+      <p class="tagline">Superpowered brawls on breakable rooftops and overpasses</p>
+      <div class="big-btns">
+        <button class="bigbtn primary" data-nav data-act="mode" data-arg="cpu"><span class="ico">▶</span><span><b>Fight the CPU</b><small>Single player</small></span></button>
+        <button class="bigbtn" data-nav data-act="mode" data-arg="versus"><span class="ico">⚔</span><span><b>2 Players</b><small>Same screen · two pads, or pad + keyboard</small></span></button>
+        <button class="bigbtn" data-nav data-act="moves"><span class="ico">?</span><span><b>How to play</b><small>Controls, combat basics and move lists</small></span></button>
       </div>
-      <div class="hint">Keyboard: WASD + J K L I U O · Gamepad: A B X Y, LB/LT = L, RB/RT = R · Touch supported. ${connectedPads().length} pad(s) connected.</div>
+      <div class="foot">
+        <button class="pill" data-nav data-act="mute">${muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
+        <span class="pill static">🎮 ${connectedPads().length ? connectedPads().length + ' controller' + (connectedPads().length > 1 ? 's' : '') + ' connected' : 'Keyboard: WASD + J K L I U O'}</span>
+      </div>
     </div>`;
   if (s === 'select') {
-    const who = selectStage === 0 ? 'PLAYER 1' : setup.mode === 'cpu' ? 'CPU OPPONENT' : 'PLAYER 2';
+    const who = selectSide === 0 ? 'Player 1' : setup.mode === 'cpu' ? 'the CPU' : 'Player 2';
     return `
-    <div class="screen">
-      <h2>CHOOSE ${who}</h2>
-      <div class="roster">${ROSTER.map((c) => `
-        <div class="card" data-nav data-act="pick" data-arg="${c.id}" style="--c:${c.color}">
-          ${selectStage === 1 && setup.p1 === c.id ? '<span class="pick p1">P1</span>' : ''}
-          <div class="cn">${c.name}</div><div class="ct">${c.title}</div>
-          <p>${c.blurb}</p>
-          <div class="chips"><span class="chip">${c.recovery} recovery</span><span class="chip">lift: ${['light', 'medium', 'heavy'][c.lift]}</span><span class="chip">speed ${c.speed.toFixed(1)}</span></div>
-        </div>`).join('')}
+    <div class="screen select-screen">
+      <div class="topbar">
+        <button class="pill" data-nav data-act="title">← Back</button>
+        <h2>Choose fighters</h2>
+        <span class="hintline">Picking for <b>${who}</b></span>
       </div>
-      ${setup.mode === 'cpu' ? `<div class="row"><span>CPU difficulty:</span><span class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="btn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d}</button>`).join('')}</span></div>` : ''}
-      <div class="row"><span>Arena:</span><span class="seg">${LAYOUTS.map((l) => `<button class="btn ${setup.arena === l.id ? 'on' : ''}" data-nav data-act="arena" data-arg="${l.id}">${l.name}</button>`).join('')}</span></div>
-      <div class="hint">${LAYOUTS.find((l) => l.id === setup.arena)!.blurb}</div>
-      <div class="row"><button class="btn" data-nav data-act="title">Back</button></div>
+      <div class="select-grid">
+        ${sidePanel(0)}
+        <div class="roster">
+          ${ROSTER.map((c) => `
+            <button class="rcard ${setup.p1 === c.id ? 'pick1' : ''} ${setup.p2 === c.id ? 'pick2' : ''}" data-nav data-act="pick" data-arg="${c.id}" style="--c:${c.color}">
+              ${por(c, 'rimg')}
+              <span class="rname">${c.name}</span>
+              <span class="rtags">${setup.p1 === c.id ? '<i class="t1">P1</i>' : ''}${setup.p2 === c.id ? `<i class="t2">${setup.mode === 'cpu' ? 'CPU' : 'P2'}</i>` : ''}</span>
+            </button>`).join('')}
+          <p class="blurb">${charById(selectSide === 0 ? setup.p1 : setup.p2).blurb}</p>
+        </div>
+        ${sidePanel(1)}
+      </div>
+      <div class="options">
+        <div class="opt"><span class="opt-label">Arena</span><div class="seg">${LAYOUTS.map((l) => `<button class="segbtn ${setup.arena === l.id ? 'on' : ''}" data-nav data-act="arena" data-arg="${l.id}"><span class="arena-sw ${l.id}"></span>${l.name}</button>`).join('')}</div></div>
+        ${setup.mode === 'cpu' ? `<div class="opt"><span class="opt-label">CPU level</span><div class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="segbtn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div></div>` : ''}
+        <button class="fight" data-nav data-act="fight">FIGHT ▶</button>
+      </div>
     </div>`;
   }
   if (s === 'result' && match?.ended) {
     const e = match.ended;
-    const how = e.how === 'ko' ? 'K.O.' : e.how === 'ringout' ? 'RING OUT' : 'FINISHER';
+    const how = e.how === 'ko' ? 'K.O.' : e.how === 'ringout' ? 'Ring out' : 'Finisher';
     const wIdx = e.winner.idx;
-    const label = setup.mode === 'cpu' ? (wIdx === 0 ? 'YOU WIN' : 'CPU WINS') : `PLAYER ${wIdx + 1} WINS`;
-    const st = (f: typeof e.winner) => `${f.def.name}: ${f.stats.hits} hits · ${f.stats.throws} throws · ${f.stats.catches} catches · ${f.stats.recoveries} recoveries · health ${Math.round(f.health)}`;
+    const label = setup.mode === 'cpu' ? (wIdx === 0 ? 'You win!' : 'CPU wins') : `Player ${wIdx + 1} wins!`;
+    const stat = (f: typeof e.winner) => `
+      <div class="rstat" style="--c:${f.def.color}">${por(f.def, 'mini')}<div><b>${f.def.name}</b>
+        <span>${f.stats.hits} hits · ${f.stats.throws} throws · ${f.stats.catches} catches · ${f.stats.recoveries} recoveries</span></div></div>`;
     return `
-    <div class="screen">
-      <p class="result-big" style="color:${e.winner.def.color}">${label}</p>
-      <h2>${e.winner.def.name} — by ${how}</h2>
-      <div class="hint">${st(match.fighters[0])}<br>${st(match.fighters[1])}</div>
-      <div class="btns" style="margin-top:16px">
-        <button class="btn" data-nav data-act="rematch">Rematch</button>
-        <button class="btn" data-nav data-act="swap">Switch Sides<small>Swap fighters and fight again</small></button>
-        <button class="btn" data-nav data-act="select">Character Select</button>
-        <button class="btn" data-nav data-act="title">Main Menu</button>
+    <div class="screen result-screen" style="--c:${e.winner.def.color}">
+      <div class="result-art">${por(e.winner.def, 'result-img')}</div>
+      <div class="result-body">
+        <p class="kicker">${how}</p>
+        <h1 class="result-big">${label}</h1>
+        <p class="sub">${e.winner.def.name} takes the bout.</p>
+        <div class="rstats">${stat(match.fighters[0])}${stat(match.fighters[1])}</div>
+        <div class="row-btns">
+          <button class="btn2 primary" data-nav data-act="rematch">↻ Rematch</button>
+          <button class="btn2" data-nav data-act="swap">⇄ Swap sides</button>
+          <button class="btn2" data-nav data-act="select">Change fighters</button>
+          <button class="btn2" data-nav data-act="title">Main menu</button>
+        </div>
       </div>
     </div>`;
   }
   if (s === 'pause') return `
-    <div class="screen">
-      <h2>PAUSED</h2>
-      <div class="btns">
-        <button class="btn" data-nav data-act="resume">Resume</button>
-        <button class="btn" data-nav data-act="rematch">Restart Bout</button>
-        <button class="btn" data-nav data-act="moves">Controls &amp; Move Sheets</button>
-        <button class="btn" data-nav data-act="mute">Sound: ${muted ? 'Off' : 'On'}</button>
-        <button class="btn" data-nav data-act="title">Quit to Menu</button>
+    <div class="screen pause-screen">
+      <div class="card">
+        <h2>Paused</h2>
+        <button class="btn2 primary wide" data-nav data-act="resume">▶ Resume</button>
+        <button class="btn2 wide" data-nav data-act="rematch">↻ Restart bout</button>
+        <button class="btn2 wide" data-nav data-act="moves">? How to play</button>
+        <button class="btn2 wide" data-nav data-act="mute">${muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
+        <button class="btn2 wide" data-nav data-act="title">Quit to menu</button>
       </div>
     </div>`;
-  if (s === 'moves') return `
-    <div class="screen">
-      <h2>CONTROLS</h2>
-      <div class="cols">
-        <table class="moves">
-          <tr><td>Stick</td><td>Move (camera-relative)</td></tr>
-          <tr><td>A</td><td>Attack — repeat for a 3-hit chain; rising / descending air attacks</td></tr>
-          <tr><td>B</td><td>Jump</td></tr>
-          <tr><td>X</td><td>Grapple the opponent, pick up a prop, or throw what you hold. The diamond marker shows the current target.</td></tr>
-          <tr><td>Y</td><td>Guard · Y + direction: evade (A during evade: counter) · Press Y as a thrown prop arrives to catch it</td></tr>
-          <tr><td>L</td><td>Mobility (sprint / swing / flight / teleport) · L+A mobility attack</td></tr>
-          <tr><td>R + A</td><td>Powered attack (costs energy). Running: dash power. Keep A held: charged power. In the air: aerial power.</td></tr>
-          <tr><td>A (running)</td><td>Running attack</td></tr>
-          <tr><td>X, then A</td><td>Pummel a grabbed opponent (up to 3), X or a direction + X to throw</td></tr>
-          <tr><td>A with a light prop</td><td>Swing it as a weapon (breaks after 3 swings); X throws it</td></tr>
-          <tr><td>R + B</td><td>Super jump</td></tr>
-          <tr><td>R + X</td><td>Power grapple (unique per fighter). On a DANGER opponent with ≥¼ energy: FINISHER</td></tr>
-          <tr><td>R + Y</td><td>Super block — deflects projectiles and thrown props</td></tr>
-          <tr><td>Hold R</td><td>Recharge energy (standing still, vulnerable)</td></tr>
-          <tr><td>Tap R</td><td>Activate Rage when the meter is full: ${TUNING.rageDuration}s of unlimited power</td></tr>
-          <tr><td>L + R</td><td>While launched: recovery (costs ${TUNING.recoveryCost} energy)</td></tr>
-        </table>
-        <table class="moves">
-          <tr><td>Vitality</td><td>Yellow stamina recovers when you're not hit; red health is lasting. Powered hits, throws and props cut health.</td></tr>
-          <tr><td>Danger</td><td>Health ≤ ${TUNING.dangerHealth} or stamina ≤ ${TUNING.dangerStamina}: exposed to a finisher.</td></tr>
-          <tr><td>Win</td><td>K.O. (health to zero) · RING OUT (fall off the roof) · FINISHER</td></tr>
-          <tr><td>Fence</td><td>Launched bodies, throws and power moves break fence segments and open the drop.</td></tr>
-        </table>
-      </div>
-      <h2 style="margin-top:18px">MOVE SHEETS</h2>
-      <div class="cols">${ROSTER.map((c) => `
-        <table class="moves" style="--c:${c.color}">
-          <tr><td style="color:${c.color}">${c.name}</td><td>${c.recovery} recovery · lift ${['light', 'medium', 'heavy'][c.lift]}</td></tr>
-          <tr><td>Mobility</td><td>${c.sheet.mobility}</td></tr>
-          <tr><td>Power</td><td>${c.sheet.power}</td></tr>
-          <tr><td>Grapple</td><td>${c.sheet.grapple}</td></tr>
-          <tr><td>Finisher</td><td>${c.sheet.finisher}</td></tr>
-          <tr><td>Weakness</td><td>${c.sheet.weakness}</td></tr>
-          ${c.sheet.moves.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}
-        </table>`).join('')}
-      </div>
-      <div class="row"><button class="btn" data-nav data-act="back">Back</button></div>
+  if (s === 'moves') {
+    const tab = (id: typeof howTab, label: string) => `<button class="tab ${howTab === id ? 'on' : ''}" data-nav data-act="tab" data-arg="${id}">${label}</button>`;
+    const k = (x: string) => `<kbd>${x}</kbd>`;
+    const ctl: [string, string, string, string][] = [
+      ['Move', 'Left stick', k('W') + k('A') + k('S') + k('D'), 'Left pad'],
+      ['Attack', k('A'), k('J'), 'A'],
+      ['Jump', k('B'), k('K'), 'B'],
+      ['Grab / pick up / throw', k('X'), k('L'), 'X'],
+      ['Guard (tap as a prop arrives to catch it)', k('Y'), k('I'), 'Y'],
+      ['Mobility: sprint, swing, fly, teleport', k('LB') + '/' + k('LT'), k('U'), 'L'],
+      ['Power modifier', k('RB') + '/' + k('RT'), k('O'), 'R'],
+      ['Pause', k('Start'), k('Esc'), '❚❚'],
+    ];
+    const body = howTab === 'controls' ? `
+      <table class="ctl"><thead><tr><th>Action</th><th>Gamepad</th><th>Keyboard</th><th>Touch</th></tr></thead>
+      <tbody>${ctl.map(([a, g, kb, t]) => `<tr><td>${a}</td><td>${g}</td><td>${kb}</td><td>${t}</td></tr>`).join('')}</tbody></table>
+      <p class="note">Player 2 on keyboard: arrows to move, ${k('.')} attack, ${k('/')} jump, ${k(',')} grab, ${k(';')} guard, ${k('Right Shift')} mobility, ${k('Enter')} power.</p>`
+      : howTab === 'combat' ? `
+      <div class="tips">
+        <div class="tip"><h4>Combos</h4><p>Press ${k('A')} up to three times for a chain. Attack while running, jumping or using mobility for different moves.</p></div>
+        <div class="tip"><h4>Power moves</h4><p>Hold ${k('R')} and press ${k('A')}. Keep ${k('A')} held to charge a stronger version, or use it while running for a dash attack. Power moves cost energy (the blue pips).</p></div>
+        <div class="tip"><h4>Grabs &amp; throws</h4><p>${k('X')} grabs the opponent or picks up an object. Press ${k('A')} to pummel, ${k('X')} to throw. ${k('R')}+${k('X')} is your fighter's power grapple.</p></div>
+        <div class="tip"><h4>Defence</h4><p>Hold ${k('Y')} to guard, and add a direction to roll away. ${k('R')}+${k('Y')} super-blocks and reflects projectiles.</p></div>
+        <div class="tip"><h4>Energy &amp; Rage</h4><p>Hold ${k('R')} while standing still to recharge. Landing hits fills Rage: tap ${k('R')} when it's full for ${TUNING.rageDuration}s of unlimited power.</p></div>
+        <div class="tip"><h4>Winning</h4><p>Empty their health (<b>K.O.</b>), knock them off the edge (<b>Ring out</b>), or press ${k('R')}+${k('X')} when they flash <b>DANGER</b> and you have one energy pip (<b>Finisher</b>).</p></div>
+        <div class="tip"><h4>Recovery</h4><p>Knocked into the air? Press ${k('L')}+${k('R')} to recover. Each fighter recovers differently, and it costs energy.</p></div>
+        <div class="tip"><h4>The arena</h4><p>Fences and barriers break. Every broken section is a new way to win by ring out, for either fighter.</p></div>
+      </div>`
+      : `<div class="fcards">${ROSTER.map((c) => `
+        <div class="fcard" style="--c:${c.color}">
+          <div class="fhead">${por(c, 'mini')}<div><b>${c.name}</b><span>${c.title}</span></div></div>
+          <table class="mlist">${c.sheet.moves.map(([kk, v]) => `<tr><td>${kk}</td><td>${v}</td></tr>`).join('')}<tr><td>Finisher</td><td>${c.sheet.finisher}</td></tr><tr><td>Weakness</td><td>${c.sheet.weakness}</td></tr></table>
+        </div>`).join('')}</div>`;
+    return `
+    <div class="screen how-screen">
+      <div class="topbar"><button class="pill" data-nav data-act="back">← Back</button><h2>How to play</h2><span></span></div>
+      <div class="tabs">${tab('controls', 'Controls')}${tab('combat', 'Combat')}${tab('fighters', 'Fighters')}</div>
+      <div class="how-body">${body}</div>
     </div>`;
+  }
   return '';
 }
 
 let movesReturn: Screen = 'title';
+function rerender(keepFocus = true) {
+  const i = focusIdx;
+  showScreen(screen);
+  if (keepFocus) setFocus(i);
+}
 function act(a: string, arg?: string) {
   sfx.select();
   switch (a) {
-    case 'mode': setup.mode = arg as Mode; selectStage = 0; showScreen('select'); break;
-    case 'pick':
-      if (selectStage === 0) { setup.p1 = arg!; selectStage = 1; showScreen('select'); }
-      else { setup.p2 = arg!; startMatch(); }
+    case 'mode': setup.mode = arg as Mode; selectSide = 0; showScreen('select'); break;
+    case 'side': selectSide = Number(arg) as 0 | 1; rerender(); break;
+    case 'pick': {
+      if (selectSide === 0) { setup.p1 = arg!; selectSide = 1; rerender(); }
+      else {
+        setup.p2 = arg!;
+        showScreen('select');
+        // Both chosen: jump to the FIGHT button.
+        const f = focusables();
+        setFocus(f.findIndex((e) => e.dataset.act === 'fight'));
+      }
       break;
-    case 'arena': setup.arena = arg as LayoutId; { const i = focusIdx; showScreen('select'); setFocus(i); } break;
-    case 'diff': setup.diff = arg as Difficulty; { const i = focusIdx; showScreen('select'); setFocus(i); } break;
+    }
+    case 'fight': startMatch(); break;
+    case 'arena': setup.arena = arg as LayoutId; rerender(); break;
+    case 'diff': setup.diff = arg as Difficulty; rerender(); break;
+    case 'tab': howTab = arg as typeof howTab; rerender(); break;
     case 'title': if (match) { match.dispose(); match = null; } hud.show(false); stopMusic(); touchRoot.classList.add('off'); showScreen('title'); break;
-    case 'select': selectStage = 0; showScreen('select'); break;
+    case 'select': selectSide = 0; if (match) { match.dispose(); match = null; } hud.show(false); showScreen('select'); break;
     case 'rematch': rematch(false); break;
     case 'swap': rematch(true); break;
     case 'resume': paused = false; showScreen('none'); break;
-    case 'moves': movesReturn = screen === 'pause' ? 'pause' : 'title'; showScreen('moves'); break;
+    case 'moves': movesReturn = screen === 'pause' ? 'pause' : 'title'; howTab = 'controls'; showScreen('moves'); break;
     case 'back': showScreen(movesReturn); break;
-    case 'mute': setMuted(!muted); showScreen(screen); break;
+    case 'mute': setMuted(!muted); rerender(); break;
   }
 }
 
@@ -446,7 +512,7 @@ function menuInput(dtMs: number) {
     if (fr.b.attack.pressed) { const el = focusables()[focusIdx]; if (el) { initAudio(); el.click(); } navCooldown = 180; }
     if (fr.b.jump.pressed) {
       navCooldown = 180;
-      if (screen === 'select') act('title');
+      if (screen === 'select') { if (selectSide === 1) { selectSide = 0; rerender(); } else act('title'); }
       else if (screen === 'moves') act('back');
       else if (screen === 'pause') act('resume');
     }
@@ -631,9 +697,11 @@ const hooks = {
 };
 
 // Load the rigged body model, then open the menu. Falls back to procedural bodies if it fails.
-loadBodyModel('./models/xbot.glb')
+Promise.all([loadBodyModels('./models'), loadPropModels('./models/props', PROP_MODELS)])
   .catch((e) => console.warn('Rigged body model unavailable, using procedural bodies:', e))
   .finally(() => {
+    try { renderPortraits(renderer); } catch (e) { console.warn('portraits failed', e); }
+    hud.portraits = (id: string) => portraitOf(charById(id));
     (window as any).__game = hooks;
     showScreen('title');
   });

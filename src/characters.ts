@@ -611,7 +611,7 @@ tether.adorn = (b) => {
   return [lens, gold];
 };
 
-aerin.look = { height: 1.95, bulk: 0.9, body: 0xe6e4f2, joints: 0x8a4cff, jointGlow: 1.4, bodyRough: 0.38, bodyMetal: 0.2 };
+aerin.look = { female: true, height: 1.95, bulk: 0.96, body: 0xe6e4f2, joints: 0x8a4cff, jointGlow: 1.4, bodyRough: 0.38, bodyMetal: 0.2 };
 aerin.adorn = (b, rig) => {
   const hair = mat(0xf1f1ff, 0.6, 0.1);
   const glow = mat(0xc9a8ff, 0.2, 0, 0xa070ff, 1.8);

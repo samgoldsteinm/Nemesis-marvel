@@ -284,7 +284,7 @@ export class Match {
   shatterProp(p: Prop, vel?: THREE.Vector3) {
     if (p.state === 'gone') return;
     if (p.explosive) { this.explode(p); return; }
-    const colors: Record<string, number> = { panel: 0xd8d2c2, crate: 0x8a6a42, letter: 0xff7060, ac: 0xa7adb5, rubble: 0x7d7f86, tank: 0xc8401c, car: 0x8a8a90, barrel: 0x2f6a9a, barrier: 0x8b8a90 };
+    const colors: Record<string, number> = { panel: 0xd8d2c2, crate: 0x8a6a42, letter: 0xff7060, ac: 0xa7adb5, rubble: 0x7d7f86, tank: 0xc8401c, car: 0x8a8a90, barrel: 0x2f6a9a, barrier: 0x8b8a90, wreck: 0x2a2624, cone: 0xff7a20, bin: 0x5a6a5a, pallet: 0x9a7a52, wheelie: 0x3a6a3a, barricade: 0xff8a30, mailbox: 0x2a6a3a };
     this.fx.burstDebris(p.pos.clone().setY(p.pos.y + 0.4), p.cls >= 1 ? 22 : 10, colors[p.kind], 6, p.cls >= 1 ? 0.3 : 0.18, vel ? vel.clone().normalize() : undefined);
     if (p.holder) { p.holder.heldProp = null; p.holder = null; }
     this.arena.removeProp(p);

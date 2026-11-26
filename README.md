@@ -82,11 +82,19 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
   - **Skyline:** a mid-distance ring of varied towers plus a painted far panorama with lit windows that fades into each venue's haze. Soft light shafts hang between the buildings.
   - **Props:** sculpted car bodies with glass, rims, bumpers and lights; slatted crates; AC units with grilles and fans; ribbed, labelled barrels; a domed fuel tank; and jersey barriers with reflectors. Overpass pile-ups are built from a box truck, burnt cars and barriers.
   - **Lighting:** an environment map built from each venue's sky gives car paint, glass, metal and puddles real reflections. Ambient occlusion adds contact shadows on desktop, and is the first effect dropped when frames run long (`?noao` / `?ao`).
-- **Rigged bodies:**
-  - Every fighter uses the skinned humanoid model in `public/models/xbot.glb` (from the three.js examples, originally from Mixamo; see `public/models/README.md` for the licence).
-  - My animation system still authors every pose. Each frame its joints are retargeted onto the model's skeleton through a one-time T-pose calibration.
-  - Each fighter recolours the model, gets glowing joint trim, and carries original pieces attached to bones: Basalt's stone armour, Tether's wrist launchers and goggles, Aerin's wings and ponytail, Shunt's coat, hood and visor.
-  - If the model fails to load, the game falls back to the procedural bodies.
+- **Animated bodies (CC0):**
+  - Fighters use the Quaternius *Universal Animation Library* mannequins, male and female (Aerin), from `public/models`.
+  - Authored clips drive idle, walk, jog and sprint, jumps, jab, cross and hook, guard, roll, hit reactions, getting up off the ground, throws and pick-ups, dashes, slides, projectile casts, carrying and victory. One-shot clips are time-fitted to each move's gameplay frames.
+  - Moves the library doesn't cover (kicks, swings, flight, wall-cling, finishers, power grapples, tumbling launches) use the procedural rig, retargeted onto the same skeleton and blended in smoothly.
+  - Each fighter is recoloured with original bone-attached armour and accessories. If the models fail to load, the game falls back to the procedural bodies.
+- **City Props (CC0):** jersey barriers, barrels, cones, road barricades, trash cans, wheelie bins and pallets from Coding Creature's *City Props 1*, used as throwable objects. The code-built props remain as fallbacks.
+- **Menus:**
+  - **Title:** three clear choices.
+  - **Fighter select:** one screen with Player 1 and Player 2/CPU panels side by side. Each panel shows a portrait rendered from that fighter's actual 3D model, stat bars, recovery and lift type, and difficulty. Arena and CPU level pickers sit beside a single FIGHT button.
+  - **Results:** a winner portrait with per-fighter stats.
+  - **How to play:** Controls, Combat and Fighters tabs.
+  - **HUD:** fighter headshots in the corner panels.
+  - **Phones:** a compact layout for short (landscape) screens.
 - **Characters (procedural fallback):**
   - muscle-shaped limbs and shaped torsos
   - more realistic proportions: longer legs, smaller heads
@@ -106,6 +114,9 @@ These come from 40 frames of the gameplay clip you supplied. They're genre conve
 - an elevated roadway arena full of throwable cars and barrels
 
 ## Checks actually run (`tests/checks.cjs`, 27/27 passing)
+
+The CPU detours around objects it gets stuck behind. In a batch of 14 rooftop bouts, none timed out.
+
 
 These checks covered K.O. on depleted health, Danger from stamina with full health, leaving Danger before a finisher, a valid finisher, a failed finisher with too little energy, and a finisher during Rage. They covered Tether's aerial save from a launch off an open edge, Basalt's ring-out on the same trajectory, and Shunt's ring-out with no energy. They covered a clean rematch reset, the lift-class split (only Basalt lifts the tank), the planted heavy throw and tank explosion, catching a prop, an R+A chord on the same tick resolving once, X choosing between the opponent and an adjacent prop, a grab returning to a valid state after rematch, a thrown prop breaking the fence, super block deflecting a projectile, Rage turning on and back off, Basalt lifting a car on the Overpass and the car exploding, CPU bouts on the Overpass, the tap/charged/dash power variants, the running attack, grab pummels, all four power grapples, a Displace ring-out, prop-weapon swings breaking the prop, and four complete CPU-vs-CPU bouts with no errors.
 

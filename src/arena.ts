@@ -4,6 +4,13 @@ import { addOutline } from './rig';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CityBuilder, farPanorama, lightShafts, facadeMaterial } from './city';
 import { buildCar, buildCrate, buildAC, buildBarrel, buildTank, buildBarrier } from './props';
+import { propModel } from './skinned';
+
+/** City Props 1 (CC0, Coding Creature) models the arenas use; loaded at startup. */
+export const PROP_MODELS = [
+  'barrel_02_big_blue', 'barrel_02_medium_green', 'concrete_jersey_barrier_01_medium', 'garbage_collector_green_large', 'garbage_collector_red_large',
+  'metal_garbage_can_01_medium', 'trash_bin_c_green', 'cone_ii_medium', 'mailbox_01_green', 'pallet_medium_01', 'traffic_bollard_02_yellow_large', 'type_ii_barricade_01_medium',
+];
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { FX } from './fx';
 import { sfx } from './audio';
@@ -94,7 +101,7 @@ export class WallSeg {
   }
 }
 
-export type PropKind = 'panel' | 'crate' | 'letter' | 'ac' | 'tank' | 'rubble' | 'car' | 'barrel' | 'barrier' | 'wreck';
+export type PropKind = 'panel' | 'crate' | 'letter' | 'ac' | 'tank' | 'rubble' | 'car' | 'barrel' | 'barrier' | 'wreck' | 'cone' | 'bin' | 'pallet' | 'wheelie' | 'barricade' | 'mailbox';
 export type PropState = 'rest' | 'held' | 'thrown' | 'falling' | 'gone';
 
 export class Prop {
@@ -124,7 +131,7 @@ export class Prop {
     return [8, 14, 22][this.cls] * this.power;
   }
   get label() {
-    return { panel: 'Sign panel', crate: 'Crate', letter: 'Sign letter', ac: 'A/C unit', tank: 'Fuel tank', rubble: 'Rubble', car: 'Car', barrel: 'Barrel', barrier: 'Barrier block', wreck: 'Burnt wreck' }[this.kind];
+    return { panel: 'Sign panel', crate: 'Crate', letter: 'Sign letter', ac: 'A/C unit', tank: 'Fuel tank', rubble: 'Rubble', car: 'Car', barrel: 'Barrel', barrier: 'Barrier block', wreck: 'Burnt wreck', cone: 'Traffic cone', bin: 'Trash can', pallet: 'Pallet', wheelie: 'Wheelie bin', barricade: 'Road barricade', mailbox: 'Mailbox' }[this.kind];
   }
 }
 
@@ -378,6 +385,24 @@ export class Arena {
       aw.castShadow = true;
       this.static.add(aw);
     }
+  }
+
+  /** A prop from the City Props pack, sized from its real bounds; falls back if the model is missing. */
+  modelProp(file: string, kind: PropKind, cls: 0 | 1 | 2, fallback: () => Prop, explosive = false, scale = 1) {
+    const base = propModel(file);
+    if (!base) return fallback();
+    const obj = base.clone(true);
+    obj.scale.setScalar(scale);
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
+    obj.position.set(-c.x, -box.min.y, -c.z);
+    obj.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh && !m.userData.outline) addOutline(m, 1.04);
+    });
+    const g = new THREE.Group();
+    g.add(obj);
+    return new Prop(kind, cls, g, new THREE.Vector3(size.x / 2, size.y / 2, size.z / 2), explosive);
   }
 
   makeWreck() {
@@ -728,14 +753,22 @@ export class Arena {
       add(this.makeCar(0xd8b020), -13, -3.2, Math.PI / 2);
       add(this.makeCar(0x8a9aa8), 11, 3.4, Math.PI / 2 + 0.1);
       add(this.makeCar(0x6a1f24), 18, -3.0, Math.PI / 2);
-      add(this.makeBarrier(), -3, 4.4);
-      add(this.makeBarrier(), 3, -4.6);
+      add(this.makeBarrier(), -3, 4.6);
+      add(this.makeBarrier(), 3, -4.8);
       add(this.makeBarrel(), -8, 4.5);
-      add(this.makeBarrel(), -7.2, 5.1);
+      add(this.makeBarrel(), -7.2, 5.3);
       add(this.makeBarrel(), 14.5, -1);
       add(this.makeBarrel(), 0, -2);
       add(this.makeCrate(), -18, 2.5);
       add(this.makeCrate(), 6, 0.5);
+      // Road-works clutter: cones, barricades and a bin.
+      add(this.makeCone(), -16.5, -5.6);
+      add(this.makeCone(), -15.2, -5.9);
+      add(this.makeCone(), 16.2, 5.5);
+      add(this.makeCone(), 9, -5.8);
+      add(this.makeBarricade(), -20.5, 4.6, Math.PI / 2);
+      add(this.makeBarricade(), 21, -2.2, Math.PI / 2);
+      add(this.makeBin(), 20.5, 5.6);
       return;
     }
     // Fence: north/south edges in 4m segments, east/west in 5m segments.
@@ -774,11 +807,14 @@ export class Arena {
     add(this.makeAC(), 5.5, 8.3);
     add(this.makeAC(), -14.2, -1.5);
     add(this.makeTank(), -11, 8);
-    add(this.makePanel(), 1.5, -4.5);
+    add(this.makePallet(), 1.5, -4.5);
     add(this.makePanel(), -2.5, 5.2);
     add(this.makeCrate(), 13.5, 6.5);
     add(this.makeCrate(), -9, -4.5);
     add(this.makeCrate(), 3.5, 1.4);
+    add(this.makeWheelie(), 15.6, -10.8);
+    add(this.makeBin(), -15.8, 10.6);
+    add(this.makeBin(), 8.5, -10.6);
   }
 
   makeCar(color: number) {
@@ -786,10 +822,26 @@ export class Arena {
   }
   makeBarrel() {
     const colors = [0x2f6a9a, 0x8a2a20, 0x3a5a2a, 0x7a6a20];
-    return new Prop('barrel', 0, buildBarrel(colors[Math.floor(Math.random() * colors.length)]), new THREE.Vector3(0.34, 0.475, 0.34));
+    const fallback = () => new Prop('barrel', 0, buildBarrel(colors[Math.floor(Math.random() * colors.length)]), new THREE.Vector3(0.34, 0.475, 0.34));
+    return this.modelProp(Math.random() < 0.5 ? 'barrel_02_big_blue' : 'barrel_02_medium_green', 'barrel', 0, fallback, false, 1.1);
   }
   makeBarrier() {
-    return new Prop('barrier', 1, buildBarrier(this.mats.concrete), new THREE.Vector3(1.1, 0.45, 0.4));
+    return this.modelProp('concrete_jersey_barrier_01_medium', 'barrier', 1, () => new Prop('barrier', 1, buildBarrier(this.mats.concrete), new THREE.Vector3(1.1, 0.45, 0.4)));
+  }
+  makeCone() {
+    return this.modelProp('cone_ii_medium', 'cone', 0, () => this.makeCrate());
+  }
+  makeBin() {
+    return this.modelProp(Math.random() < 0.5 ? 'metal_garbage_can_01_medium' : 'trash_bin_c_green', 'bin', 0, () => this.makeCrate(), false, 1.15);
+  }
+  makePallet() {
+    return this.modelProp('pallet_medium_01', 'pallet', 0, () => this.makePanel());
+  }
+  makeWheelie() {
+    return this.modelProp(Math.random() < 0.5 ? 'garbage_collector_green_large' : 'garbage_collector_red_large', 'wheelie', 1, () => this.makeAC(), false, 1.15);
+  }
+  makeBarricade() {
+    return this.modelProp('type_ii_barricade_01_medium', 'barricade', 0, () => this.makeCrate());
   }
   makeAC() {
     return new Prop('ac', 1, buildAC(), new THREE.Vector3(0.85, 0.6, 0.6));
