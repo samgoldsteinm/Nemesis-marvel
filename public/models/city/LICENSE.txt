@@ -1,0 +1,8 @@
+Downtown City MegaKit (Standard / free version) by Quaternius — https://quaternius.com
+License: CC0 1.0 Universal (Public Domain Dedication)
+https://creativecommons.org/publicdomain/zero/1.0/
+
+megakit.glb contains a subset of the kit (Building_Large_2, Building_Medium_2_001, Building_Small_1,
+Prop_ACUnit, Prop_Bollard, Prop_Planter_Single, Prop_ManholeCover, Prop_Drain, Street_4Lane,
+Sidewalk_Straight_3m, Stairs_Rails_Metal), simplified, with textures resized to 512 px WebP,
+vertex wear masks removed and meshopt compression.

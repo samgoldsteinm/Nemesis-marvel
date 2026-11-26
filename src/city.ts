@@ -204,6 +204,11 @@ export class CityBuilder {
     }
   }
 
+  /** A plain facade volume (no rooftop clutter): the base under a kit building. */
+  podium(x: number, z: number, w: number, d: number, bottom: number, top: number, style: FacadeStyle = 'concrete') {
+    this.volume(style, x, z, w, d, bottom, top, 0);
+  }
+
   building(o: BuildingOpts) {
     const style = o.style ?? STYLES[Math.floor(Math.random() * STYLES.length)];
     const h = o.top - o.bottom;

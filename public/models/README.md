@@ -9,5 +9,7 @@ All assets in this folder are released under **CC0 1.0 (public domain)**, except
 - `ual_motifect.glb`: combat and martial-arts clips (names prefixed `M_`) from the **Motifect Combat** and **Motifect Martial Arts** motion packs by Motifect (https://motifect.io), free for personal and commercial use; retargeted onto the UAL skeleton, trimmed and compressed (the raw files are not redistributed).
 - `props/*.glb`: a selection from **City Props 1 (free)** by Coding Creature
   (https://www.codingcreature.com), meshopt-compressed. Licence: `props/LICENSE.txt`.
+- `city/megakit.glb`: buildings, street pieces and rooftop props from the **Downtown City MegaKit (free)** by Quaternius
+  (https://quaternius.com), CC0. Simplified, textures resized, meshopt-compressed. Licence: `city/LICENSE.txt`.
 
 The game recolours the mannequins per fighter and attaches its own original armour and accessories.

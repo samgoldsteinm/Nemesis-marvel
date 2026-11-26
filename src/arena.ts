@@ -3,6 +3,7 @@ import type { LiftClass } from './characters';
 import { addOutline } from './rig';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CityBuilder, farPanorama, lightShafts, facadeMaterial } from './city';
+import { hasCityKit, placeKit, kitAt, KIT_SIZE, KitBuilding, KitPlacement } from './citykit';
 import { buildCar, buildCrate, buildAC, buildBarrel, buildTank, buildBarrier } from './props';
 import { propModel } from './skinned';
 
@@ -387,6 +388,40 @@ export class Arena {
     }
   }
 
+  /**
+   * A kit building (Downtown City MegaKit) whose footprint centre is (x, z), front facing `ry`
+   * (0 = +Z), standing on a procedural podium from `podiumBottom` up to `base`. Pieces are queued in
+   * `this.kitQueue` and merged per material by flushKit().
+   */
+  private kitBlock(name: KitBuilding, x: number, z: number, ry: number, base: number, podiumBottom: number, sign?: [string, string, string], signY?: number, roofAC = 0) {
+    const k = KIT_SIZE[name];
+    const quarter = Math.abs(Math.round(ry / (Math.PI / 2))) % 2 === 1;
+    const w = quarter ? k.d : k.w, d = quarter ? k.w : k.d;
+    if (base > podiumBottom + 0.5) this.cityB.podium(x, z, w - 0.3, d - 0.3, podiumBottom, base + 0.02, Math.random() < 0.5 ? 'concrete' : 'darkbrick');
+    this.kitQueue.push(kitAt(name, x, base, z, ry));
+    const front = new THREE.Vector3(Math.sin(ry), 0, Math.cos(ry));
+    // Rooftop AC units and vents on the kit roof.
+    for (let i = 0; i < roofAC; i++) {
+      const ax = x + (Math.random() - 0.5) * (w - 4), az = z + (Math.random() - 0.5) * (d - 4);
+      this.kitQueue.push({ name: 'Prop_ACUnit', x: ax, y: base + k.h + 0.05, z: az, ry: Math.floor(Math.random() * 4) * Math.PI / 2, scale: 2.4 });
+    }
+    if (sign) {
+      const depth = k.d;
+      const tex = this.signTex(...sign);
+      const sw = Math.min((quarter ? k.d : k.w) * 0.55, 8);
+      const sm = new THREE.Mesh(new RoundedBoxGeometry(sw, 1.8, 0.3, 2, 0.06), new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.5 }));
+      const at = new THREE.Vector3(x, signY ?? base + 4.6, z).addScaledVector(front, depth / 2 + 0.35);
+      sm.position.copy(at);
+      sm.rotation.y = ry;
+      this.static.add(sm);
+    }
+  }
+  private kitQueue: KitPlacement[] = [];
+  private flushKit(castShadow = false) {
+    placeKit(this.static, this.kitQueue, { castShadow });
+    this.kitQueue = [];
+  }
+
   /** A prop from the City Props pack, sized from its real bounds; falls back if the model is missing. */
   modelProp(file: string, kind: PropKind, cls: 0 | 1 | 2, fallback: () => Prop, explosive = false, scale = 1) {
     const base = propModel(file);
@@ -474,13 +509,37 @@ export class Arena {
     // Close city blocks on both sides, with storefronts at deck level.
     const signs: [string, string, string][] = [['DELI', '#f0e6c8', '#a02018'], ['HOTEL', '#1a2a3a', '#ffd070'], ['PAWN', '#f2c230', '#1a1a1a'], ['PARKING', '#1a4a8a', '#ffffff'], ['24 HR', '#202020', '#ff4040'], ['LAUNDRY', '#e8f0f0', '#206080'], ['DINER', '#c02a20', '#fff0d0'], ['SURPLUS', '#2a3a20', '#e8e0b0']];
     let si = 0;
-    for (const face of [1, -1] as const) {
-      for (let x = -hw - 20; x < hw + 20; ) {
-        const w = 8 + Math.random() * 8;
-        const d = 10 + Math.random() * 6;
-        const z = -face * (hd + 9 + d / 2 + Math.random() * 4);
-        this.block(x + w / 2, z, w, d, -22, 6 + Math.random() * 26, face, signs[si++ % signs.length], 2.5 + Math.random() * 2);
-        x += w + 1 + Math.random() * 2;
+    if (hasCityKit()) {
+      // Real modular buildings (Downtown City MegaKit) lining both sides, storefronts at deck level.
+      const kinds: KitBuilding[] = ['Building_Medium_2_001', 'Building_Small_1', 'Building_Large_2', 'Building_Small_1', 'Building_Medium_2_001'];
+      let ki = Math.floor(Math.random() * kinds.length);
+      for (const face of [1, -1] as const) {
+        for (let x = -hw - 22; x < hw + 22; ) {
+          const kind = kinds[ki++ % kinds.length];
+          const k = KIT_SIZE[kind];
+          const z = -face * (hd + 9 + k.d / 2 + Math.random() * 2);
+          // Some buildings sit on a taller podium so the street wall steps up and down.
+          const base = Math.random() < 0.3 ? 3.4 : 0;
+          this.kitBlock(kind, x + k.w / 2, z, face > 0 ? 0 : Math.PI, base, -22, signs[si++ % signs.length], base + 2.6 + Math.random() * 1.6, 2);
+          x += k.w + 0.6 + Math.random() * 1.5;
+        }
+      }
+      // The street under the overpass: real road tiles with markings, sidewalks and manholes.
+      for (let x = -66; x <= 66; x += 6) this.kitQueue.push({ name: 'Street_4Lane', x, y: -22 + 0.02, z: 0, ry: 0 });
+      for (let i = 0; i < 6; i++) this.kitQueue.push({ name: 'Prop_ManholeCover', x: -40 + i * 16 + Math.random() * 4, y: -21.97, z: (Math.random() - 0.5) * 8 });
+      // Drains and manhole covers on the deck itself (flat dressing, no collision).
+      for (let i = 0; i < 5; i++) this.kitQueue.push({ name: 'Prop_Drain', x: -hw + 4 + i * (hw * 2 - 8) / 4, y: 0.02, z: (i % 2 ? 1 : -1) * (hd - 0.5) });
+      for (const x of [-12, 10]) this.kitQueue.push({ name: 'Prop_ManholeCover', x, y: 0.02, z: (Math.random() - 0.5) * 4 });
+      this.flushKit(false);
+    } else {
+      for (const face of [1, -1] as const) {
+        for (let x = -hw - 20; x < hw + 20; ) {
+          const w = 8 + Math.random() * 8;
+          const d = 10 + Math.random() * 6;
+          const z = -face * (hd + 9 + d / 2 + Math.random() * 4);
+          this.block(x + w / 2, z, w, d, -22, 6 + Math.random() * 26, face, signs[si++ % signs.length], 2.5 + Math.random() * 2);
+          x += w + 1 + Math.random() * 2;
+        }
       }
     }
     // Road decals, puddles and clutter.
@@ -604,10 +663,24 @@ export class Arena {
     this.buildCity(34);
     // Close neighbours: taller blocks crowd the roof, with signage and rooftop clutter.
     const nsigns: [string, string, string][] = [['HOTEL', '#1a2a3a', '#ffd070'], ['FRESH 24/7', '#f0e6c8', '#c02a20'], ['RADIO', '#202028', '#7ad0ff'], ['GARAGE', '#e8d020', '#202020']];
-    this.block(0, -HD - 16, 30, 12, -60, 24, 1, nsigns[0], 9);
-    this.block(-HW - 14, -2, 12, 22, -60, 12, 1, nsigns[1], 6);
-    this.block(HW + 13, 4, 12, 18, -60, 30, 1, nsigns[2], 12);
-    this.block(-10, HD + 18, 18, 14, -60, 6, -1, nsigns[3], 2);
+    if (hasCityKit()) {
+      // Real modular buildings (Downtown City MegaKit) on podiums, fronts facing the roof.
+      // Only windowed faces look at the roof and the gameplay camera: Medium is windowed on its front
+      // only, Large on its front and left side, Small on its front and left side.
+      this.kitBlock('Building_Medium_2_001', -3, -HD - 15, 0, -1, -60, nsigns[0], 9, 4);
+      this.cityB.building({ x: 12, z: -HD - 16, w: 12, d: 12, bottom: -60, top: 18, detail: 2, front: new THREE.Vector3(0, 0, 1) });
+      this.cityB.podium(-20, -HD - 17, 12, 12, -60, 10, 'brick');
+      this.kitBlock('Building_Small_1', -HW - 13, -2, Math.PI / 2, -5, -60, nsigns[1], 6, 2);
+      this.kitBlock('Building_Large_2', HW + 13, 2, 0, 2, -60, nsigns[2], 12, 5);
+      this.kitBlock('Building_Small_1', -10, HD + 18, Math.PI, -11, -60, nsigns[3], 2, 3);
+      this.kitBlock('Building_Medium_2_001', 14, HD + 19, Math.PI, -20, -60, undefined, undefined, 2);
+      this.flushKit(false);
+    } else {
+      this.block(0, -HD - 16, 30, 12, -60, 24, 1, nsigns[0], 9);
+      this.block(-HW - 14, -2, 12, 22, -60, 12, 1, nsigns[1], 6);
+      this.block(HW + 13, 4, 12, 18, -60, 30, 1, nsigns[2], 12);
+      this.block(-10, HD + 18, 18, 14, -60, 6, -1, nsigns[3], 2);
+    }
     this.cityB.flush(this.static);
     lightShafts(this.static, [[-HW - 6, 8, -8], [6, 14, -HD - 7], [HW + 5, 10, 6]], new THREE.Vector3(-22, 26, 12), 0xffd8a8, 0.06);
     // Water tower on the neighbouring roof, billboard frame, rooftop pipes and vents.

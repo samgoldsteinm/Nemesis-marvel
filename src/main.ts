@@ -20,6 +20,7 @@ import { TUNING } from './fighter';
 import { RIM_COLOR } from './characters';
 import { renderPortraits, portraitOf } from './portraits';
 import { loadBodyModels, loadPropModels } from './skinned';
+import { loadCityKit, hasCityKit } from './citykit';
 import { PROP_MODELS } from './arena';
 
 // ============================================================ renderer & scene
@@ -727,7 +728,7 @@ const hooks = {
 };
 
 // Load the rigged body model, then open the menu. Falls back to procedural bodies if it fails.
-Promise.all([loadBodyModels('./models'), loadPropModels('./models/props', PROP_MODELS)])
+Promise.all([loadBodyModels('./models'), loadPropModels('./models/props', PROP_MODELS), loadCityKit('./models/city/megakit.glb').then(() => { if (hasCityKit()) arena.setLayout(arena.layout); })])
   .catch((e) => console.warn('Rigged body model unavailable, using procedural bodies:', e))
   .finally(() => {
     try { renderPortraits(renderer); } catch (e) { console.warn('portraits failed', e); }
