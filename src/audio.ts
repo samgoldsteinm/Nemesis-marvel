@@ -469,7 +469,7 @@ class Track {
 
   private fightStep(t: number, s: number) {
     const st = s % 16, bar = Math.floor(s / 16), sect = Math.floor(bar / 4) % 4; // A A B A, 4 bars each
-    const over = this.variant === 'overpass';
+    const over = this.variant === 'overpass' || this.variant === 'helipad';
     // Riff in D phrygian (degrees; -1 = rest). Section B moves up to Bb/C for lift.
     const A = over ? [0, -1, 0, 0, 1, -1, 0, -1, 0, 0, 3, -1, 1, -1, 0, 6 - 7] : [0, -1, 0, 1, -1, 0, -1, 0, 0, -1, 3, -1, 2, 1, -1, 0];
     const B = over ? [5 - 7, -1, 5 - 7, 5 - 7, 6 - 7, -1, 5 - 7, -1, 3, -1, 3, 1, -1, 1, 0, -1] : [5 - 7, -1, 5 - 7, 6 - 7, -1, 5 - 7, 6 - 7, -1, 3, -1, 3, 4, -1, 3, 1, -1];
@@ -502,6 +502,9 @@ function pump() {
   cur.schedule(ctx.currentTime + 0.18);
 }
 
+/** Fight tempo per arena: the overpass and helipad drive harder, the docks drag. */
+const TEMPO: Record<string, number> = { rooftop: 128, overpass: 136, construction: 132, docks: 120, helipad: 140 };
+
 /** Start (or crossfade to) a music track: 'menu' or 'fight' (variant: arena id for flavour). */
 export function startMusic(kind: Kind = 'fight', variant = '') {
   wantMusic = { kind, variant };
@@ -509,7 +512,7 @@ export function startMusic(kind: Kind = 'fight', variant = '') {
   if (cur && cur.kind === kind && cur.variant === variant && cur.alive) return;
   const t = ctx.currentTime + 0.05;
   if (cur) cur.stop(t, 1.0);
-  cur = new Track(kind, variant, kind === 'menu' ? 84 : variant === 'overpass' ? 136 : 128, t);
+  cur = new Track(kind, variant, kind === 'menu' ? 84 : TEMPO[variant] ?? 128, t);
   cur.hot.gain.value = 0;
   setIntensity(intensity);
   if (timer === null) timer = window.setInterval(pump, 30);
@@ -545,7 +548,7 @@ export async function renderOffline(kind: Kind | 'sfx', seconds: number, opts: {
       for (const [s, fn] of jobs) { sfxTime = s; fn(); }
       sfxTime = null;
     } else {
-      const tr = new Track(kind, opts.variant ?? '', kind === 'menu' ? 84 : opts.variant === 'overpass' ? 136 : 128, 0);
+      const tr = new Track(kind, opts.variant ?? '', kind === 'menu' ? 84 : TEMPO[opts.variant ?? ''] ?? 128, 0);
       tr.hot.gain.value = (opts.intensity ?? 0) * 1.4;
       tr.schedule(seconds);
     }

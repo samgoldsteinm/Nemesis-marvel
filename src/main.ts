@@ -112,6 +112,24 @@ const PALETTES: Record<LayoutId, Palette> = {
     hemi: [0xcfe8ec, 0x3a4a4c, 0.85], sun: [0xf4fbff, 2.6], sunPos: [10, 34, 14], rim: [0x9fe0ff, 0.9], shadow: [34, 14],
     grade: { sat: 0.7, lift: [0.03, 0.05, 0.06], shadowTint: [0.82, 1.0, 1.12], highTint: [0.95, 1.0, 1.0], gamma: 0.96 }, bloom: [0.45, 0.5, 0.82],
   },
+  // Unfinished tower at sunset: low orange sun raking across the slab, violet sky overhead.
+  construction: {
+    sky: [[0, '#2a2038'], [0.42, '#6a3a52'], [0.68, '#d8744a'], [0.84, '#ffc070'], [1, '#4a3038']], fog: 0x9a6a5c, fogNear: 60, fogFar: 230,
+    hemi: [0xd8b0a0, 0x3a2a2a, 0.8], sun: [0xffb070, 2.6], sunPos: [-18, 14, 22], rim: [0x7a90ff, 1.0], shadow: [24, 18],
+    grade: { sat: 0.85, lift: [0.04, 0.03, 0.035], shadowTint: [0.9, 0.9, 1.1], highTint: [1.05, 0.95, 0.84], gamma: 0.97 }, bloom: [0.4, 0.45, 0.82],
+  },
+  // Night pier: cold teal fog, sodium-orange key light from the lamps, black water.
+  docks: {
+    sky: [[0, '#03070c'], [0.5, '#0a1a26'], [0.8, '#1c3a46'], [1, '#0a1218']], fog: 0x1a323c, fogNear: 30, fogFar: 170,
+    hemi: [0x7aa0c0, 0x182430, 1.05], sun: [0xffb468, 2.2], sunPos: [8, 30, 10], rim: [0x5ad0ff, 1.3], shadow: [30, 14],
+    grade: { sat: 0.85, lift: [0.035, 0.05, 0.07], shadowTint: [0.8, 0.95, 1.2], highTint: [1.08, 0.98, 0.86], gamma: 0.97 }, bloom: [0.5, 0.5, 0.78],
+  },
+  // Neon district at night: cool moonlight key, magenta rim, violet haze.
+  helipad: {
+    sky: [[0, '#06030e'], [0.5, '#1a0a30'], [0.78, '#4a1a5a'], [0.9, '#8a2a7a'], [1, '#1a0a20']], fog: 0x2a1438, fogNear: 40, fogFar: 200,
+    hemi: [0x8a6ad8, 0x1a0a20, 0.85], sun: [0xb8d8ff, 1.8], sunPos: [12, 30, -10], rim: [0xff4fd8, 1.4], shadow: [14, 14],
+    grade: { sat: 0.95, lift: [0.04, 0.02, 0.06], shadowTint: [0.95, 0.85, 1.2], highTint: [1.0, 0.92, 1.05], gamma: 0.96 }, bloom: [0.55, 0.5, 0.75],
+  },
 };
 // Sky reflections: an environment map rendered from the palette's sky and sun, so car paint,
 // glass, metal and puddles reflect something instead of looking matte.
@@ -432,7 +450,7 @@ function render(s: Screen): string {
         ${sidePanel(1)}
       </div>
       <div class="options">
-        <div class="opt"><span class="opt-label">Arena</span><div class="seg">${LAYOUTS.map((l) => `<button class="segbtn ${setup.arena === l.id ? 'on' : ''}" data-nav data-act="arena" data-arg="${l.id}"><span class="arena-sw ${l.id}"></span><span class="lfull">${l.name}</span><span class="lshort">${l.name.split(' ').pop()}</span></button>`).join('')}</div></div>
+        <div class="opt"><span class="opt-label">Arena</span><div class="seg arena-pick"><button class="segbtn arr" data-nav data-act="arenaStep" data-arg="-1" aria-label="Previous arena">◀</button><button class="segbtn on arena-cur" data-nav data-act="arenaStep" data-arg="1" title="${LAYOUTS.find((l) => l.id === setup.arena)!.blurb}"><span class="arena-sw ${setup.arena}"></span><span class="lfull">${LAYOUTS.find((l) => l.id === setup.arena)!.name}</span><span class="lshort">${LAYOUTS.find((l) => l.id === setup.arena)!.short}</span><small class="anum">${LAYOUTS.findIndex((l) => l.id === setup.arena) + 1}/${LAYOUTS.length}</small></button><button class="segbtn arr" data-nav data-act="arenaStep" data-arg="1" aria-label="Next arena">▶</button></div></div>
         <div class="opt"><span class="opt-label">Lives</span><div class="seg">${[1, 2, 3, 5].map((n) => `<button class="segbtn ${setup.lives === n ? 'on' : ''}" data-nav data-act="lives" data-arg="${n}">${n} ♥</button>`).join('')}</div></div>
         ${setup.mode === 'cpu' ? `<div class="opt"><span class="opt-label">CPU level</span><div class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="segbtn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div></div>` : ''}
         ${locked[0] && locked[1]
@@ -552,6 +570,12 @@ function act(a: string, arg?: string) {
     }
     case 'fight': goLandscape(); startMatch(); break;
     case 'arena': setup.arena = arg as LayoutId; rerender(); break;
+    case 'arenaStep': {
+      const i = LAYOUTS.findIndex((l) => l.id === setup.arena);
+      setup.arena = LAYOUTS[(i + Number(arg) + LAYOUTS.length) % LAYOUTS.length].id;
+      rerender();
+      break;
+    }
     case 'diff': setup.diff = arg as Difficulty; rerender(); break;
     case 'lives': setup.lives = Number(arg); try { localStorage.setItem('bl.lives', String(setup.lives)); } catch { /* */ } rerender(); break;
     case 'tab': howTab = arg as typeof howTab; rerender(); break;
@@ -770,6 +794,8 @@ requestAnimationFrame(frame);
 (window as any).THREE = THREE;
 const hooks = {
   get match() { return match; },
+  /** Last frame's draw calls / triangles (perf checks). */
+  renderInfo() { const ar = renderer.info.autoReset; renderer.info.autoReset = false; renderer.info.reset(); renderer.render(scene, vcam.cam); const r = { calls: renderer.info.render.calls, triangles: renderer.info.render.triangles }; renderer.info.autoReset = ar; return r; },
   setup,
   arena,
   fx,

@@ -14,17 +14,23 @@ export const PROP_MODELS = [
 ];
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { FX } from './fx';
+import { buildConstruction, buildDocks, buildHelipad, resetExtra } from './arenas2';
 import { sfx } from './audio';
 
 // The Clarion Building rooftop: an enclosed roof that becomes a ring-out arena as its fence breaks.
 
 /** Playable deck half-extents for the current layout (x = width, z = depth). */
 export const BOUNDS = { hw: 18, hd: 13 };
-export type LayoutId = 'rooftop' | 'overpass';
-export const LAYOUTS: { id: LayoutId; name: string; blurb: string }[] = [
-  { id: 'rooftop', name: 'Clarion Rooftop', blurb: 'Enclosed roof that becomes a ring-out arena as its fence breaks.' },
-  { id: 'overpass', name: 'Route 9 Overpass', blurb: 'Narrow elevated roadway: stalled cars to throw, exposed sides, barriers that give way.' },
+export type LayoutId = 'rooftop' | 'overpass' | 'construction' | 'docks' | 'helipad';
+export const LAYOUTS: { id: LayoutId; name: string; short: string; blurb: string }[] = [
+  { id: 'rooftop', name: 'Clarion Rooftop', short: 'Rooftop', blurb: 'Enclosed roof that becomes a ring-out arena as its fence breaks.' },
+  { id: 'overpass', name: 'Route 9 Overpass', short: 'Overpass', blurb: 'Narrow elevated roadway: stalled cars to throw, exposed sides, barriers that give way.' },
+  { id: 'construction', name: 'Skyline Site', short: 'Site', blurb: 'Unfinished tower floor: steel beams to throw, a crane to swing from, only safety mesh at the edges.' },
+  { id: 'docks', name: 'Harbor Pier 7', short: 'Docks', blurb: 'Night pier between container stacks: fuel drums, cranes overhead, railings over the black water.' },
+  { id: 'helipad', name: 'Neon Helipad', short: 'Helipad', blurb: 'A tiny circular pad above the neon district. Barely any rim — every hit is a ring-out threat.' },
 ];
+/** Circular decks (helipad): `inside()` uses this radius instead of the rectangle. */
+export const SHAPE = { circle: 0 };
 export const WALL_H = 3.0;
 export const WALL_T = 0.5;
 export const KILL_Y = -14;
@@ -37,6 +43,7 @@ export interface Solid {
   clingable: boolean;
 }
 
+export type WallStyle = 'fence' | 'noise' | 'safety' | 'rail' | 'rim';
 export class WallSeg {
   hp = 100;
   broken = false;
@@ -44,49 +51,73 @@ export class WallSeg {
   group = new THREE.Group();
   base: THREE.Mesh;
   fence: THREE.Object3D;
-  constructor(public center: THREE.Vector3, public size: THREE.Vector3, public outward: THREE.Vector3, mats: ArenaMats, style: 'fence' | 'noise' = 'fence') {
+  constructor(public center: THREE.Vector3, public size: THREE.Vector3, public outward: THREE.Vector3, mats: ArenaMats, style: WallStyle = 'fence', public height = WALL_H) {
     this.solid = {
       min: new THREE.Vector3(center.x - size.x / 2, 0, center.z - size.z / 2),
-      max: new THREE.Vector3(center.x + size.x / 2, WALL_H, center.z + size.z / 2),
+      max: new THREE.Vector3(center.x + size.x / 2, height, center.z + size.z / 2),
       kind: 'wall', ref: this, clingable: true,
     };
     this.group.position.copy(center);
-    this.base = new THREE.Mesh(new THREE.BoxGeometry(size.x, 1.0, size.z), mats.concrete);
-    this.base.position.y = 0.5;
+    const along = size.x > size.z ? 'x' : 'z';
+    const len = Math.max(size.x, size.z);
+    const bx = (l: number, h: number, t: number, m: THREE.Material, y: number, off = 0) => {
+      const b = new THREE.Mesh(new THREE.BoxGeometry(along === 'x' ? l : t, h, along === 'z' ? l : t), m);
+      b.position.set(along === 'x' ? off : 0, y, along === 'z' ? off : 0);
+      b.castShadow = true;
+      return b;
+    };
+    const fence = new THREE.Group();
+    if (style === 'fence' || style === 'noise') {
+      this.base = new THREE.Mesh(new THREE.BoxGeometry(size.x, 1.0, size.z), mats.concrete);
+      this.base.position.y = 0.5;
+      // Chain-link fence panel with posts: visibly tall, so the collision height is readable.
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(len - 0.1, 2.0), style === 'noise' ? mats.noise : mats.fence);
+      panel.position.y = 2.0;
+      if (along === 'z') panel.rotation.y = Math.PI / 2;
+      fence.add(panel);
+      fence.add(bx(len, 0.08, 0.08, mats.steel, 3.0));
+      for (const sgn of [-1, 1]) fence.add(bx(0.12, 2.1, 0.12, mats.steel, 2.0, (sgn * len) / 2));
+    } else if (style === 'safety') {
+      // Construction-site edge: steel kerb, orange safety mesh and a striped hand rail.
+      this.base = new THREE.Mesh(new THREE.BoxGeometry(size.x, 0.25, size.z), mats.steel);
+      this.base.position.y = 0.125;
+      const panel = new THREE.Mesh(new THREE.PlaneGeometry(len - 0.1, 1.15), mats.safety);
+      panel.position.y = 0.85;
+      if (along === 'z') panel.rotation.y = Math.PI / 2;
+      fence.add(panel);
+      fence.add(bx(len, 0.1, 0.1, mats.stripe, height - 0.05));
+      fence.add(bx(len, 0.06, 0.06, mats.stripe, 1.45));
+      for (const sgn of [-1, 0, 1]) fence.add(bx(0.09, height, 0.09, mats.steel, height / 2, (sgn * len) / 2.05));
+    } else if (style === 'rail') {
+      // Pier railing: timber kerb, steel posts, two rails.
+      this.base = new THREE.Mesh(new THREE.BoxGeometry(size.x, 0.3, size.z), mats.timber);
+      this.base.position.y = 0.15;
+      for (const y of [0.75, height - 0.1]) fence.add(bx(len, 0.09, 0.09, mats.rail, y));
+      for (const sgn of [-1, 0, 1]) fence.add(bx(0.1, height, 0.1, mats.rail, height / 2, (sgn * len) / 2.05));
+    } else {
+      // Helipad rim: a low raised lip in yellow/black hazard stripes.
+      this.base = new THREE.Mesh(new THREE.BoxGeometry(size.x, height, size.z), mats.hazard);
+      this.base.position.y = height / 2;
+    }
     this.base.castShadow = this.base.receiveShadow = true;
     addOutline(this.base, 1.02);
     this.group.add(this.base);
-    // Chain-link fence panel with posts: visibly tall, so the collision height is readable.
-    const fence = new THREE.Group();
-    const along = size.x > size.z ? 'x' : 'z';
-    const len = Math.max(size.x, size.z);
-    const panel = new THREE.Mesh(new THREE.PlaneGeometry(len - 0.1, 2.0), style === 'noise' ? mats.noise : mats.fence);
-    panel.position.y = 2.0;
-    if (along === 'z') panel.rotation.y = Math.PI / 2;
-    fence.add(panel);
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(along === 'x' ? len : 0.08, 0.08, along === 'z' ? len : 0.08), mats.steel);
-    rail.position.y = 3.0;
-    fence.add(rail);
-    for (const s of [-1, 1]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.1, 0.12), mats.steel);
-      post.position.set(along === 'x' ? (s * len) / 2 : 0, 2.0, along === 'z' ? (s * len) / 2 : 0);
-      post.castShadow = true;
-      fence.add(post);
-    }
     this.fence = fence;
     this.group.add(fence);
+    this.baseH = this.base.position.y * 2;
   }
+  private baseH = 1;
 
   damage(amount: number, fx: FX, dir?: THREE.Vector3): boolean {
     if (this.broken) return false;
     this.hp -= amount;
     const p = this.center.clone();
-    p.y = 1.2;
+    p.y = Math.min(1.2, this.height * 0.6);
     if (this.hp <= 0) {
       this.broken = true;
       this.fence.visible = false;
       this.base.scale.y = 0.22;
-      this.base.position.y = 0.11;
+      this.base.position.y = this.baseH * 0.11;
       fx.burstDebris(p, 26, 0x8a8f98, 9, 0.35, dir ?? this.outward);
       fx.sparksAt(p.clone().setY(2.2), 16, 0xc0c8d8, 8);
       fx.shake = Math.max(fx.shake, 0.6);
@@ -102,7 +133,7 @@ export class WallSeg {
   }
 }
 
-export type PropKind = 'panel' | 'crate' | 'letter' | 'ac' | 'tank' | 'rubble' | 'car' | 'barrel' | 'barrier' | 'wreck' | 'cone' | 'bin' | 'pallet' | 'wheelie' | 'barricade' | 'mailbox';
+export type PropKind = 'panel' | 'crate' | 'letter' | 'ac' | 'tank' | 'rubble' | 'car' | 'barrel' | 'barrier' | 'wreck' | 'cone' | 'bin' | 'pallet' | 'wheelie' | 'barricade' | 'mailbox' | 'beams' | 'lumber' | 'cement' | 'drum';
 export type PropState = 'rest' | 'held' | 'thrown' | 'falling' | 'gone';
 
 export class Prop {
@@ -132,7 +163,7 @@ export class Prop {
     return [8, 14, 22][this.cls] * this.power;
   }
   get label() {
-    return { panel: 'Sign panel', crate: 'Crate', letter: 'Sign letter', ac: 'A/C unit', tank: 'Fuel tank', rubble: 'Rubble', car: 'Car', barrel: 'Barrel', barrier: 'Barrier block', wreck: 'Burnt wreck', cone: 'Traffic cone', bin: 'Trash can', pallet: 'Pallet', wheelie: 'Wheelie bin', barricade: 'Road barricade', mailbox: 'Mailbox' }[this.kind];
+    return { panel: 'Sign panel', crate: 'Crate', letter: 'Sign letter', ac: 'A/C unit', tank: 'Fuel tank', rubble: 'Rubble', car: 'Car', barrel: 'Barrel', barrier: 'Barrier block', wreck: 'Burnt wreck', cone: 'Traffic cone', bin: 'Trash can', pallet: 'Pallet', wheelie: 'Wheelie bin', barricade: 'Road barricade', mailbox: 'Mailbox', beams: 'Steel beams', lumber: 'Lumber', cement: 'Cement bags', drum: 'Fuel drum' }[this.kind];
   }
 }
 
@@ -154,6 +185,10 @@ interface ArenaMats {
   barrel: THREE.MeshStandardMaterial;
   glass: THREE.MeshStandardMaterial;
   tire: THREE.MeshStandardMaterial;
+  safety: THREE.MeshStandardMaterial;
+  timber: THREE.MeshStandardMaterial;
+  rail: THREE.MeshStandardMaterial;
+  hazard: THREE.MeshStandardMaterial;
 }
 
 function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat?: [number, number]) {
@@ -227,6 +262,24 @@ export class Arena {
       barrel: new THREE.MeshStandardMaterial({ color: 0x2f6a9a, roughness: 0.5, metalness: 0.5 }),
       glass: new THREE.MeshStandardMaterial({ color: 0x14202a, roughness: 0.1, metalness: 0.6 }),
       tire: new THREE.MeshStandardMaterial({ color: 0x111114, roughness: 0.9 }),
+      safety: new THREE.MeshStandardMaterial({ map: canvasTex(64, 64, (g) => {
+        g.clearRect(0, 0, 64, 64);
+        g.strokeStyle = 'rgba(255,120,30,0.95)'; g.lineWidth = 3;
+        for (let i = 0; i <= 64; i += 8) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 64); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(64, i); g.stroke(); }
+      }, [6, 1.5]), transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, roughness: 0.7, emissive: 0x401400, emissiveIntensity: 0.5 }),
+      timber: new THREE.MeshStandardMaterial({ map: canvasTex(128, 128, (g) => {
+        g.fillStyle = '#4a3a2c'; g.fillRect(0, 0, 128, 128);
+        for (let y = 0; y < 128; y += 16) { g.fillStyle = `rgb(${60 + Math.random() * 25},${46 + Math.random() * 18},${34 + Math.random() * 12})`; g.fillRect(0, y + 1, 128, 14); }
+        g.strokeStyle = 'rgba(20,14,10,0.8)'; g.lineWidth = 2;
+        for (let y = 0; y <= 128; y += 16) { g.beginPath(); g.moveTo(0, y); g.lineTo(128, y); g.stroke(); }
+        for (let i = 0; i < 300; i++) { g.fillStyle = 'rgba(20,14,10,0.25)'; g.fillRect(Math.random() * 128, Math.random() * 128, 6 + Math.random() * 14, 1); }
+      }, [10, 4]), roughness: 0.85 }),
+      rail: new THREE.MeshStandardMaterial({ color: 0x9aa4a8, roughness: 0.5, metalness: 0.6 }),
+      hazard: new THREE.MeshStandardMaterial({ map: canvasTex(128, 32, (g) => {
+        g.fillStyle = '#18161a'; g.fillRect(0, 0, 128, 32);
+        g.fillStyle = '#f0c020';
+        for (let x = -32; x < 160; x += 24) { g.beginPath(); g.moveTo(x, 32); g.lineTo(x + 12, 32); g.lineTo(x + 28, 0); g.lineTo(x + 16, 0); g.fill(); }
+      }, [3, 1]), roughness: 0.6, emissive: 0x201800, emissiveIntensity: 0.4 }),
     };
     for (const ch of new Set(LETTERS)) {
       this.letterTex.set(ch, canvasTex(128, 128, (g) => {
@@ -260,30 +313,40 @@ export class Arena {
     this.anchors = [];
     this.fadeables = [];
     this.ceiling = 14;
+    SHAPE.circle = 0;
     if (id === 'rooftop') {
       BOUNDS.hw = 18; BOUNDS.hd = 13;
       this.buildStatic();
-    } else {
+    } else if (id === 'overpass') {
       BOUNDS.hw = 26; BOUNDS.hd = 7;
       this.buildOverpass();
+    } else if (id === 'construction') {
+      BOUNDS.hw = 17; BOUNDS.hd = 11;
+      buildConstruction(this);
+    } else if (id === 'docks') {
+      BOUNDS.hw = 22; BOUNDS.hd = 7.5;
+      buildDocks(this);
+    } else {
+      BOUNDS.hw = 11; BOUNDS.hd = 11; SHAPE.circle = 11;
+      buildHelipad(this);
     }
     this.reset();
   }
 
   private city: CityBuilder | null = null;
-  private get cityB() {
+  get cityB() {
     if (!this.city) this.city = new CityBuilder(this.mats.concrete, this.mats.steel, new THREE.MeshStandardMaterial({ color: 0x5a4030, roughness: 0.9 }));
     return this.city;
   }
 
   /** Mid-distance varied towers (merged) plus a painted far panorama. */
-  private buildCity(minR: number, yBase = -30) {
+  buildCity(minR: number, yBase = -30, tint?: number) {
     this.cityB.skyline(BOUNDS.hw + 8, BOUNDS.hd + 8, minR, minR + 95, 46, yBase);
     // Far panorama tinted toward each venue's haze.
-    this.static.add(farPanorama(260, yBase - 20, 150, this.layout === 'overpass' ? 0xe4eef0 : 0xa49ab8));
+    this.static.add(farPanorama(260, yBase - 20, 150, tint ?? (this.layout === 'overpass' ? 0xe4eef0 : 0xa49ab8)));
   }
 
-  private get winTex() {
+  get winTex() {
     if (!this._winTex) this._winTex = canvasTex(64, 128, (g) => {
       g.fillStyle = '#121019';
       g.fillRect(0, 0, 64, 128);
@@ -298,7 +361,7 @@ export class Arena {
   private _winTex: THREE.Texture | null = null;
 
   /** Merge many boxes into one mesh (one draw call) — used for trusses, pipes and clutter. */
-  private boxes(list: [number, number, number, number, number, number, number?][], mat: THREE.Material, shadow = true) {
+  boxes(list: [number, number, number, number, number, number, number?][], mat: THREE.Material, shadow = true) {
     const geos = list.map(([w, h, d, x, y, z, ry]) => {
       const g = new THREE.BoxGeometry(w, h, d);
       if (ry) g.rotateY(ry);
@@ -313,7 +376,7 @@ export class Arena {
   }
 
   /** A flat decal on the deck: cracks, skid marks, stains, puddles. */
-  private decal(kind: 'crack' | 'skid' | 'stain' | 'puddle', x: number, z: number, size: number, rot = 0) {
+  decal(kind: 'crack' | 'skid' | 'stain' | 'puddle', x: number, z: number, size: number, rot = 0) {
     const key = `decal_${kind}`;
     let mat = this.decalMats.get(key);
     if (!mat) {
@@ -362,7 +425,7 @@ export class Arena {
   private decalMats = new Map<string, THREE.Material>();
 
   /** Painted or lit storefront sign texture with a generic word. */
-  private signTex(word: string, bg: string, fg: string) {
+  signTex(word: string, bg: string, fg: string) {
     return canvasTex(256, 64, (g) => {
       g.fillStyle = bg; g.fillRect(0, 0, 256, 64);
       g.strokeStyle = fg; g.lineWidth = 4; g.strokeRect(6, 6, 244, 52);
@@ -393,7 +456,7 @@ export class Arena {
    * (0 = +Z), standing on a procedural podium from `podiumBottom` up to `base`. Pieces are queued in
    * `this.kitQueue` and merged per material by flushKit().
    */
-  private kitBlock(name: KitBuilding, x: number, z: number, ry: number, base: number, podiumBottom: number, sign?: [string, string, string], signY?: number, roofAC = 0) {
+  kitBlock(name: KitBuilding, x: number, z: number, ry: number, base: number, podiumBottom: number, sign?: [string, string, string], signY?: number, roofAC = 0) {
     const k = KIT_SIZE[name];
     const quarter = Math.abs(Math.round(ry / (Math.PI / 2))) % 2 === 1;
     const w = quarter ? k.d : k.w, d = quarter ? k.w : k.d;
@@ -416,8 +479,8 @@ export class Arena {
       this.static.add(sm);
     }
   }
-  private kitQueue: KitPlacement[] = [];
-  private flushKit(castShadow = false) {
+  kitQueue: KitPlacement[] = [];
+  flushKit(castShadow = false) {
     placeKit(this.static, this.kitQueue, { castShadow });
     this.kitQueue = [];
   }
@@ -807,6 +870,7 @@ export class Arena {
     this.letters = [];
     const m = this.mats;
     const HW = BOUNDS.hw, HD = BOUNDS.hd;
+    if (this.layout === 'construction' || this.layout === 'docks' || this.layout === 'helipad') { resetExtra(this); return; }
     if (this.layout === 'overpass') {
       // Noise-barrier segments along both long edges; the ends are closed by wreckage.
       for (const zs of [-1, 1]) for (let i = 0; i < 13; i++) {
@@ -982,6 +1046,7 @@ export class Arena {
 
   // ------------------------------------------------------------------ queries
   inside(x: number, z: number) {
+    if (SHAPE.circle) return x * x + z * z <= SHAPE.circle * SHAPE.circle;
     return Math.abs(x) <= BOUNDS.hw && Math.abs(z) <= BOUNDS.hd;
   }
 

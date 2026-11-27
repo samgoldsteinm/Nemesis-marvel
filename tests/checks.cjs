@@ -477,6 +477,49 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     return { pass: held && Math.abs(dy) < 0.05 && b.stamina < st0, info: `held=${held} dy=${dy} stamina ${st0.toFixed(0)}->${b.stamina.toFixed(0)}` };
   });
 
+  await check('New arenas load with valid spawns, props and breakable edges', () => {
+    const out = [];
+    for (const ar of ['construction', 'docks', 'helipad']) {
+      const m = T.setup('basalt', 'tether', ar);
+      const A = T.G.arena;
+      const spawnsOk = m.fighters.every((f) => A.inside(f.pos.x, f.pos.z) && f.onGround && Math.abs(f.pos.y) < 0.05);
+      const propsInside = A.props.filter((p) => A.inside(p.pos.x, p.pos.z)).length;
+      out.push(`${ar}:spawns=${spawnsOk} props=${propsInside}/${A.props.length} walls=${A.walls.length} anchors=${A.anchors.length}`);
+      if (!spawnsOk || propsInside < 5 || A.walls.length < 3 || A.anchors.length < 3) return { pass: false, info: out.join(' ; ') };
+    }
+    return { pass: true, info: out.join(' ; ') };
+  });
+
+  await check('New arenas: a heavy launch through a broken/open edge is a ring-out', () => {
+    const out = [];
+    for (const ar of ['construction', 'docks', 'helipad']) {
+      const m = T.setup('basalt', 'tether', ar);
+      const A = T.G.arena;
+      const [a, b] = m.fighters;
+      // Break the nearest edge segment in +z (helipad: launch toward the open south edge).
+      for (const w of A.walls) if (w.outward.z > 0.5) w.damage(999, T.G.fx);
+      T.place(a, 0, 0, 0); T.place(b, 0, 1.6, Math.PI);
+      b.receiveHit(a, { fwd: 0, up: 0, radius: 0, stamina: 1, health: 1, kbF: 30, kbU: 6, stun: 40, launch: true, heavy: true }, new (b.pos.constructor)(0, 0, 1), { unblockable: true, source: 'throw' });
+      let n = 0; while (!m.ended && n < 400) { T.idle(5); n += 5; }
+      out.push(`${ar}:${m.ended ? m.ended.how : 'none'}@${n}`);
+    }
+    return { pass: out.every((o) => o.includes(':ringout@')), info: out.join(' ; ') };
+  });
+
+  await check('New arenas: CPU vs CPU bouts resolve', () => {
+    const outcomes = [];
+    for (const [p, q, ar] of [['vanta', 'basalt', 'construction'], ['rift', 'magna', 'docks'], ['tether', 'ember', 'helipad']]) {
+      const m = T.setup(p, q, ar);
+      T.G.forced[0] = null; T.G.forced[1] = null;
+      T.G.enableCPUs('hard');
+      let n = 0;
+      while (!m.ended && n < 60 * 150) { T.G.step(30); n += 30; }
+      outcomes.push(m.ended ? `${p}v${q}@${ar}:${m.ended.how}:${m.ended.winner.def.id}@${(n / 60).toFixed(0)}s` : `${p}v${q}@${ar}:timeout`);
+      T.G.disableCPU();
+    }
+    return { pass: outcomes.every((o) => !o.includes('timeout')), info: outcomes.join(' ; ') };
+  });
+
   await check('SHUNT Displace drops the victim off an open edge for a ring-out', () => {
     const m = T.setup('shunt', 'basalt');
     const [a, b] = m.fighters;

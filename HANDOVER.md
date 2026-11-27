@@ -42,7 +42,8 @@ modifier. Gamepad (standard mapping), two keyboard layouts, and touch.
 | `src/intro.ts` | Cinematic fight intro (per-fighter lines, speech, power-ups) |
 | `src/padcursor.ts` | Controller arrow cursor in menus |
 | `src/audio.ts` | Synth SFX + music (Web Audio, no files) |
-| `src/arena.ts`, `src/city.ts`, `src/citykit.ts`, `src/props.ts` | Arenas, procedural city, MegaKit buildings, props |
+| `src/arena.ts`, `src/city.ts`, `src/citykit.ts`, `src/props.ts` | Arenas (rooftop, overpass), procedural city, MegaKit buildings, props |
+| `src/arenas2.ts` | Skyline Site, Harbor Pier 7, Neon Helipad builders + their dynamic pieces (`resetExtra`), water splash height `WATER_Y` |
 | `src/camera.ts` | Versus camera (`zoomMul`, `zLimit`, `cinematic`) |
 | `src/ai.ts` | CPU opponent |
 | `src/hud.ts`, `src/input.ts`, `src/portraits.ts`, `src/rig.ts` | HUD, input devices, select-screen portraits, procedural rig |
@@ -99,6 +100,7 @@ modifier. Gamepad (standard mapping), two keyboard layouts, and touch.
 | 11-27 | Basalt = rock golem model ("Golem Rock" by Oscar Creativo, `public/models/golem.glb`), runtime-retargeted from the hidden UAL driver; 2.22 m visual / 2.3 gameplay height |
 | 11-27 | Rage tap works from controllers (24-tick window, from charge, mid-move); grab is a clinch with knee pummels, victim stays grounded and flinches |
 | 11-27 | Select screen: full trait text (panel scrolls), compact bar on small phones; HUD names can't overlap |
+| 11-27 | Three new arenas: Skyline Site (construction floor, crane/hoist/scaffold, safety-mesh edges, beams/lumber/cement props), Harbor Pier 7 (container ends, pier railings over water with splash, fuel drums, quay cranes, cargo ship), Neon Helipad (circular deck via `SHAPE.circle`, 3 low rims, neon district). Per-arena palettes and fight tempos; select-screen arena picker is ◀ name ▶ (fits 667×375) |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -152,6 +154,15 @@ modifier. Gamepad (standard mapping), two keyboard layouts, and touch.
 - Head attachments (`HA`) are authored for a 1.95 m reference head; scale for taller fighters or they look tiny/huge.
 - Golem (CC skeleton) model: FBX importer duplicated the skeleton per mesh (merged by name); UDIM tile names were lost in the zip (matched by UV masks); meshopt-quantised bounds aren't metres (measure skinned bounds); inward vertex normals made rim light paint pale blotches (rim uses |N·V| on the smooth normal); forearm roll must be spread over twist bones.
 - Rage tap on gamepads: analog triggers are slow to release; a tap that slips into charge must still count.
+
+- Never call `addOutline` inside `traverse()`: the outline mesh is added as a child and gets traversed too (infinite recursion, "Maximum call stack size exceeded"). Outline each mesh when you create it.
+
+**Arenas**
+- New wall styles live on `WallSeg` (`style`, `height`): `fence`/`noise` (rooftop/overpass), `safety`, `rail`, `rim`.
+- Circular decks: set `SHAPE.circle` (radius) so `inside()` is a disc; `BOUNDS` is the enclosing square and stays valid for clamps.
+- Don't put collision on edge dressing (bollards etc.): it stops launched fighters at the edge and blocks ring-outs.
+- Watch-less dev servers (`hmr:false`, `watch.ignored`) serve stale modules after edits: restart them with `--force`.
+- `renderer.info` resets every frame; read draw calls from a manual `render()` with `autoReset=false` (`__game.renderInfo()`).
 
 **Process**
 - Background agents editing files while tests run make Vite hot-reload the page mid-test → failures that say
