@@ -188,7 +188,7 @@ const basalt: CharacterDef = {
   weight: 1.6,
   heavy: 1,
   radius: 0.75,
-  height: 2.5,
+  height: 2.3,
   durability: 1.35,
   proportions: { thigh: 0.55, shin: 0.5, torso: 0.95, shoulderW: 1.25, hipW: 0.55, upperArm: 0.62, foreArm: 0.62, neck: 0.12 },
   moves: {

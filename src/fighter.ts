@@ -16,6 +16,9 @@ export type FState =
   | 'swing' | 'cling' | 'fly' | 'teleport' | 'recover'
   | 'finisher' | 'finished' | 'ko' | 'out' | 'victory' | 'idleLock' | 'powerCharge' | 'pgrapple';
 
+/** Longest R press (ticks) that still counts as a tap for Rage. */
+const TAP_R = 24;
+
 export const TUNING = {
   gravity: 30,
   dangerHealth: 25,
@@ -286,6 +289,8 @@ export class Fighter {
       else this.yaw += Math.sign(d) * step;
     }
     if (inp.b.power.pressed) this.rUsed = false;
+    // Rage tap also works mid-move (attack recovery, dodge, landing), not only when free.
+    if (inp.b.power.released && inp.b.power.lastHeld <= TAP_R && !this.rUsed && this.rage >= 100 && !this.raging && ['attack', 'recover', 'evade'].includes(this.state) && !this.match.inputLocked) this.activateRage();
 
     this.updateResources(dt);
 
@@ -632,7 +637,7 @@ export class Fighter {
     // L: mobility.
     if (this.mobility()) return true;
     // Neutral R tap: Rage.
-    if (b.power.released && b.power.lastHeld <= 14 && !this.rUsed && this.rage >= 100 && !this.raging && this.stickMag() < 0.3) {
+    if (b.power.released && b.power.lastHeld <= TAP_R && !this.rUsed && this.rage >= 100 && !this.raging && this.stickMag() < 0.5) {
       this.activateRage();
       return true;
     }
@@ -1203,6 +1208,8 @@ export class Fighter {
     this.energy = Math.min(100, this.energy + TUNING.chargeRate * dt);
     if (this.t % 10 === 0) sfx.charge();
     if (this.t % 3 === 0) this.match.fx.trail(this.pos.clone().add(new THREE.Vector3((Math.random() - 0.5) * 1.2, Math.random() * 0.3, (Math.random() - 0.5) * 1.2)), 0x6fc8ff, 0.15, 0.5);
+    // A tap that slipped into charging (analog triggers often take longer to release) still triggers Rage.
+    if (b.power.released && b.power.lastHeld <= TAP_R && this.rage >= 100 && !this.raging) { this.setState('ground'); this.activateRage(); return; }
     if (!b.power.down || this.stickMag() > 0.3 || b.attack.pressed || b.jump.pressed || b.grab.pressed || b.guard.pressed) {
       this.rUsed = true;
       this.setState('ground');
@@ -1292,8 +1299,9 @@ export class Fighter {
     this.friction(dt, 20);
     if (!o || o.state !== 'grabbed') { this.grabbed = null; this.setState('ground'); return; }
     // Hold the victim in front.
-    const hold = this.pos.clone().addScaledVector(this.forward, this.def.radius + o.def.radius + 0.15);
-    hold.y = this.pos.y + (this.t > 8 ? 0.25 : 0);
+    // Clinch distance, feet on the ground (the victim doubles over rather than floating).
+    const hold = this.pos.clone().addScaledVector(this.forward, (this.def.radius + o.def.radius) * 0.85 + 0.05);
+    hold.y = this.pos.y;
     o.pos.copy(hold);
     o.vel.set(0, 0, 0);
     o.yaw = this.yaw + Math.PI;
@@ -1310,7 +1318,7 @@ export class Fighter {
       this.match.fx.hitstop = 0.04;
       sfx.hit(false);
       this.t = Math.max(8, this.t - 12);
-      this.pummelT = 8;
+      this.pummelT = 14;
       if (o.health <= 0) { this.throwFighter(o, false); return; }
     }
     if (this.pummelT > 0) this.pummelT--;
@@ -1677,7 +1685,9 @@ export class Fighter {
       case 'powerCharge': return once('Spell_Simple_Enter', 18, 'pc' + ms);
       case 'lift': return once('PickUp_Table', this.heldProp?.cls === 2 ? 26 : 14, 'lift' + ms, undefined, 0.12);
       case 'throw': return once('OverhandThrow', this.throwWind + 14, 'th' + ms, this.throwWind);
-      case 'grabbing': return this.pummelT > 0 ? once('Melee_Hook', 10, 'pm' + this.pummels, 4, 0.06) : loop('Push_Loop', 0.5, 0.15);
+      // Clinch (procedural, hands on the opponent) with knee-strike pummels; victim flinches on each knee.
+      case 'grabbing': return this.pummelT > 0 ? (once('M_Knee', 16, 'pm' + this.pummels, 5, 0.06) ?? once('Melee_Hook', 10, 'pm' + this.pummels, 4, 0.06)) : null;
+      case 'grabbed': { const g = this.grabbedBy; return g && g.state === 'grabbing' && g.pummelT > 0 ? once('M_HitBody', 14, 'gv' + g.pummels, undefined, 0.05) : null; }
       case 'hitstun': {
         const react = ['Hit_Chest', 'M_HitBody', 'Hit_Head', 'M_HitChest'][this.lastHitSerial % 4];
         return once(hasClip(react) ? react : this.hitSide > 0 ? 'Hit_Chest' : 'Hit_Head', Math.max(16, this.stun), 'h' + this.lastHitSerial, undefined, 0.05);
@@ -2172,7 +2182,7 @@ export class Fighter {
       case 'sblock': pose = P.block(); rate = 30; break;
       case 'evade': pose = P.evade(); rate = 30; break;
       case 'charge': pose = P.charge(time); break;
-      case 'grabbing': pose = this.pummelT > 0 ? P.kickS() : this.t < 8 ? P.grab() : (this.def.lift === 2 ? P.holdOver() : P.grab()); if (this.pummelT > 0) { pose.j.lThigh = [-1.3, 0, 0]; pose.j.lShin = [1.4, 0, 0]; pose.j.spine = [0.3, 0, 0]; } rate = this.pummelT > 0 ? 40 : 18; break;
+      case 'grabbing': pose = this.t < 6 ? P.grab() : P.clinch(); if (this.pummelT > 0) { pose.j.lThigh = [-1.5, 0, 0.1]; pose.j.lShin = [1.6, 0, 0]; pose.j.spine = [0.4, 0, 0]; } rate = this.pummelT > 0 ? 40 : 18; break;
       case 'grabbed': case 'yanked': pose = P.heldVictim(); break;
       case 'lift': pose = this.heldProp && this.heldProp.cls >= 1 ? (this.t < 10 ? P.slamS() : P.holdOver()) : P.carry(); rate = 12; break;
       case 'throw': pose = this.t < this.throwWind ? P.throwW() : P.throwS(); rate = this.t < this.throwWind ? 14 : 40; break;

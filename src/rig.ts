@@ -273,6 +273,8 @@ export const P = {
   slamS(): Pose { return { j: { spine: [0.75, 0, 0], head: [-0.4, 0, 0], lArm: [-1.1, 0, 0.1], lFore: [-0.2, 0, 0], rArm: [-1.1, 0, -0.1], rFore: [-0.2, 0, 0], lThigh: [-0.9, 0, 0.35], lShin: [1.2, 0, 0], rThigh: [0.2, 0, -0.35], rShin: [1.1, 0, 0] }, bodyY: -0.4 }; },
   clapW(): Pose { return { j: { spine: [-0.15, 0, 0], lArm: [-1.4, 0, 1.4], lFore: [-0.2, 0, 0], rArm: [-1.4, 0, -1.4], rFore: [-0.2, 0, 0], lThigh: [-0.4, 0, 0.3], lShin: [0.6, 0, 0], rThigh: [0.2, 0, -0.3], rShin: [0.6, 0, 0] }, bodyY: -0.15 }; },
   clapS(): Pose { return { j: { spine: [0.35, 0, 0], lArm: [-1.55, 0, -0.1], lFore: [-0.1, 0, 0], rArm: [-1.55, 0, 0.1], rFore: [-0.1, 0, 0], lThigh: [-0.6, 0, 0.3], lShin: [0.7, 0, 0], rThigh: [0.4, 0, -0.3], rShin: [0.4, 0, 0] }, bodyY: -0.25 }; },
+  /** Muay-Thai style clinch: hands gripping the opponent's neck/shoulders, elbows in, leaning in. */
+  clinch(): Pose { return { j: { spine: [0.3, 0, 0], head: [0.15, 0, 0], lArm: [-1.7, -0.3, 0.2], lFore: [-1.05, 0, 0], rArm: [-1.7, 0.3, -0.2], rFore: [-1.05, 0, 0], lThigh: [-0.35, 0, 0.12], lShin: [0.45, 0, 0], rThigh: [0.25, 0, -0.1], rShin: [0.35, 0, 0] }, bodyY: -0.08 }; },
   grab(): Pose { return { j: { spine: [0.35, 0, 0], lArm: [-1.5, 0, 0.15], lFore: [-0.3, 0, 0], rArm: [-1.5, 0, -0.15], rFore: [-0.3, 0, 0], lThigh: [-0.5, 0, 0.1], lShin: [0.5, 0, 0], rThigh: [0.3, 0, 0], rShin: [0.3, 0, 0] }, bodyY: -0.1 }; },
   holdOver(): Pose { return { j: { spine: [-0.1, 0, 0], lArm: [-2.9, 0, 0.35], lFore: [-0.35, 0, 0], rArm: [-2.9, 0, -0.35], rFore: [-0.35, 0, 0], lThigh: [-0.2, 0, 0.2], lShin: [0.4, 0, 0], rThigh: [0.1, 0, -0.2], rShin: [0.4, 0, 0] }, bodyY: -0.12 }; },
   carry(): Pose { return { j: { spine: [0.05, 0, 0], lArm: [-1.2, 0, 0.3], lFore: [-1.0, 0, 0], rArm: [-1.2, 0, -0.3], rFore: [-1.0, 0, 0] } }; },
@@ -301,5 +303,6 @@ export const P = {
   victory(t: number): Pose { return { j: { spine: [-0.15, 0, 0], head: [-0.25, 0, 0], rArm: [-3.0, 0, -0.3 + Math.sin(t * 4) * 0.1], rFore: [-0.2, 0, 0], lArm: [0.1, 0, 0.3], lFore: [-1.6, 0, 0], lThigh: [-0.1, 0, 0.2], rThigh: [0.05, 0, -0.2] } }; },
   defeat(): Pose { return { j: { spine: [0.8, 0, 0], head: [0.5, 0, 0], lArm: [-0.3, 0, 0.2], rArm: [-0.3, 0, -0.2], lFore: [-0.3, 0, 0], rFore: [-0.3, 0, 0], lThigh: [-1.5, 0, 0.2], lShin: [2.2, 0, 0], rThigh: [0.0, 0, -0.2], rShin: [2.0, 0, 0] }, bodyY: -0.6 }; },
   teleport(): Pose { return { j: { spine: [0.5, 0, 0], lArm: [-0.2, 0, 1.0], rArm: [-0.2, 0, -1.0], lThigh: [-1.0, 0, 0.3], lShin: [1.6, 0, 0], rThigh: [-0.6, 0, -0.3], rShin: [1.5, 0, 0] }, bodyY: -0.35 }; },
-  heldVictim(): Pose { return { j: { spine: [-0.2, 0, 0], head: [-0.3, 0, 0], lArm: [-0.4, 0, 0.8], rArm: [-0.4, 0, -0.8], lFore: [-0.6, 0, 0], rFore: [-0.6, 0, 0], lThigh: [-0.3, 0, 0.1], lShin: [0.6, 0, 0], rThigh: [0.2, 0, -0.1], rShin: [0.4, 0, 0] } }; },
+  /** Caught in a clinch: doubled over, hands clawing at the grabber's arms, knees buckling. */
+  heldVictim(): Pose { return { j: { spine: [0.45, 0, 0], head: [0.25, 0, 0], lArm: [-1.0, 0, 0.35], rArm: [-1.0, 0, -0.35], lFore: [-1.3, 0, 0], rFore: [-1.3, 0, 0], lThigh: [-0.45, 0, 0.12], lShin: [0.75, 0, 0], rThigh: [-0.2, 0, -0.12], rShin: [0.6, 0, 0] }, bodyY: -0.15 }; },
 };

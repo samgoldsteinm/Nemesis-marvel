@@ -432,12 +432,12 @@ function render(s: Screen): string {
         ${sidePanel(1)}
       </div>
       <div class="options">
-        <div class="opt"><span class="opt-label">Arena</span><div class="seg">${LAYOUTS.map((l) => `<button class="segbtn ${setup.arena === l.id ? 'on' : ''}" data-nav data-act="arena" data-arg="${l.id}"><span class="arena-sw ${l.id}"></span>${l.name}</button>`).join('')}</div></div>
+        <div class="opt"><span class="opt-label">Arena</span><div class="seg">${LAYOUTS.map((l) => `<button class="segbtn ${setup.arena === l.id ? 'on' : ''}" data-nav data-act="arena" data-arg="${l.id}"><span class="arena-sw ${l.id}"></span><span class="lfull">${l.name}</span><span class="lshort">${l.name.split(' ').pop()}</span></button>`).join('')}</div></div>
         <div class="opt"><span class="opt-label">Lives</span><div class="seg">${[1, 2, 3, 5].map((n) => `<button class="segbtn ${setup.lives === n ? 'on' : ''}" data-nav data-act="lives" data-arg="${n}">${n} ♥</button>`).join('')}</div></div>
         ${setup.mode === 'cpu' ? `<div class="opt"><span class="opt-label">CPU level</span><div class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="segbtn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div></div>` : ''}
         ${locked[0] && locked[1]
           ? '<button class="fight" data-nav data-act="fight">FIGHT ▶</button>'
-          : `<button class="fight confirm" data-nav data-act="confirm">✓ Confirm ${charById(selectSide === 0 ? setup.p1 : setup.p2).name}</button>`}
+          : `<button class="fight confirm" data-nav data-act="confirm">✓ Confirm<span class="cname"> ${charById(selectSide === 0 ? setup.p1 : setup.p2).name}</span></button>`}
       </div>
     </div>`;
   }

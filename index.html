@@ -74,7 +74,7 @@
   .side-img.ini, .pimg.ini, .rimg.ini, .mini.ini, .result-img.ini { display: grid; place-items: center; width: 100%; height: 100%; font: 900 64px Impact, sans-serif; color: var(--c); }
   .side-name { font: 900 30px Impact, "Arial Black", sans-serif; letter-spacing: .03em; color: var(--c); margin-top: 6px; }
   .side-title { color: var(--dim); font-size: 13px; text-transform: uppercase; letter-spacing: .1em; }
-  .trait { font-size: 12px; line-height: 1.35; color: var(--dim); margin: 6px 0 2px; max-width: 280px; } .trait b { color: var(--c); }
+  .trait { font-size: 12px; line-height: 1.35; color: var(--dim); margin: 6px 0 2px; max-width: 320px; } .trait b { color: var(--c); }
   .stats { margin-top: 10px; display: grid; gap: 6px; }
   .stat { display: grid; grid-template-columns: 82px 1fr; align-items: center; font-size: 12px; color: #ccc; }
   .stat i { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
@@ -148,7 +148,10 @@
     .stats { margin-top: 4px; gap: 2px; }
     .stat { grid-template-columns: 62px 1fr; font-size: 10px; }
     .stat b { height: 5px; }
-    .trait { font-size: 10px; line-height: 1.25; margin: 4px 0 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .trait { font-size: 10px; line-height: 1.25; margin: 4px 0 0; }
+    .side { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; max-height: calc(100vh - 128px - env(safe-area-inset-bottom)); } .side::-webkit-scrollbar { display: none; }
+    .side .badge { white-space: nowrap; } .side .choosing { display: none; }
+    .side-art { height: 15vh; }
     .rcard { height: 27vh; }
     .options { margin-top: 6px; padding: 6px 8px; gap: 8px; flex-wrap: nowrap; }
     .opt-label, .arena-sw { display: none; }
@@ -187,7 +190,7 @@
   .meters { flex: 1; min-width: 0; }
   .pips { display: flex; gap: 3px; align-items: center; height: 10px; }
   .p1 .pips { flex-direction: row-reverse; }
-  .pips b { position: relative; flex: 0 0 18%; height: 6px; background: #050508; border: 1px solid #000; box-shadow: 0 0 0 1px rgba(110,220,255,0.25); transform: skew(-20deg); overflow: hidden; }
+  .pips b { position: relative; flex: 1 1 0; min-width: 9px; max-width: 18%; height: 6px; background: #050508; border: 1px solid #000; box-shadow: 0 0 0 1px rgba(110,220,255,0.25); transform: skew(-20deg); overflow: hidden; }
   .pips b i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: linear-gradient(180deg, #c8f4ff, #39b4e8); }
   .p1 .pips b i { left: auto; right: 0; }
   .pips.unlimited b i { background: linear-gradient(180deg, #fff0b0, #ff5a1c); }
@@ -197,7 +200,8 @@
   .pips .lives u.on { background: #ff4a5a; box-shadow: 0 0 6px rgba(255,74,90,.7); }
   .pips .lives u.go { background: #ff4a5a; animation: lifego .5s ease-in-out infinite alternate; }
   @keyframes lifego { to { opacity: .15; transform: rotate(45deg) scale(.6); } }
-  .pips .nm { margin: 0 6px; font-size: 12px; letter-spacing: 0.06em; white-space: nowrap; text-shadow: 1px 1px 0 #000; }
+  .pips .nm { margin: 0 6px; font-size: 12px; letter-spacing: 0.06em; white-space: nowrap; text-shadow: 1px 1px 0 #000; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .pips .lives { flex: 0 0 auto; }
   .bar { position: relative; height: 8px; background: #050508; margin-top: 4px; overflow: hidden; border: 1px solid #000; transform: skew(-20deg); box-shadow: 1px 1px 0 rgba(0,0,0,0.6); }
   .bar.vit { height: 8px; }
   .bar > div, .bar .fill { position: absolute; top: 0; bottom: 0; left: 0; transition: width .12s linear; }
@@ -285,6 +289,8 @@
     #touch .tbtns { transform: scale(var(--tscale, 0.8)); transform-origin: 100% 100%; bottom: max(8px, calc(env(safe-area-inset-bottom) + 4px)); }
     #toast { bottom: 24px; }
   }
+  .lshort { display: none; }
+  @media (orientation: landscape) and (max-width: 720px) { .lfull { display: none; } .lshort { display: inline; } .fight.confirm .cname { display: none; } .options .segbtn { padding: 6px 5px; } }
   @media (orientation: landscape) and (max-height: 420px) { #touch .tbtns { --tscale: 0.7; } }
   /* Compact select screen for landscape phones: three columns, everything on one screen. */
   @media (orientation: landscape) and (max-height: 560px) {

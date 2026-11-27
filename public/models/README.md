@@ -13,3 +13,5 @@ All assets in this folder are released under **CC0 1.0 (public domain)**, except
   (https://quaternius.com), CC0. Simplified, textures resized, meshopt-compressed. Licence: `city/LICENSE.txt`.
 
 The game recolours the mannequins per fighter and attaches its own original armour and accessories.
+- `chars/*_head.glb`: head parts (faces, eyes, hair, horns) extracted from Quaternius's *Fantasy Races* and *Bestiary* kits (Quaternius Asset License, see `chars/LICENSE.txt`), grafted onto the fighters' bodies and recoloured; not redistributed as an asset pack.
+- `golem.glb`: Basalt's body — "Golem Rock" by Oscar Creativo (free character model; credit the author). Converted from FBX: the 14 UDIM tiles packed into one atlas (colour/normal 2048, emissive 1024, WebP), meshes merged onto one skeleton, simplified to 24k triangles, meshopt-compressed. Animated at runtime by retargeting from the UAL mannequin.

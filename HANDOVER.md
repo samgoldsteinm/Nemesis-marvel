@@ -95,7 +95,10 @@ modifier. Gamepad (standard mapping), two keyboard layouts, and touch.
 | 11-26 | Cinematic fight intros with lines, speech, power-ups; title toggles for intros/voices |
 | 11-26 | Lives/rounds (1/2/3/5 on select; HUD diamonds; "ROUND n"; arena damage persists) |
 | 11-26 | Sound design (`audio.ts`): buses + limiter, shared reverb/distortion, D Phrygian; menu + fight music with intensity layer; per-fighter ability palettes, impacts, Rage cue, power/special stingers, FIGHT stinger |
-| 11-26 | In progress: faces/masks + Fantasy Races/Bestiary bodies |
+| 11-26 | Faces/masks for every fighter; head parts grafted from Quaternius Fantasy Races/Bestiary (`public/models/chars/`, recoloured) for Aerin, Shunt, Magna, Ember, Rift; outfit patterns (web/rosette/tiger/quilt) in the body shader |
+| 11-27 | Basalt = rock golem model ("Golem Rock" by Oscar Creativo, `public/models/golem.glb`), runtime-retargeted from the hidden UAL driver; 2.22 m visual / 2.3 gameplay height |
+| 11-27 | Rage tap works from controllers (24-tick window, from charge, mid-move); grab is a clinch with knee pummels, victim stays grounded and flinches |
+| 11-27 | Select screen: full trait text (panel scrolls), compact bar on small phones; HUD names can't overlap |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -142,6 +145,13 @@ modifier. Gamepad (standard mapping), two keyboard layouts, and touch.
 **Audio**
 - Audio only starts after a user gesture; `startMusic` before unlock is remembered and starts on the first tap/key.
 - Verify audio offline (`renderOffline` → WAV + levels); we can't listen in this environment.
+
+**Characters**
+- User wants their OWN characters: borrow parts from asset packs (heads, hair, horns), never swap a whole stock character in. Always send screenshots and wait for approval before committing visual character changes.
+- Bulk (`look.bulk`) widens the whole model in X/Z; grafted heads are counter-scaled so faces don't squash.
+- Head attachments (`HA`) are authored for a 1.95 m reference head; scale for taller fighters or they look tiny/huge.
+- Golem (CC skeleton) model: FBX importer duplicated the skeleton per mesh (merged by name); UDIM tile names were lost in the zip (matched by UV masks); meshopt-quantised bounds aren't metres (measure skinned bounds); inward vertex normals made rim light paint pale blotches (rim uses |N·V| on the smooth normal); forearm roll must be spread over twist bones.
+- Rage tap on gamepads: analog triggers are slow to release; a tap that slips into charge must still count.
 
 **Process**
 - Background agents editing files while tests run make Vite hot-reload the page mid-test → failures that say

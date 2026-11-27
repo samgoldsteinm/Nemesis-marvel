@@ -1,0 +1,5 @@
+Head parts (faces, eyes, hair, horns, collar) extracted and recoloured from Quaternius kits:
+- "Characters - Fantasy Races Kit" (Elf / Orc heads)
+- "Bestiary - Dungeon Monsters Kit" (Imp head)
+by Quaternius (https://quaternius.com), used under the Quaternius Asset License (standard version).
+They are used inside this game only and are not redistributed as a standalone asset pack.

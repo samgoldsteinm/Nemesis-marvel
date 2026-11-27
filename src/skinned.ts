@@ -14,6 +14,12 @@ loader.setMeshoptDecoder(MeshoptDecoder);
 
 let maleBase: THREE.Object3D | null = null;
 let femaleBase: THREE.Object3D | null = null;
+/** Textured character bodies on the same skeleton (Quaternius Fantasy Races / Bestiary kits). */
+export type BodyModel = 'elf_f' | 'elf_m' | 'orc_f' | 'orc_m' | 'imp';
+const charBases = new Map<BodyModel, THREE.Object3D>();
+/** Full replacement bodies on another skeleton, animated by retargeting from the (hidden) mannequin. */
+let golemBase: THREE.Object3D | null = null;
+let modelDir = '';
 const clips = new Map<string, THREE.AnimationClip>();
 const propModels = new Map<string, THREE.Object3D>();
 
@@ -27,6 +33,14 @@ export async function loadBodyModels(dir: string) {
   ]);
   maleBase = male.scene;
   femaleBase = female.scene;
+  modelDir = dir;
+  // Character bodies are optional: a fighter falls back to the painted mannequin if one fails to load.
+  // Head parts (faces, eyes, hair, horns) borrowed from character kits; optional per fighter.
+  await Promise.all((['elf_f', 'elf_m', 'orc_f', 'imp'] as BodyModel[]).map(async (id) => {
+    try { charBases.set(id, (await loader.loadAsync(`${dir}/chars/${id}_head.glb`)).scene); } catch (e) { console.warn('head parts failed', id, e); }
+  }));
+  // Basalt's rock golem body (optional; falls back to the painted mannequin).
+  try { golemBase = (await loader.loadAsync(`${dir}/golem.glb`)).scene; } catch (e) { console.warn('golem body failed', e); }
   for (const c of [...male.animations, ...extra.animations, ...(motifect?.animations ?? [])]) {
     // Drop root translation so clips play in place; the game moves the fighter.
     c.tracks = c.tracks.filter((t) => !/^root\.position$/.test(t.name));
@@ -74,6 +88,20 @@ export interface BodyLook {
   female?: boolean;
   /** Per-region vertex paint: turns the mannequin into skin, clothes, fur or stone. */
   paint?: Paint;
+  /** Graft a sculpted head (face, eyes, ears, hair) from a character kit onto the mannequin (same skeleton). */
+  model?: BodyModel;
+  /** Multiplier on the grafted head's skin texture (recolours it to the fighter). */
+  skinTint?: number;
+  /** Head size relative to the kit's (default 1). */
+  headScale?: number;
+  /** 0..1: desaturate the model's skin texture before tinting (stone, char). */
+  skinDesat?: number;
+  /** Hide the model's own hair (under helmets and hoods). */
+  hideHair?: boolean;
+  /** Make the model's eyes glow this colour. */
+  eyeGlow?: number;
+  /** Replace the whole body with the rock golem model (retargeted from the mannequin's animation). */
+  golem?: { emissive?: number; emissiveIntensity?: number };
 }
 
 /** Region colours for vertex painting (hex). Unset regions fall back as noted. */
@@ -97,6 +125,8 @@ export interface Paint {
   detail?: { kind: 'cloth' | 'fur' | 'stone' | 'scales' | 'skin'; amount: number };
   /** Glowing veins / cracks across the body (stone, lava, tattoos). */
   cracks?: { color: number; amount: number; scale?: number; width?: number; regions?: Region[] };
+  /** Printed / woven outfit pattern: web seams, fur rosettes, tiger stripes or quilted panels. glow > 0 makes it emissive. */
+  pattern?: { kind: 'web' | 'rosette' | 'tiger' | 'quilt'; color: number; amount: number; scale?: number; glow?: number; regions?: Region[] };
 }
 export type Region = 'head' | 'neck' | 'torso' | 'upper' | 'fore' | 'hand' | 'hips' | 'thigh' | 'calf' | 'foot';
 function boneRegion(name: string): Region {
@@ -114,7 +144,7 @@ function boneRegion(name: string): Region {
 const REGION_ID: Record<Region, number> = { head: 0, neck: 1, torso: 2, upper: 3, fore: 4, hand: 5, hips: 6, thigh: 7, calf: 8, foot: 9 };
 
 /** Paint a cloned mannequin geometry by skin weights, with face/hair split, panels and stripes. */
-function paintGeometry(m: THREE.SkinnedMesh, paint: Paint) {
+function paintGeometry(m: THREE.SkinnedMesh, paint: Paint, model = false) {
   const geo = m.geometry.clone();
   m.geometry = geo;
   const pos = geo.attributes.position, nor = geo.attributes.normal;
@@ -155,6 +185,10 @@ function paintGeometry(m: THREE.SkinnedMesh, paint: Paint) {
   const beltY0 = spine1.clone().sub(pelvis).dot(up);
   const out = new Float32Array(pos.count * 3);
   const reg = new Float32Array(pos.count);
+  const cloth = new Float32Array(pos.count);
+  // On textured models, regions painted the skin colour keep the model's own skin (face, arms...); the rest is clothing.
+  const skinCol = new THREE.Color(paint.skin);
+  const isSkin = (c: THREE.Color) => Math.abs(c.r - skinCol.r) + Math.abs(c.g - skinCol.g) + Math.abs(c.b - skinCol.b) < 0.01;
   const tmp = new THREE.Color(), acc = new THREE.Color();
   for (let k = 0; k < pos.count; k++) {
     v.fromBufferAttribute(pos, k).applyMatrix4(bm);
@@ -178,14 +212,21 @@ function paintGeometry(m: THREE.SkinnedMesh, paint: Paint) {
       if (r === 'torso' && chest && n.dot(fwd) > 0.55) tmp.copy(chest);
       if (belt && (r === 'hips' || r === 'torso')) { const y = v.clone().sub(pelvis).dot(up); if (y > beltY0 * 0.25 && y < beltY0 * 1.15) tmp.copy(belt); }
       if (stripe && (r === 'torso' || r === 'thigh' || r === 'calf' || r === 'upper') && Math.abs(n.dot(right)) > 0.9) tmp.copy(stripe);
+      if (model) {
+        // Head stays the model's own (face, ears); masks still paint over it.
+        const skinHere = (r === 'head' && !(mask && tmp.equals(mask))) || isSkin(tmp);
+        if (skinHere) { tmp.setRGB(1, 1, 1); } else cloth[k] += w;
+      }
       acc.r += tmp.r * w; acc.g += tmp.g * w; acc.b += tmp.b * w; wsum += w;
     }
-    if (wsum > 0) acc.multiplyScalar(1 / wsum);
+    if (wsum > 0) { acc.multiplyScalar(1 / wsum); cloth[k] /= wsum; }
+
     out[k * 3] = acc.r; out[k * 3 + 1] = acc.g; out[k * 3 + 2] = acc.b;
     reg[k] = REGION_ID[bestR];
   }
   geo.setAttribute('color', new THREE.BufferAttribute(out, 3));
   geo.setAttribute('region', new THREE.BufferAttribute(reg, 1));
+  geo.setAttribute('cloth', new THREE.BufferAttribute(cloth, 1));
   geo.computeBoundingBox();
   const size = geo.boundingBox!.getSize(new THREE.Vector3());
   return Math.max(size.x, size.y, size.z);
@@ -200,7 +241,12 @@ function addSurfaceDetail(mat: THREE.MeshStandardMaterial, paint: Paint, extent:
   const cr = paint.cracks;
   let regMask = 0;
   for (const r of cr?.regions ?? (Object.keys(REGION_ID) as Region[])) regMask |= 1 << REGION_ID[r];
+  const pt = paint.pattern;
+  let patMask = 0;
+  for (const r of pt?.regions ?? (Object.keys(REGION_ID) as Region[])) patMask |= 1 << REGION_ID[r];
   const uniforms = {
+    uPat: { value: pt ? { web: 1, rosette: 2, tiger: 3, quilt: 4 }[pt.kind] : 0 }, uPatColor: { value: new THREE.Color(pt?.color ?? 0) },
+    uPatAmt: { value: pt?.amount ?? 0 }, uPatScale: { value: pt?.scale ?? 6 }, uPatGlow: { value: pt?.glow ?? 0 }, uPatMask: { value: patMask },
     uDetail: { value: det.amount }, uKind: { value: kindId }, uScale: { value: 1 / extent },
     uCrackColor: { value: new THREE.Color(cr?.color ?? 0) }, uCrack: { value: cr?.amount ?? 0 },
     uCrackScale: { value: cr?.scale ?? 9 }, uCrackWidth: { value: cr?.width ?? 0.06 }, uRegMask: { value: regMask },
@@ -211,6 +257,7 @@ function addSurfaceDetail(mat: THREE.MeshStandardMaterial, paint: Paint, extent:
     Object.assign(sh.uniforms, uniforms);
     sh.vertexShader = 'attribute float region;\nvarying vec3 vBindP;\nvarying float vRegion;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvBindP = position; vRegion = region;');
     sh.fragmentShader = `uniform float uDetail, uKind, uScale, uCrack, uCrackScale, uCrackWidth; uniform int uRegMask; uniform vec3 uCrackColor;
+uniform float uPat, uPatAmt, uPatScale, uPatGlow; uniform int uPatMask; uniform vec3 uPatColor;
 varying vec3 vBindP; varying float vRegion;
 float h3(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float vn(vec3 x){ vec3 i = floor(x), f = fract(x); f = f*f*(3.0-2.0*f);
@@ -230,15 +277,57 @@ float cellEdge(vec3 p){ vec3 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.
     else if (uKind < 2.5) { dn = (fbm(q*18.0) - 0.5) * 1.4 - (1.0 - smoothstep(0.0, 0.12, cellEdge(q*11.0))) * 0.9; }
     else if (uKind < 3.5) { dn = (smoothstep(0.0, 0.2, cellEdge(q*40.0)) - 0.6) * 0.9; }
     else { dn = (fbm(q*30.0) - 0.5) * 0.5; }
-    diffuseColor.rgb *= clamp(1.0 + dn * uDetail * 2.0, 0.3, 1.6); }`)
+    diffuseColor.rgb *= clamp(1.0 + dn * uDetail * 2.0, 0.3, 1.6); }
+  float patC = 0.0;
+  if (uPat > 0.5 && ((uPatMask >> int(vRegion + 0.5)) & 1) == 1) {
+    vec3 q = vBindP * uScale * uPatScale;
+    if (uPat < 1.5) {
+      // Web: thin cell seams plus radiating lines.
+      float e = cellEdge(q * vec3(1.0, 1.6, 1.0));
+      patC = 1.0 - smoothstep(0.025, 0.06, e);
+    } else if (uPat < 2.5) {
+      // Rosettes: dark rings with a lighter centre.
+      vec3 i = floor(q * 1.6), f = fract(q * 1.6) - 0.5; float d = length(f.xy + (vec2(h3(i), h3(i + 3.1)) - 0.5) * 0.35);
+      patC = smoothstep(0.16, 0.2, d) * (1.0 - smoothstep(0.26, 0.31, d)) * step(0.35, h3(i + 7.0));
+    } else if (uPat < 3.5) {
+      // Tiger stripes: wavy bands around the body.
+      float b2 = sin(q.y * 9.0 + fbm(q * 2.5) * 5.0 + q.x * 2.0);
+      patC = smoothstep(0.55, 0.85, b2);
+    } else {
+      // Quilted panels: diamond stitching.
+      float a = abs(fract((q.x + q.y) * 2.0) - 0.5), b2 = abs(fract((q.x - q.y) * 2.0) - 0.5);
+      patC = 1.0 - smoothstep(0.02, 0.05, min(a, b2));
+    }
+    diffuseColor.rgb = mix(diffuseColor.rgb, uPatColor, patC * uPatAmt);
+  }`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
   if (uCrack > 0.0 && ((uRegMask >> int(vRegion + 0.5)) & 1) == 1) {
     float e = cellEdge(vBindP * uScale * uCrackScale + vec3(fbm(vBindP * uScale * 6.0)) * 0.6);
     float c = 1.0 - smoothstep(uCrackWidth * 0.4, uCrackWidth, e);
     diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.35, c);
-    totalEmissiveRadiance += uCrackColor * c * uCrack; }`);
+    totalEmissiveRadiance += uCrackColor * c * uCrack; }
+  if (uPatGlow > 0.0) totalEmissiveRadiance += uPatColor * patC * uPatGlow;`);
   };
-  mat.customProgramCacheKey = () => prevKey + `|detail${kindId}${cr ? 'c' : ''}`;
+  mat.customProgramCacheKey = () => prevKey + `|detail${kindId}${cr ? 'c' : ''}${pt ? 'p' : ''}`;
+}
+
+/** Drop the mannequin's head triangles (a grafted head replaces them). */
+function removeHead(m: THREE.SkinnedMesh) {
+  const geo = m.geometry, idx = geo.index;
+  if (!idx) return;
+  const hi = m.skeleton.bones.findIndex((b) => b.name === 'Head');
+  const si = geo.attributes.skinIndex, sw = geo.attributes.skinWeight;
+  const hw = (i: number) => { let w = 0; for (let c = 0; c < 4; c++) if (si.getComponent(i, c) === hi) w += sw.getComponent(i, c); return w; };
+  const keep: number[] = [];
+  for (let t = 0; t < idx.count; t += 3) {
+    const a = idx.getX(t), b = idx.getX(t + 1), c = idx.getX(t + 2);
+    if (hw(a) > 0.5 && hw(b) > 0.5 && hw(c) > 0.5) continue;
+    keep.push(a, b, c);
+  }
+  const g2 = geo.clone();
+  g2.setIndex(keep);
+  m.geometry = g2;
+  m.userData.headless = true;
 }
 
 export interface ClipPlay {
@@ -271,12 +360,15 @@ export class SkinnedBody {
 
   constructor(public look: BodyLook, decorate: (m: THREE.MeshStandardMaterial, kind: 'body' | 'joints') => void) {
     // inner holds the mannequin; model (outer) is what the fighter rig owns.
+    const headKit = look.model ? charBases.get(look.model) : undefined;
+    this.isModel = !!headKit;
     this.inner = SkeletonUtils.clone((look.female ? femaleBase : maleBase) ?? maleBase!);
     this.model = new THREE.Group();
     this.model.add(this.inner);
     this.inner.traverse((o) => { if ((o as THREE.Bone).isBone) this.bones.set(o.name, o as THREE.Bone); });
     const meshes: THREE.SkinnedMesh[] = [];
     this.inner.traverse((o) => { if ((o as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(o as THREE.SkinnedMesh); });
+    const noOutline = new Set<THREE.SkinnedMesh>();
     for (const m of meshes) {
       const src = m.material as THREE.MeshStandardMaterial;
       const isJoints = /joint/i.test(src.name);
@@ -320,8 +412,222 @@ export class SkinnedBody {
     this.model.scale.set(s * look.bulk, s, s * look.bulk);
     this.inner.position.y = -box.min.y;
     this.model.updateMatrixWorld(true);
-    for (const m of meshes) this.addOutline(m, s);
+    if (headKit) {
+      // Remove the mannequin's own head, then bind the kit's head parts to our bones (same names).
+      for (const m of meshes) removeHead(m);
+      headKit.traverse((o) => {
+        const km = o as THREE.SkinnedMesh;
+        if (!km.isSkinnedMesh) return;
+        const bones = km.skeleton.bones.map((kb) => this.bones.get(kb.name) ?? this.bones.get('Head')!);
+        const inv = km.skeleton.boneInverses.map((x) => x.clone());
+        const hs = look.headScale ?? 1;
+        if (hs !== 1 || look.bulk !== 1) {
+          // Scale the head about the Head bone's bind position. The body's bulk widens the model in X/Z; undo
+          // that on the head so a broad fighter doesn't get a squashed face.
+          const hi = km.skeleton.bones.findIndex((b) => b.name === 'Head');
+          const hb = km.skeleton.boneInverses[hi].clone().invert();
+          const c = new THREE.Vector3().setFromMatrixPosition(hb);
+          const hxz = hs / look.bulk;
+          const S = new THREE.Matrix4().makeTranslation(c.x, c.y, c.z).multiply(new THREE.Matrix4().makeScale(1 / hxz, 1 / hs, 1 / hxz)).multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+          for (const x of inv) x.multiply(S);
+        }
+        const mesh = new THREE.SkinnedMesh(km.geometry, km.material as THREE.Material);
+        mesh.name = km.name;
+        meshes[0].parent!.add(mesh);
+        mesh.bind(new THREE.Skeleton(bones, inv), km.bindMatrix);
+        this.modelMaterial(mesh, km.material as THREE.MeshStandardMaterial, look, decorate, noOutline);
+        if (!noOutline.has(mesh)) this.addOutline(mesh, s);
+        mesh.userData.headPart = true;
+      });
+    }
+    if (look.golem && golemBase) {
+      // The mannequin stays as the invisible animation driver; the golem is what's seen.
+      for (const m of meshes) { m.visible = false; m.castShadow = false; noOutline.add(m); }
+      this.setupGolem(look, decorate, s);
+    }
+    for (const m of meshes) if (!noOutline.has(m)) this.addOutline(m, s);
+    if (!this.jointMat) this.jointMat = this.bodyMat;
     this.proportions = this.measure();
+  }
+
+  // ------------------------------------------------------------------ golem body (retargeted)
+  isGolem = false;
+  private gBones = new Map<string, THREE.Bone>();
+  /** UAL bone → golem bone, with the rest-pose correction: golemWorld = driverWorld · pre · post. */
+  private gPairs: { d: THREE.Bone; g: THREE.Bone; pre: THREE.Quaternion; post: THREE.Quaternion }[] = [];
+  private gHip: { bone: THREE.Bone; d0: THREE.Vector3; g0: THREE.Vector3; k: number } | null = null;
+  private gTwist: { fa: THREE.Bone; hand: THREE.Bone; axis: THREE.Vector3; rest: THREE.Quaternion; t1: THREE.Bone; r1: THREE.Quaternion; t2: THREE.Bone; r2: THREE.Quaternion }[] = [];
+  private setupGolem(look: BodyLook, decorate: (m: THREE.MeshStandardMaterial, kind: 'body' | 'joints') => void, s: number) {
+    const g = SkeletonUtils.clone(golemBase!);
+    let mesh: THREE.SkinnedMesh | null = null;
+    g.traverse((o) => { if ((o as THREE.Bone).isBone) this.gBones.set(o.name, o as THREE.Bone); if ((o as THREE.SkinnedMesh).isSkinnedMesh) mesh = o as THREE.SkinnedMesh; });
+    if (!mesh) return;
+    const gm = mesh as THREE.SkinnedMesh;
+    // Skinned bounds in the bind pose (meshopt quantisation folds scale into the bind matrices, so raw
+    // geometry bounds are not metres).
+    g.updateMatrixWorld(true);
+    gm.computeBoundingBox();
+    const gb = gm.boundingBox!.clone().applyMatrix4(gm.matrixWorld);
+    const gh = gb.max.y - gb.min.y;
+    // True proportions at the fighter's height: undo the outer model's height scale and bulk widening.
+    const k = look.height / gh;
+    g.scale.set(k / (s * look.bulk), k / s, k / (s * look.bulk));
+    g.position.y = -gb.min.y * (k / s);
+    this.model.add(g);
+    const src = gm.material as THREE.MeshStandardMaterial;
+    const mat = new THREE.MeshStandardMaterial({
+      // Matte stone: the kit's roughness/metal maps read as wet chrome under our sky reflections.
+      map: src.map, normalMap: src.normalMap, roughness: 0.92, metalness: 0.04, envMapIntensity: 0.35,
+      emissiveMap: src.emissiveMap, emissive: look.golem?.emissive ?? 0xffffff,
+      emissiveIntensity: look.golem?.emissiveIntensity ?? 1.4,
+    });
+    mat.normalScale.set(0.6, 0.6);
+    decorate(mat, 'body');
+    // Rim from the smooth surface normal, not the craggy normal-mapped one: otherwise every crack edge in the
+    // normal map catches the rim light and the rock reads as wet silver veins.
+    const prevRim = mat.onBeforeCompile, prevRimKey = mat.customProgramCacheKey();
+    mat.onBeforeCompile = (sh, r) => {
+      prevRim.call(mat, sh, r);
+      // abs(): some of the model's vertex normals are inverted (inner arms); clamping them to 0 gave a full-strength rim.
+      sh.fragmentShader = sh.fragmentShader.replace('clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0)', 'abs(dot(normalize(vNormal), normalize(vViewPosition)))');
+    };
+    mat.customProgramCacheKey = () => prevRimKey + '|geoRim';
+    gm.material = mat;
+    gm.castShadow = true; gm.receiveShadow = true; gm.frustumCulled = false;
+    this.bodyMat = mat; this.jointMat = mat;
+    this.addOutline(gm, k);
+    this.isGolem = true;
+    // Retarget pairs, calibrated now while the driver holds its reference pose and the golem its bind pose.
+    this.model.updateMatrixWorld(true);
+    const P: [string, string, string?][] = [
+      ['pelvis', 'CC_Base_Hip'], ['spine_01', 'CC_Base_Waist', 'spine_02'], ['spine_02', 'CC_Base_Spine01', 'spine_03'], ['spine_03', 'CC_Base_Spine02', 'neck_01'],
+      ['neck_01', 'CC_Base_NeckTwist01', 'Head'], ['Head', 'CC_Base_Head'],
+    ];
+    for (const [sd, sg] of [['l', 'L'], ['r', 'R']]) {
+      P.push([`clavicle_${sd}`, `CC_Base_${sg}_Clavicle`, `upperarm_${sd}`], [`upperarm_${sd}`, `CC_Base_${sg}_Upperarm`, `lowerarm_${sd}`],
+        [`lowerarm_${sd}`, `CC_Base_${sg}_Forearm`, `hand_${sd}`], [`hand_${sd}`, `CC_Base_${sg}_Hand`, `middle_01_${sd}`],
+        [`thigh_${sd}`, `CC_Base_${sg}_Thigh`, `calf_${sd}`], [`calf_${sd}`, `CC_Base_${sg}_Calf`, `foot_${sd}`],
+        [`foot_${sd}`, `CC_Base_${sg}_Foot`, `ball_${sd}`], [`ball_${sd}`, `CC_Base_${sg}_ToeBase`]);
+      for (const [f, F] of [['thumb', 'Thumb'], ['index', 'Index'], ['pinky', 'Pinky']]) for (let i = 1; i <= 3; i++) P.push([`${f}_0${i}_${sd}`, `CC_Base_${sg}_${F}${i}`, i < 3 ? `${f}_0${i + 1}_${sd}` : undefined]);
+    }
+    // Mapped children on the golem side (for the hand, aim at the middle of the index and pinky roots).
+    const gChild: Record<string, () => THREE.Vector3> = {};
+    for (const sg of ['L', 'R']) gChild[`CC_Base_${sg}_Hand`] = () => this.gwp(`CC_Base_${sg}_Index1`).add(this.gwp(`CC_Base_${sg}_Pinky1`)).multiplyScalar(0.5);
+    const map = new Map(P.map(([d, gg]) => [d, gg]));
+    const wq = (b: THREE.Object3D) => b.getWorldQuaternion(new THREE.Quaternion());
+    for (const [dn, gn, dc] of P) {
+      const d = this.bones.get(dn), gbn = this.gBones.get(gn);
+      if (!d || !gbn) continue;
+      let align = new THREE.Quaternion();
+      const gc = dc ? map.get(dc) : undefined;
+      if (dc && this.bones.get(dc) && (gChild[gn] || (gc && this.gBones.get(gc)))) {
+        const dd = this.wp(dc).sub(this.wp(dn)).normalize();
+        const gp = this.gwp(gn), gcp = gChild[gn] ? gChild[gn]() : this.gwp(gc!);
+        const gd = gcp.sub(gp).normalize();
+        align = new THREE.Quaternion().setFromUnitVectors(gd, dd);
+      }
+      this.gPairs.push({ d, g: gbn, pre: wq(d).invert(), post: align.multiply(wq(gbn)) });
+    }
+    // Forearm roll is carried by the twist bones (as the CC rig expects), not the forearm itself: the
+    // forearm takes only the bend, ForearmTwist01/02 take ¼ / ¾ of the roll and the hand takes all of it.
+    for (const sg of ['L', 'R']) {
+      const fa = this.gBones.get(`CC_Base_${sg}_Forearm`), hand = this.gBones.get(`CC_Base_${sg}_Hand`);
+      const t1 = this.gBones.get(`CC_Base_${sg}_ForearmTwist01`), t2 = this.gBones.get(`CC_Base_${sg}_ForearmTwist02`);
+      if (fa && hand && t1 && t2) this.gTwist.push({ fa, hand, axis: hand.position.clone().normalize(), rest: fa.quaternion.clone(), t1, r1: t1.quaternion.clone(), t2, r2: t2.quaternion.clone() });
+    }
+    // Hips: follow the driver pelvis' motion (scaled by the hip-height ratio), in model space.
+    const hip = this.gBones.get('CC_Base_Hip')!;
+    const d0 = this.model.worldToLocal(this.wp('pelvis')), g0 = this.model.worldToLocal(this.gwp('CC_Base_Hip'));
+    this.gHip = { bone: hip, d0, g0, k: g0.y / Math.max(0.01, d0.y) };
+  }
+  private gwp(name: string) { return this.gBones.get(name)!.getWorldPosition(new THREE.Vector3()); }
+  /** Pose the golem from the driver mannequin (call after the driver's final pose). */
+  private retarget() {
+    if (!this.isGolem) return;
+    this.inner.updateMatrixWorld(true);
+    const h = this.gHip!;
+    const dp = this.model.worldToLocal(this.wp('pelvis'));
+    const want = h.g0.clone().add(dp.sub(h.d0).multiplyScalar(h.k));
+    h.bone.position.copy(h.bone.parent!.worldToLocal(this.model.localToWorld(want)));
+    h.bone.updateMatrixWorld(true);
+    for (const p of this.gPairs) {
+      p.d.getWorldQuaternion(this.tq).multiply(p.pre).multiply(p.post);
+      p.g.parent!.getWorldQuaternion(this.pq);
+      p.g.quaternion.copy(this.pq.invert().multiply(this.tq));
+      const tw = this.gTwist.find((x) => x.fa === p.g);
+      if (tw) this.splitTwist(tw);
+      p.g.updateMatrixWorld(true);
+    }
+  }
+  private sq = new THREE.Quaternion();
+  private swq = new THREE.Quaternion();
+  /** Keep only the bend on the forearm; hand its roll to the twist bones (¼ near the elbow, ¾ near the wrist). */
+  private splitTwist(tw: SkinnedBody['gTwist'][number]) {
+    // delta from rest in the forearm's rest-local frame, decomposed into swing · twist about the bone axis.
+    const delta = this.sq.copy(tw.rest).invert().multiply(tw.fa.quaternion);
+    const a = tw.axis, d = a.x * delta.x + a.y * delta.y + a.z * delta.z;
+    const twist = this.swq.set(a.x * d, a.y * d, a.z * d, delta.w);
+    if (twist.lengthSq() < 1e-8) return;
+    twist.normalize();
+    const angle = 2 * Math.atan2(d, delta.w);
+    const swing = delta.multiply(twist.clone().invert());
+    tw.fa.quaternion.copy(tw.rest).multiply(swing);
+    // The twist bones sit along the forearm axis: rotate them about the same axis in their own frames.
+    // Express the forearm axis in each twist bone's rest frame (t2 sits under t1).
+    const local = (b: THREE.Bone, r: THREE.Quaternion, chain: THREE.Quaternion, frac: number) => {
+      const ax = a.clone().applyQuaternion(chain.clone().invert()).normalize();
+      b.quaternion.copy(r).multiply(new THREE.Quaternion().setFromAxisAngle(ax, angle * frac));
+    };
+    local(tw.t1, tw.r1, tw.r1, 0.25);
+    local(tw.t2, tw.r2, tw.r1.clone().multiply(tw.r2), 0.5);
+  }
+
+  isModel = false;
+  /** Materials for a textured character body: skin texture with painted clothing, tinted hair, shaded eyes. */
+  private modelMaterial(m: THREE.SkinnedMesh, src: THREE.MeshStandardMaterial, look: BodyLook, decorate: (m: THREE.MeshStandardMaterial, kind: 'body' | 'joints') => void, noOutline: Set<THREE.SkinnedMesh>) {
+    const name = `${m.name} ${src.name}`;
+    m.castShadow = true; m.receiveShadow = true; m.frustumCulled = false;
+    if (/eye/i.test(name)) {
+      const mat = new THREE.MeshStandardMaterial({ map: src.map, roughness: 0.25, metalness: 0, emissive: look.eyeGlow ?? 0, emissiveIntensity: look.eyeGlow !== undefined ? 1.6 : 0 });
+      m.material = mat; noOutline.add(m); m.castShadow = false;
+      return;
+    }
+    if (/hair/i.test(name)) {
+      if (look.hideHair) { m.visible = false; noOutline.add(m); return; }
+      const mat = new THREE.MeshStandardMaterial({ map: src.map, color: look.paint?.hair ?? 0xffffff, roughness: 0.6, metalness: 0 });
+      decorate(mat, 'body');
+      // Hair strands keep their texture's shading but take the fighter's hair colour (chained after the rim light).
+      const prevH = mat.onBeforeCompile, prevHKey = mat.customProgramCacheKey();
+      mat.onBeforeCompile = (sh, r) => {
+        prevH.call(mat, sh, r);
+        sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#ifdef USE_MAP
+  vec4 hairTex = texture2D(map, vMapUv);
+  diffuseColor.rgb *= 0.45 + 1.1 * dot(hairTex.rgb, vec3(0.299, 0.587, 0.114));
+#endif`);
+      };
+      mat.customProgramCacheKey = () => prevHKey + '|hairTint';
+      m.material = mat;
+      return;
+    }
+    const isHead = /body/i.test(name);
+    const mat = new THREE.MeshStandardMaterial({
+      map: src.map, color: isHead ? (look.skinTint ?? 0xffffff) : 0xffffff, roughness: isHead ? 0.55 : 0.5, metalness: isHead ? 0 : 0.3,
+      emissiveMap: src.emissiveMap ?? null, emissive: src.emissiveMap ? 0xffffff : 0x000000, emissiveIntensity: src.emissiveMap ? 1.2 : 0,
+    });
+    decorate(mat, 'body');
+    if (isHead && look.skinDesat) {
+      // Desaturate the kit's skin before tinting, so the face takes the fighter's own skin colour.
+      const prev = mat.onBeforeCompile, prevKey = mat.customProgramCacheKey(), d = look.skinDesat.toFixed(3);
+      mat.onBeforeCompile = (sh, r) => {
+        prev.call(mat, sh, r);
+        sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+#ifdef USE_MAP
+  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(dot(sampledDiffuseColor.rgb, vec3(0.299, 0.587, 0.114))) * diffuse * 1.25, ${d});
+#endif`);
+      };
+      mat.customProgramCacheKey = () => prevKey + '|desat' + d;
+    }
+    m.material = mat;
   }
 
   bone(name: string) {
@@ -422,8 +728,14 @@ export class SkinnedBody {
     return clips.get(name)?.duration ?? 1;
   }
 
+  /** Golem bone standing in for a UAL bone name (hands, feet, head... for effects that follow the visible body). */
+  private gFor(name: string) {
+    if (!this.isGolem) return undefined;
+    const p = this.gPairs.find((x) => x.d.name === name);
+    return p?.g;
+  }
   boneWorld(name: string, out = new THREE.Vector3()) {
-    const b = this.bone(name);
+    const b = this.gFor(name) ?? this.bone(name);
     return b ? b.getWorldPosition(out) : out;
   }
 
@@ -452,6 +764,10 @@ export class SkinnedBody {
 
   /** Advance clips and blend in the procedural pose by procW (call after the rig pose is applied). */
   update(dt: number) {
+    this.updateDriver(dt);
+    this.retarget();
+  }
+  private updateDriver(dt: number) {
     const rig = this.rig;
     if (!rig) return;
     const k = 1 - Math.exp(-dt / 0.085);

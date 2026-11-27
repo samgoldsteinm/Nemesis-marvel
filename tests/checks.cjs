@@ -454,6 +454,29 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     return { pass, info: JSON.stringify({ afterFirst, afterSecond }) };
   });
 
+  await check('Rage: a slow controller-style R tap (20 ticks, slips into charging) still activates Rage', () => {
+    const m = T.setup('tether', 'basalt');
+    const [a] = m.fighters;
+    a.rage = 100;
+    T.hold(0, ['power'], 20); T.idle(2);
+    const ok1 = a.raging;
+    const m2 = T.setup('vanta', 'basalt');
+    const v = m2.fighters[0];
+    v.rage = 100;
+    T.hold(0, ['attack'], 1); T.idle(8); T.hold(0, ['power'], 6); T.idle(2);
+    return { pass: ok1 && v.raging, info: `slowTap=${ok1} midAttack=${v.raging}` };
+  });
+
+  await check('Grab: clinch holds the victim on the ground; A knees', () => {
+    const m = T.setup('ember', 'tether');
+    const [a, b] = m.fighters;
+    T.faceEachOther(m, a.def.radius + b.def.radius + 0.4);
+    T.hold(0, ['grab'], 1); T.idle(10);
+    const held = b.state === 'grabbed', dy = +(b.pos.y - a.pos.y).toFixed(2);
+    const st0 = b.stamina; T.hold(0, ['attack'], 1); T.idle(10);
+    return { pass: held && Math.abs(dy) < 0.05 && b.stamina < st0, info: `held=${held} dy=${dy} stamina ${st0.toFixed(0)}->${b.stamina.toFixed(0)}` };
+  });
+
   await check('SHUNT Displace drops the victim off an open edge for a ring-out', () => {
     const m = T.setup('shunt', 'basalt');
     const [a, b] = m.fighters;
