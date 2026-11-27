@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { srand } from './rng';
 import type { StatusHandle, StatusKind } from './vfx';
 import { CharacterDef, MoveDef, HitSpec, PROP_SWING, finishMaterial } from './characters';
 import { SkinnedBody, hasBodyModel, ClipPlay, hasClip } from './skinned';
@@ -1628,6 +1629,15 @@ export class Fighter {
     }
   }
 
+  /**
+   * Hand position for gameplay (projectile origins): computed from the body, never from animated bones,
+   * so it is identical on every machine regardless of frame rate (online lockstep depends on this).
+   */
+  handSim() {
+    const f = this.forward;
+    return this.pos.clone().add(new THREE.Vector3(0, this.def.height * 0.62, 0)).addScaledVector(f, this.def.radius + 0.35).add(new THREE.Vector3(f.z, 0, -f.x).multiplyScalar(-0.18));
+  }
+  /** Animated hand bone position: visual effects only. */
   hand() {
     const v = new THREE.Vector3();
     if (this.skinned) return this.skinned.boneWorld('hand_r', v);
@@ -1917,7 +1927,7 @@ export class Fighter {
     const brokeStamina = staminaBefore > 0 && this.stamina <= 0;
     const kb = dir.clone().setY(0).normalize().multiplyScalar(spec.kbF * (att.raging ? 1.15 : 1) / this.def.weight);
     const launch = spec.launch || brokeStamina || this.health <= 0 || !this.onGround && spec.kbU > 0;
-    this.hitSide = Math.random() < 0.5 ? 1 : -1;
+    this.hitSide = srand() < 0.5 ? 1 : -1;
     this.lastHitSerial++;
     if (launch) {
       this.vel.copy(kb);
@@ -2089,7 +2099,7 @@ export class Fighter {
     } else if (id === 'vanta') {
       // Thousand Cuts: dart through them from every angle in gold streaks.
       if (t < 98 && t % 7 === 0) {
-        const a = Math.random() * Math.PI * 2;
+        const a = srand() * Math.PI * 2;
         const from = this.pos.clone();
         this.pos.copy(o.pos).add(new THREE.Vector3(Math.sin(a) * 1.8, 0, Math.cos(a) * 1.8));
         this.yaw = Math.atan2(o.pos.x - this.pos.x, o.pos.z - this.pos.z);
@@ -2130,7 +2140,7 @@ export class Fighter {
     } else {
       // Shunt: scatter strikes from every side.
       if (t < 100 && t % 14 === 0) {
-        const a = Math.random() * Math.PI * 2;
+        const a = srand() * Math.PI * 2;
         this.pos.copy(o.pos).add(new THREE.Vector3(Math.sin(a) * 1.4, 0, Math.cos(a) * 1.4));
         this.yaw = Math.atan2(o.pos.x - this.pos.x, o.pos.z - this.pos.z);
         fx.flash(o.center, 0.9, this.tpColor, 0.12);

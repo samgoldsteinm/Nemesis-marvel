@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { simRng, newSeed } from './rng';
 import { Fighter } from './fighter';
 import { Arena, Prop, BOUNDS } from './arena';
 import { FX } from './fx';
@@ -66,7 +67,19 @@ export class Match {
     for (const m of this.mines) this.scene.remove(m.mesh);
   }
 
-  restart() {
+  /** Remove projectiles and mines in flight (restart, new round, online resync). */
+  clearShots() {
+    for (const p of this.projectiles) { p.mesh.visible = false; p.vis?.stop(false); }
+    for (const m of this.mines) this.scene.remove(m.mesh);
+    this.mines = [];
+    this.projectiles = [];
+  }
+
+  /** Seed of the current match's gameplay RNG (the host's choice online, random offline). */
+  seed = 0;
+  restart(seed?: number) {
+    this.seed = seed ?? newSeed();
+    simRng.seed(this.seed);
     this.arena.reset();
     this.fx.clear();
     this.ended = null;
@@ -239,7 +252,7 @@ export class Match {
     const mesh = this.projPool.find((m) => !m.visible);
     if (!mesh) return;
     const o = owner.opp;
-    const origin = from ? from.clone() : owner.hand();
+    const origin = from ? from.clone() : owner.handSim();
     const aim = o.center.sub(origin);
     const dir = dirOverride ? dirOverride.clone().normalize()
       : aim.lengthSq() > 0 && aim.clone().setY(0).normalize().dot(owner.forward) > 0.5 ? aim.normalize() : owner.forward.clone().setY(0);

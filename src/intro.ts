@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Rng } from './rng';
 import type { Match } from './match';
 import type { Fighter } from './fighter';
 import type { VersusCamera } from './camera';
@@ -140,7 +141,9 @@ export class FightIntro {
 
   constructor(private match: Match, private vcam: VersusCamera, private el: HTMLElement, private voice: boolean) {
     const [a, b] = match.fighters;
-    const la = pickLine(a, b), lb = pickLine(b, a);
+    // Line choice is seeded from the match so both players hear the same lines online.
+    const lineRng = new Rng((match.seed ^ 0x5bd1e995) >>> 0);
+    const la = pickLine(a, b, lineRng), lb = pickLine(b, a, lineRng);
     this.lines = [la.text, lb.text];
     this.keys = [la.key, lb.key];
     // Fetch both recorded lines now; shots stretch to fit the speech once the manifest is in.
@@ -290,14 +293,14 @@ export class FightIntro {
   }
 }
 
-function pickLine(f: Fighter, o: Fighter): { text: string; key: string } {
+function pickLine(f: Fighter, o: Fighter, rng: Rng): { text: string; key: string } {
   const vsKey = `${f.def.id}>${o.def.id}`;
   const vs = VERSUS[vsKey];
   const pool = LINES[f.def.id] ?? ['Let’s go.'];
   const nm = o.def.name.split(' ')[0];
   const oname = nm.charAt(0) + nm.slice(1).toLowerCase();
-  if (vs && Math.random() < 0.6) return { text: vs, key: `vs_${o.def.id}` };
-  const i = Math.floor(Math.random() * pool.length);
+  if (vs && rng.next() < 0.6) return { text: vs, key: `vs_${o.def.id}` };
+  const i = Math.floor(rng.next() * pool.length);
   const raw = pool[i];
   const s = typeof raw === 'function' ? raw(o) : raw;
   // Clip keys match the generator (scratchpad tts/gen.py): l<i>, or l<i>_<opponent> for lines naming them.

@@ -21,6 +21,14 @@ npm run dev &
 node tests/checks.cjs
 ```
 
+## Play online
+
+Title → **Play online** → **Host** gives a 5-letter room code and a share link (`…/?room=CODE`). The friend opens
+the link (or picks **Join** and types the code). The host picks P1, the arena and lives; the guest picks P2; the
+fight starts when both lock in. Ping is shown in the corner. It uses free public MQTT brokers to connect and
+WebRTC (with TURN) for the match itself, so there is no server to run. Deterministic input lockstep: both
+games simulate the same inputs; a bad connection makes the game pause briefly rather than drift.
+
 ## Controls
 
 | Action | Xbox controller | Keyboard P1 | Keyboard P2 | Touch |
@@ -132,7 +140,7 @@ These come from 40 frames of the gameplay clip you supplied. They're genre conve
 - bloom with a full-screen red wash during Rage
 - an elevated roadway arena full of throwable cars and barrels
 
-## Checks actually run (`tests/checks.cjs`, 30/30 passing)
+## Checks actually run (`tests/checks.cjs`, 38/38 passing)
 
 The CPU detours around objects it gets stuck behind. In a batch of 14 rooftop bouts, none timed out.
 

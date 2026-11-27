@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { srand } from './rng';
 import type { LiftClass } from './characters';
 import { addOutline } from './rig';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -960,8 +961,8 @@ export class Arena {
   }
   makeBarrel() {
     const colors = [0x2f6a9a, 0x8a2a20, 0x3a5a2a, 0x7a6a20];
-    const fallback = () => new Prop('barrel', 0, buildBarrel(colors[Math.floor(Math.random() * colors.length)]), new THREE.Vector3(0.34, 0.475, 0.34));
-    return this.modelProp(Math.random() < 0.5 ? 'barrel_02_big_blue' : 'barrel_02_medium_green', 'barrel', 0, fallback, false, 1.1);
+    const fallback = () => new Prop('barrel', 0, buildBarrel(colors[Math.floor(srand() * colors.length)]), new THREE.Vector3(0.34, 0.475, 0.34));
+    return this.modelProp(srand() < 0.5 ? 'barrel_02_big_blue' : 'barrel_02_medium_green', 'barrel', 0, fallback, false, 1.1);
   }
   makeBarrier() {
     return this.modelProp('concrete_jersey_barrier_01_medium', 'barrier', 1, () => new Prop('barrier', 1, buildBarrier(this.mats.concrete), new THREE.Vector3(1.1, 0.45, 0.4)));
@@ -970,13 +971,13 @@ export class Arena {
     return this.modelProp('cone_ii_medium', 'cone', 0, () => this.makeCrate());
   }
   makeBin() {
-    return this.modelProp(Math.random() < 0.5 ? 'metal_garbage_can_01_medium' : 'trash_bin_c_green', 'bin', 0, () => this.makeCrate(), false, 1.15);
+    return this.modelProp(srand() < 0.5 ? 'metal_garbage_can_01_medium' : 'trash_bin_c_green', 'bin', 0, () => this.makeCrate(), false, 1.15);
   }
   makePallet() {
     return this.modelProp('pallet_medium_01', 'pallet', 0, () => this.makePanel());
   }
   makeWheelie() {
-    return this.modelProp(Math.random() < 0.5 ? 'garbage_collector_green_large' : 'garbage_collector_red_large', 'wheelie', 1, () => this.makeAC(), false, 1.15);
+    return this.modelProp(srand() < 0.5 ? 'garbage_collector_green_large' : 'garbage_collector_red_large', 'wheelie', 1, () => this.makeAC(), false, 1.15);
   }
   makeBarricade() {
     return this.modelProp('type_ii_barricade_01_medium', 'barricade', 0, () => this.makeCrate());
@@ -1025,7 +1026,7 @@ export class Arena {
     const p = new Prop('letter', 0, g, new THREE.Vector3(0.55, 0.55, 0.15));
     p.pos.copy(L.mesh.position).setY(4.5);
     p.pos.z = -12;
-    p.vel.set((Math.random() - 0.5) * 2, 2, 5);
+    p.vel.set((srand() - 0.5) * 2, 2, 5);
     p.spin.set(3, 0, 1);
     p.state = 'falling';
     this.props.push(p);
@@ -1038,7 +1039,7 @@ export class Arena {
     const p = this.makeRubble();
     p.pos.copy(at);
     p.pos.y = Math.max(0.5, at.y);
-    p.vel.set((Math.random() - 0.5) * 3, 3, (Math.random() - 0.5) * 3);
+    p.vel.set((srand() - 0.5) * 3, 3, (srand() - 0.5) * 3);
     p.state = 'falling';
     this.props.push(p);
     this.dyn.add(p.mesh);

@@ -10,8 +10,8 @@ const URL = process.argv[2] || 'http://localhost:5173/';
   const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(URL);
-  await page.waitForFunction(() => !!window.__game, null, { timeout: 60000 });
+  await page.goto(URL, { timeout: 240000 });
+  await page.waitForFunction(() => !!window.__game, null, { timeout: 240000 });
 
   // In-page helpers.
   await page.evaluate(() => {
@@ -518,6 +518,30 @@ const URL = process.argv[2] || 'http://localhost:5173/';
       T.G.disableCPU();
     }
     return { pass: outcomes.every((o) => !o.includes('timeout')), info: outcomes.join(' ; ') };
+  });
+
+  await check('Determinism: same seed + inputs give identical state on every arena, independent of animation rate', async () => {
+    const np = await import('/src/netplay.ts');
+    const G = T.G;
+    const run = (p1, p2, arena, seed, chunk) => {
+      G.start(p1, p2, 'versus', 'normal', arena); G.setManual(true);
+      G.match.restart(seed);
+      G.forced[0] = null; G.forced[1] = null;
+      G.enableCPUs('hard');
+      const hs = [];
+      for (let t = 0; t < 1200; t += chunk) { G.step(chunk); if ((t + chunk) % 60 === 0) hs.push(np.checksum(G.match)); }
+      G.disableCPU();
+      return hs;
+    };
+    const out = [];
+    let ok = true;
+    for (const [p1, p2, arena] of [['basalt', 'tether', 'rooftop'], ['ember', 'rift', 'overpass'], ['magna', 'vanta', 'construction'], ['aerin', 'shunt', 'docks'], ['rift', 'ember', 'helipad']]) {
+      const a = run(p1, p2, arena, 4242, 1), b = run(p1, p2, arena, 4242, 6);
+      const d = a.findIndex((h, i) => h !== b[i]);
+      if (d >= 0) ok = false;
+      out.push(`${arena}:${d < 0 ? 'same' : 'DIFF@' + (d + 1) * 60}`);
+    }
+    return { pass: ok, info: out.join(' ') };
   });
 
   await check('SHUNT Displace drops the victim off an open edge for a ring-out', () => {

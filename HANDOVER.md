@@ -47,6 +47,10 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | `src/camera.ts` | Versus camera (`zoomMul`, `zLimit`, `cinematic`) |
 | `src/ai.ts` | CPU opponent |
 | `src/hud.ts`, `src/input.ts`, `src/portraits.ts`, `src/rig.ts` | HUD, input devices, select-screen portraits, procedural rig |
+| `src/rng.ts` | Seeded match RNG (`simRng`, `srand`). **All gameplay randomness goes through it** (see §7) |
+| `src/net.ts` | Transport: tiny MQTT-over-wss client to public brokers (signalling + relay), WebRTC data channels, STUN/TURN (Metered), `NetLink` (hello/welcome, heartbeat, bye), `?net=local` BroadcastChannel bus for tests |
+| `src/netplay.ts` | Lockstep netcode: input encoding, canonical stick frame, `checksum`, `snapshot`/`applySnapshot`, `Lockstep`, `OnlineSession` (lobby protocol) |
+| `src/online.ts` | Online flow controller (host/join, lobby, intro, fight, rematch, disconnects) used by `main.ts` |
 | `tests/checks.cjs` | Deterministic gameplay checks (Playwright). `node tests/checks.cjs [url]` with the dev server running |
 
 ### Assets and licences (keep the LICENSE files)
@@ -106,6 +110,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-27 | Both layouts: Xbox and GameCube (switch on the title screen or in How to Play → Controls; GameCube controllers/adapters auto-switch). Non-standard GameCube adapters (Mayflash etc.) get a raw button map; a "Set up controller" screen records each action's button/trigger per controller (`bl.bind.<pad id>` in localStorage). Menu confirm/back, HUD prompts, move lists, tips and touch labels follow the layout (`layoutText`, `actionLabel` in input.ts) |
 | 11-27 | Real talking jaws: per-vertex `aJaw` weights computed from each face (nose/chin profile) + vertex-shader rotation about a hinge before skinning, on grafted heads, painted mannequin heads and the golem; outlines deform too; lower lip pieces rotate with the chin; golem gets a magma glow inside the mouth. Per-fighter strength in `looks.ts` (`look.jaw`) |
 | 11-27 | Menu redesign: red accent (`--hot` #ff3b4e / `--hot2` #b8142c) replaces orange; Anton + Oswald fonts (OFL, `public/fonts`); Press Start screen (chrome logo, smoky teal band, duotone fighter profile, blinking prompt); title with comic-toned hero art; fighter select = two diagonal-split panels (P1 blue, P2 red, skyline + halftone backdrops, posterised poses) + duotone face roster strip + device-aware button prompts; restyled results/pause/how-to |
+| 11-27 | Online 1v1 (`net.ts`, `netplay.ts`, `online.ts`, `rng.ts`): room codes + share links over public MQTT brokers, WebRTC data channel with relay fallback, Metered TURN; deterministic input lockstep (2–6 tick delay from RTT), seeded match RNG, checksums every 60 ticks with snapshot resync; determinism check in tests |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -187,6 +192,20 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - Portrait variants (`portraits.ts`): pose, comic (posterised), face (duotone), profile (duotone) — all rendered once at load; faces need the camera ~1.9× head scale away or they crop to the forehead.
 - The Press Start screen is `screen = 'start'`; test hooks (`__game.start`) bypass it.
 
+**Online / determinism**
+- Gameplay used `Math.random` (AI, hit side, finisher teleports, prop models/debris) and projectile origins used the
+  *animated* hand bone, so two machines diverged. Fixed: `srand()` everywhere in sim code, `handSim()` for origins.
+- Online stick input was camera-relative and each side's camera differs → fighters drifted. Fixed: both sides
+  convert to the canonical frame (`toCanonical`) and set `match.camBasis = CANON`.
+- Intro lines were picked with `Math.random` → different voice clips per side. Fixed: picked with an Rng seeded from the match seed.
+- Old Lockstep handlers stayed subscribed after a rematch → double inputs. `NetLink.on` returns an unsubscribe; `Lockstep.dispose()`.
+- The public brokers (broker.emqx.io, broker.hivemq.com, test.mosquitto.org) and crustrush.metered.live are blocked
+  (403) from the cloud sandbox → test with `?net=local` (BroadcastChannel between tabs of one browser).
+- Two swiftshader tabs in the sandbox can show multi-second RTT → heartbeat dropped the link. Timeout is 20 s;
+  tests pass `?nettimeout=120000`.
+- Under heavy sandbox load the page can take ~2 min to finish "LOADING FIGHTERS…"; `checks.cjs` waits up to 240 s for boot.
+- Another agent rewrote the shared vite config file mid-test → use your own config/port per agent.
+
 **Process**
 - Background agents editing files while tests run make Vite hot-reload the page mid-test → failures that say
   "Execution context was destroyed" / "T is not defined" are not real; re-run when files are quiet, or test in
@@ -201,3 +220,41 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - Tune `CLIP_IMPACT` timings by eye for a few Motifect clips.
 - Overpass triangle count roughly doubled with the MegaKit; watch low-end phones.
 - iPhone Safari doesn't allow fullscreen/orientation lock; the rotate prompt covers it.
+
+## 7. Online play (architecture, protocol, rules)
+
+**Transport (`net.ts`).** No server of our own. Each room has two MQTT inbox topics on three public brokers
+(`breakline/v1/r/<CODE>/h` for the host, `/g` for the guest); every message is published to all brokers and
+de-duplicated by id. Over that relay the peers exchange SDP/ICE and open WebRTC data channels (`c` reliable,
+`f` unordered no-retransmit), using Google/Cloudflare STUN plus Metered TURN (`TURN_URL`, Crust Rush's app).
+If WebRTC fails the game keeps playing over the relay (slower). `NetLink`: `hello`→`welcome` (a third peer gets
+`full`), `hb`/`hbr` heartbeat every 1 s (RTT for the ping display), link lost after 20 s, `bye` on leave.
+
+**Lobby (`OnlineSession`).** Host picks P1 and the arena/lives, guest picks P2. Messages: `pick` {pick, locked},
+`cfg` {arena, lives}, `start` {seed, p1, p2, arena, lives, delay} (host, once both locked), `ready` (intro done or
+skipped), `rematch`. The fight starts only when both are `ready`: `match.restart(seed)` + `setLives`, then Lockstep.
+
+**Netcode (`Lockstep`).** Deterministic input lockstep at 60 Hz. Input per tick = `[mx*100, my*100, buttons]`
+(quantised the same on both sides, in the canonical stick frame). Local input is scheduled `delay` ticks ahead
+(`delayFor(rtt)` = 2–6); every packet carries the last 30 unacked inputs (redundancy, so loss costs nothing).
+A tick is simulated only when both inputs are known; otherwise the game stalls ("waiting…" after 0.5 s) —
+it never guesses, so it can't desync from missing input. The host sends a checksum (`ck`) every 60 ticks; on a
+mismatch the guest asks (`rs`), the host sends a snapshot (`sn`), the guest applies it and re-simulates from its
+input history (240 ticks).
+
+**Determinism rules (breaking these desyncs online play):**
+- Never call `Math.random()` in gameplay code (fighter, match, ai, arena props, anything that changes sim state).
+  Use `srand()` from `rng.ts`. Visual-only randomness (fx, vfx, audio, camera shake) stays on `Math.random`.
+- Gameplay positions must not come from animated bones: use `fighter.handSim()`, not `hand()`, for spawns.
+- The sim must not depend on frame rate or render state; it advances only via `simTick` at fixed 60 Hz.
+- The intro is cosmetic; anything it does must not change sim state. Only `restart(seed)` starts the fight.
+- New sim state that matters must be covered by `checksum()` and survive `snapshot()` (reflection over fighter
+  fields; props only if counts match; walls via damage).
+- `tests/checks.cjs` "Determinism" runs 5 arenas × 1200 CPU-vs-CPU ticks twice with different animation cadence
+  and compares checksums — run it after any gameplay change.
+
+**Testing online locally.** `?net=local` swaps MQTT/WebRTC for a BroadcastChannel (two tabs of the same browser),
+`?rtc` re-enables WebRTC on top of it, `?nettimeout=ms` changes the drop timeout, `?room=CODE` auto-joins.
+Two-page Playwright script used: scratchpad `online_e2e.cjs` (host + join, lock picks, fight, compare checksums,
+guest leaves → host sees "Opponent left.").
+

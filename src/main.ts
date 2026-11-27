@@ -1,3 +1,5 @@
+import { Online } from './online';
+import { CANON, toCanonical, MatchCfg } from './netplay';
 import { FightIntro } from './intro';
 import { updatePadCursor, hidePadCursor } from './padcursor';
 import { VFX } from './vfx';
@@ -274,7 +276,7 @@ function goLandscape() {
 }
 
 // ============================================================ app state
-type Mode = 'cpu' | 'versus';
+type Mode = 'cpu' | 'versus' | 'online';
 interface Setup { mode: Mode; p1: string; p2: string; diff: Difficulty; p1Human: boolean; arena: LayoutId; lives: number }
 const setup: Setup = { mode: 'cpu', p1: 'tether', p2: 'basalt', diff: 'normal', p1Human: true, arena: 'rooftop', lives: 1 };
 try { const l = Number(localStorage.getItem('bl.lives')); if ([1, 2, 3, 5].includes(l)) setup.lives = l; } catch { /* storage optional */ }
@@ -282,7 +284,7 @@ let match: Match | null = null;
 let cpus: (CPU | null)[] = [null, null];
 const trackers = [new EdgeTracker(), new EdgeTracker()];
 let paused = false;
-type Screen = 'start' | 'title' | 'mode' | 'select' | 'result' | 'pause' | 'moves' | 'padsetup' | 'none';
+type Screen = 'start' | 'title' | 'mode' | 'select' | 'result' | 'pause' | 'moves' | 'padsetup' | 'online' | 'none';
 let screen: Screen = 'title' as Screen;
 /** Test/automation override: when set, replaces a player's raw input each tick. */
 const forced: (RawState | null)[] = [null, null];
@@ -290,7 +292,7 @@ let simSpeed = 1;
 let manualStep = false;
 
 function bindings(): DeviceBinding[] {
-  if (setup.mode === 'cpu') return [{ keyboard: [0, 1], gamepad: 0, touch: true }, { keyboard: [], gamepad: null, touch: false }];
+  if (setup.mode === 'cpu' || setup.mode === 'online') return [{ keyboard: [0, 1], gamepad: 0, touch: true }, { keyboard: [], gamepad: null, touch: false }];
   return [{ keyboard: [0], gamepad: 0, touch: true }, { keyboard: [1], gamepad: 1, touch: false }];
 }
 
@@ -300,7 +302,7 @@ let introsOn = true, voicesOn = true;
 try { introsOn = localStorage.getItem('bl.intros') !== '0'; voicesOn = localStorage.getItem('bl.voices') !== '0'; } catch { /* storage optional */ }
 const introEl = document.getElementById('intro')!;
 function endIntro() { if (intro) { intro.finish(); intro = null; } }
-function startMatch(withIntro = true) {
+function startMatch(withIntro = true, seed?: number) {
   endIntro();
   if (match) match.dispose();
   const d: [CharacterDef, CharacterDef] = [charById(setup.p1), charById(setup.p2)];
@@ -308,10 +310,11 @@ function startMatch(withIntro = true) {
   applyPalette(setup.arena);
   vcam.zLimit = setup.arena === 'overpass' ? 5.8 : Infinity;
   match = new Match(scene, arena, fx, vcam, d);
+  if (seed !== undefined) match.restart(seed);
   match.setLives(setup.lives);
   cpus = [null, setup.mode === 'cpu' ? new CPU(match.fighters[1], match, setup.diff) : null];
   trackers.forEach((t) => t.reset());
-  hud.setNames(match, setup.mode === 'cpu' ? ['YOU', `CPU · ${setup.diff}`] : ['PAD 1 / WASD', 'PAD 2 / ARROWS']);
+  hud.setNames(match, setup.mode === 'cpu' ? ['YOU', `CPU · ${setup.diff}`] : setup.mode === 'online' ? (online.side === 0 ? ['YOU', 'ONLINE'] : ['ONLINE', 'YOU']) : ['PAD 1 / WASD', 'PAD 2 / ARROWS']);
   hud.show(true);
   keysHint.innerHTML = 'Move <b>WASD</b> · Attack <b>J</b> · Jump <b>K</b> · Grab <b>L</b> · Guard <b>I</b> · Mobility <b>U</b> · Power <b>O</b> · Pause <b>Esc</b>' + (setup.mode === 'versus' ? '<br>P2: Arrows · Attack <b>.</b> · Jump <b>/</b> · Grab <b>,</b> · Guard <b>;</b> · Mobility <b>R-Shift</b> · Power <b>Enter</b> (or numpad 1 2 3 5 4 6)' : '');
   if (connectedPads().length) noteInput('pad');
@@ -321,6 +324,101 @@ function startMatch(withIntro = true) {
   startMusic('fight', setup.arena);
   setIntensity(0);
   if (introsOn && withIntro) intro = new FightIntro(match, vcam, introEl, voicesOn);
+}
+
+// ------------------------------------------------------------ online play (see online.ts / netplay.ts / net.ts)
+const online = new Online({
+  show: (s) => showScreen(s as Screen),
+  rerender: () => { if (screen === 'select' || screen === 'online' || screen === 'result') rerender(); },
+  toast: (m) => toast(m),
+  startMatch: (cfg: MatchCfg) => {
+    setup.mode = 'online'; setup.p1 = cfg.p1; setup.p2 = cfg.p2; setup.arena = cfg.arena as LayoutId; setup.lives = cfg.lives;
+    goLandscape();
+    startMatch(true, cfg.seed);
+    if (!intro) online.introDone();
+  },
+  match: () => match,
+  simulate: (pair) => { forced[0] = pair[0]; forced[1] = pair[1]; simTick(); forced[0] = forced[1] = null; },
+  sample: () => {
+    if (!match || (screen !== 'none' && screen !== 'pause')) return emptyRaw();
+    if (screen === 'pause') return emptyRaw();
+    const raw = readDevices(bindings()[0]);
+    return toCanonical(raw, vcam.fwd, vcam.right);
+  },
+  onFight: () => { trackers.forEach((t) => t.reset()); paused = false; if (screen !== 'none' && screen !== 'pause') showScreen('none'); },
+  leave: () => { endIntro(); if (match) { match.dispose(); match = null; } hud.show(false); touchRoot.classList.add('off'); paused = false; setup.mode = 'cpu'; startMusic('menu'); },
+});
+/** A ?room=CODE link joins that room after Press Start. */
+let pendingRoom = '';
+try { pendingRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase(); } catch { /* */ }
+function syncOnlineSelect() {
+  const s = online.session;
+  if (!s) return;
+  setup.mode = 'online';
+  const mine = s.me, theirs = s.them;
+  if (online.side === 0) { setup.p1 = mine.pick; setup.p2 = theirs.pick; } else { setup.p1 = theirs.pick; setup.p2 = mine.pick; }
+  locked[online.side] = mine.locked; locked[1 - online.side] = theirs.locked;
+  selectSide = online.side;
+  setup.arena = s.arena as LayoutId; setup.lives = s.lives;
+}
+/** Online versions of select-screen actions. Returns true when handled. */
+function onlineAct(a: string, arg?: string): boolean {
+  const s = online.session;
+  if (!online.active) return false;
+  switch (a) {
+    case 'pick': if (!s) return true; if (s.me.locked) { s.setPick(arg!, false); return true; } s.setPick(arg!, s.me.pick === arg); return true;
+    case 'confirm': if (s) s.setPick(s.me.pick, true); return true;
+    case 'side': return true;
+    case 'fight': return true;
+    case 'arenaStep': if (s && online.isHost) { const i = LAYOUTS.findIndex((l) => l.id === s.arena); const n = LAYOUTS[(i + Number(arg) + LAYOUTS.length) % LAYOUTS.length]; s.setCfg(n.id, s.lives); } return true;
+    case 'lives': if (s && online.isHost) s.setCfg(s.arena, Number(arg)); return true;
+    case 'rematch': online.rematch(); rerender(); return true;
+    case 'swap': return true;
+    case 'select': return true;
+    case 'title': case 'online-leave': online.close(); online.error = ''; act('title-raw'); return true;
+    case 'resume': paused = false; showScreen('none'); return true;
+  }
+  return false;
+}
+function renderOnline() {
+  const err = online.error ? `<p class="net-err">${online.error}</p>` : '';
+  if (!online.active) return `
+    <div class="screen online-screen">
+      <div class="topbar"><button class="pill" data-nav data-act="title">← Back</button><h2>Play online</h2><span></span></div>
+      <div class="net-body">
+        ${err}
+        <div class="net-cards">
+          <div class="net-card"><h3>Host a match</h3><p>Get a room code and send it (or the link) to a friend.</p><button class="btn2 primary" data-nav data-act="online-host">Host</button></div>
+          <div class="net-card"><h3>Join a match</h3><p>Enter the code your friend gave you.</p>
+            <input id="roomCode" class="net-code-in" maxlength="6" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false">
+            <button class="btn2 primary" data-nav data-act="online-join">Join</button></div>
+        </div>
+        <p class="note">1v1 over the internet. Players connect directly when possible and through a relay otherwise; no account needed.</p>
+      </div>
+    </div>`;
+  const host = online.isHost;
+  return `
+    <div class="screen online-screen">
+      <div class="topbar"><button class="pill" data-nav data-act="online-leave">← Leave</button><h2>${host ? 'Hosting' : 'Joining'}</h2><span></span></div>
+      <div class="net-body">
+        ${err}
+        <p class="note">Room code</p>
+        <div class="net-code">${online.code}</div>
+        ${host ? `<p class="note">Send this code to a friend, or share the link:</p><div class="net-link"><input readonly value="${online.shareUrl}"><button class="pill" data-nav data-act="online-copy">Copy link</button></div>` : ''}
+        <p class="net-status"><span class="dot ${online.connected ? 'ok' : ''}"></span>${online.connected ? 'Connected!' : host ? 'Waiting for your opponent to join…' : 'Connecting to the room…'}</p>
+      </div>
+    </div>`;
+}
+const netStat = document.createElement('div');
+netStat.id = 'netstat';
+document.body.appendChild(netStat);
+function updateNetStat() {
+  const show = online.active && !!match && (screen === 'none' || screen === 'pause');
+  netStat.style.display = show ? '' : 'none';
+  if (!show) return;
+  const p = online.ping;
+  netStat.className = p < 90 ? 'good' : p < 180 ? 'ok' : 'bad';
+  netStat.innerHTML = `<i></i>${p ? p + ' ms' : '…'} · ${online.direct ? 'direct' : 'relay'}${online.waiting ? ' · <b>waiting for opponent…</b>' : online.phase === 'intro' ? ' · <b>getting ready…</b>' : ''}`;
 }
 
 function rematch(swap = false) {
@@ -469,6 +567,7 @@ function renderTitle() {
         <div class="big-btns">
           <button class="bigbtn primary" data-nav data-act="mode" data-arg="cpu"><span class="ico">▶</span><span><b>Fight the CPU</b><small>Single player</small></span></button>
           <button class="bigbtn" data-nav data-act="mode" data-arg="versus"><span class="ico">⚔</span><span><b>2 Players</b><small>Same screen · two pads, or pad + keyboard</small></span></button>
+          <button class="bigbtn" data-nav data-act="online"><span class="ico">🌐</span><span><b>Play online</b><small>1v1 with a friend · room code</small></span></button>
           <button class="bigbtn" data-nav data-act="moves"><span class="ico">?</span><span><b>How to play</b><small>Controls, combat basics and move lists</small></span></button>
         </div>
         <div class="foot">
@@ -486,7 +585,7 @@ function renderTitle() {
 function selHalf(side: 0 | 1) {
   const id = side === 0 ? setup.p1 : setup.p2;
   const def = charById(id);
-  const who = side === 0 ? 'PLAYER 1' : setup.mode === 'cpu' ? 'CPU' : 'PLAYER 2';
+  const who = setup.mode === 'online' ? (side === online.side ? 'YOU' : 'OPPONENT') : side === 0 ? 'PLAYER 1' : setup.mode === 'cpu' ? 'CPU' : 'PLAYER 2';
   const active = selectSide === side && !(locked[0] && locked[1]);
   const art = comicOf(def);
   return `
@@ -504,8 +603,10 @@ function selHalf(side: 0 | 1) {
     </div>`;
 }
 function renderSelect() {
-  const who = selectSide === 0 ? 'Player 1' : setup.mode === 'cpu' ? 'the CPU' : 'Player 2';
+  const who = setup.mode === 'online' ? 'you' : selectSide === 0 ? 'Player 1' : setup.mode === 'cpu' ? 'the CPU' : 'Player 2';
   const cur = LAYOUTS.find((l) => l.id === setup.arena)!;
+  const net = online.active;
+  const netNote = net ? `<div class="net-sel"><span class="dot ok"></span>Online · room ${online.code} · ${online.ping || '…'} ms${online.isHost ? ' · you pick the arena and lives' : ' · the host picks the arena and lives'}${locked[online.side] && !locked[1 - online.side] ? ' · waiting for your opponent to lock in…' : ''}</div>` : '';
   return `
     <div class="screen select-screen">
       <div class="sel-top">
@@ -513,6 +614,7 @@ function renderSelect() {
         <h2 class="sel-h">${locked[0] && locked[1] ? 'Ready to fight' : `Choose a fighter <small>for ${who}</small>`}</h2>
         ${prompts([['confirm', locked[0] && locked[1] ? 'Fight' : 'Preview · again to lock in'], ['back', 'Back']])}
       </div>
+      ${netNote}
       <div class="vs">${selHalf(0)}${selHalf(1)}<svg class="seam" viewBox="0 0 100 100" preserveAspectRatio="none">${['glow', 'edge', 'core'].map((k) => `<line class="${k} ls" x1="54" y1="0" x2="46" y2="100"/><line class="${k} pt" x1="0" y1="54" x2="100" y2="46"/>`).join('')}</svg><div class="vsmark">VS</div></div>
       <div class="strip">
         ${ROSTER.map((c) => {
@@ -528,9 +630,9 @@ function renderSelect() {
         <div class="opt"><span class="opt-label">Arena</span><div class="seg arena-pick"><button class="segbtn arr" data-nav data-act="arenaStep" data-arg="-1" aria-label="Previous arena">◀</button><button class="segbtn on arena-cur" data-nav data-act="arenaStep" data-arg="1" title="${cur.blurb}"><span class="arena-sw ${setup.arena}"></span><span class="lfull">${cur.name}</span><span class="lshort">${cur.short}</span><small class="anum">${LAYOUTS.findIndex((l) => l.id === setup.arena) + 1}/${LAYOUTS.length}</small></button><button class="segbtn arr" data-nav data-act="arenaStep" data-arg="1" aria-label="Next arena">▶</button></div></div>
         <div class="opt"><span class="opt-label">Lives</span><div class="seg">${[1, 2, 3, 5].map((n) => `<button class="segbtn ${setup.lives === n ? 'on' : ''}" data-nav data-act="lives" data-arg="${n}">${n} ♥</button>`).join('')}</div></div>
         ${setup.mode === 'cpu' ? `<div class="opt"><span class="opt-label">CPU level</span><div class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="segbtn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div></div>` : ''}
-        ${locked[0] && locked[1]
+        ${net && locked[0] && locked[1] ? '<button class="fight" disabled>Starting…</button>' : locked[0] && locked[1]
           ? '<button class="fight" data-nav data-act="fight">FIGHT ▶</button>'
-          : `<button class="fight confirm" data-nav data-act="confirm">✓ Lock in<span class="cname"> ${charById(selectSide === 0 ? setup.p1 : setup.p2).name}</span></button>`}
+          : `<button class="fight confirm" data-nav data-act="confirm">${net && locked[online.side] ? 'Waiting…' : `✓ Lock in<span class="cname"> ${charById(selectSide === 0 ? setup.p1 : setup.p2).name}</span>`}</button>`}
       </div>
     </div>`;
 }
@@ -539,7 +641,7 @@ function renderResult() {
   const e = match.ended;
   const how = e.how === 'ko' ? 'K.O.' : e.how === 'ringout' ? 'Ring out' : 'Finisher';
   const wIdx = e.winner.idx;
-  const label = setup.mode === 'cpu' ? (wIdx === 0 ? 'You win!' : 'CPU wins') : `Player ${wIdx + 1} wins!`;
+  const label = setup.mode === 'cpu' ? (wIdx === 0 ? 'You win!' : 'CPU wins') : setup.mode === 'online' ? (wIdx === online.side ? 'You win!' : 'You lose') : `Player ${wIdx + 1} wins!`;
   const stat = (f: typeof e.winner) => `
     <div class="rstat" style="--c:${f.def.color}">${faceOf(f.def) ? `<img class="mini" src="${faceOf(f.def)}" alt="">` : por(f.def, 'mini')}<div><b>${f.def.name}</b>
       <span>${f.stats.hits} hits · ${f.stats.throws} throws · ${f.stats.catches} catches · ${f.stats.recoveries} recoveries</span></div></div>`;
@@ -551,11 +653,13 @@ function renderResult() {
         <h1 class="result-big">${label}</h1>
         <p class="sub">${e.winner.def.name} takes the bout.</p>
         <div class="rstats">${stat(match.fighters[0])}${stat(match.fighters[1])}</div>
-        <div class="row-btns">
+        <div class="row-btns">${online.active ? `
+          <button class="btn2 primary" data-nav data-act="rematch">${online.session?.rematchMine ? 'Waiting for opponent…' : online.session?.rematchTheirs ? '↻ Rematch (opponent is ready)' : '↻ Rematch'}</button>
+          <button class="btn2" data-nav data-act="title">Leave</button>` : `
           <button class="btn2 primary" data-nav data-act="rematch">↻ Rematch</button>
           <button class="btn2" data-nav data-act="swap">⇄ Swap sides</button>
           <button class="btn2" data-nav data-act="select">Change fighters</button>
-          <button class="btn2" data-nav data-act="title">Main menu</button>
+          <button class="btn2" data-nav data-act="title">Main menu</button>`}
         </div>
       </div>
     </div>`;
@@ -564,17 +668,18 @@ function renderResult() {
 function render(s: Screen): string {
   if (s === 'start') return renderStart();
   if (s === 'title') return renderTitle();
-  if (s === 'select') return renderSelect();
+  if (s === 'online') return renderOnline();
+  if (s === 'select') { if (online.active) syncOnlineSelect(); return renderSelect(); }
   if (s === 'result') return renderResult();
   if (s === 'pause') return `
     <div class="screen pause-screen">
       <div class="card">
         <h2 class="paused-h">Paused</h2>
         <button class="btn2 primary wide" data-nav data-act="resume">▶ Resume</button>
-        <button class="btn2 wide" data-nav data-act="rematch">↻ Restart bout</button>
+        ${online.active ? '<p class="note">Online: the match keeps running while this menu is open.</p>' : '<button class="btn2 wide" data-nav data-act="rematch">↻ Restart bout</button>'}
         <button class="btn2 wide" data-nav data-act="moves">? How to play</button>
         <button class="btn2 wide" data-nav data-act="mute">${muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
-        <button class="btn2 wide" data-nav data-act="title">Quit to menu</button>
+        <button class="btn2 wide" data-nav data-act="title">${online.active ? 'Leave match' : 'Quit to menu'}</button>
       </div>
     </div>`;
   if (s === 'padsetup') {
@@ -650,8 +755,15 @@ function rerender(keepFocus = true) {
 }
 function act(a: string, arg?: string) {
   if (a === 'back' || a === 'title') sfx.back(); else if (a === 'confirm' || a === 'fight') sfx.lockIn(); else sfx.select();
+  if (onlineAct(a, arg)) return;
   switch (a) {
     case 'start': startPressed(); break;
+    case 'online': online.error = ''; showScreen('online'); break;
+    case 'online-host': online.host(); break;
+    case 'online-join': { const el = document.getElementById('roomCode') as HTMLInputElement | null; online.join(el?.value ?? ''); break; }
+    case 'online-copy': try { void navigator.clipboard.writeText(online.shareUrl); toast('Link copied'); } catch { toast(online.shareUrl); } break;
+    case 'online-leave': break;
+    case 'title-raw': act('title'); break;
     case 'mode': setup.mode = arg as Mode; selectSide = 0; locked[0] = locked[1] = false; showScreen('select'); break;
     case 'side': selectSide = Number(arg) as 0 | 1; locked[selectSide] = false; rerender(); break;
     case 'pick': {
@@ -760,6 +872,7 @@ function startPressed() {
   startMusic('menu');
   sfx.lockIn?.();
   showScreen('title');
+  if (pendingRoom) { const r = pendingRoom; pendingRoom = ''; online.join(r); }
 }
 let startPadPrev = true; // ignore a button already held when the screen appears
 function pollStartPads() {
@@ -844,8 +957,9 @@ function simTick() {
     if (trackers[i].frame.pause && !cpus[i] && !match.ended) { paused = true; showScreen('pause'); return; }
   }
   endInputRead();
-  match.camBasis.fwd = vcam.fwd;
-  match.camBasis.right = vcam.right;
+  // Online the stick arrives already in a fixed world frame (identical on both machines).
+  match.camBasis.fwd = setup.mode === 'online' ? CANON.fwd : vcam.fwd;
+  match.camBasis.right = setup.mode === 'online' ? CANON.right : vcam.right;
   match.update(DT);
   fx.update(DT);
   // Music intensity follows the fight: Rage, Danger and low health raise the extra layer.
@@ -889,11 +1003,16 @@ function frame(now: number) {
 
   if (screen !== 'none') menuInput(rawDt * 1000);
   else hidePadCursor();
-  if (intro && match && !paused && screen === 'none' && !intro.update(rawDt)) intro = null;
+  if (intro && match && !paused && screen === 'none' && !intro.update(rawDt)) { intro = null; if (online.active) online.introDone(); }
+  if (online.active && intro === null && online.phase === 'intro') online.introDone();
   (window as any).__introT = intro ? intro.t : 99;
   // "FIGHT!" stinger the moment the banner appears (READY → FIGHT at introT 45; works for new rounds too).
   if (match) { if (match.introT === 45 && lastIntroT !== 45) sfx.fightStart?.(); lastIntroT = match.introT; }
-  if (match && !paused && screen === 'none' && !manualStep) {
+  if (online.active) {
+    // Online: the lockstep decides when ticks run (both players' inputs known); menus never pause the simulation.
+    if (fx.hitstop > 0) fx.hitstop = Math.max(0, fx.hitstop - rawDt);
+    online.pump(rawDt * 1000);
+  } else if (match && !paused && screen === 'none' && !manualStep) {
     if (fx.hitstop > 0) fx.hitstop -= rawDt; // brief impact emphasis: sim holds, rendering continues
     else {
       acc += rawDt * simSpeed;
@@ -910,6 +1029,7 @@ function frame(now: number) {
   }
 
   updateControlOverlay();
+  updateNetStat();
   if (match) {
     for (const f of match.fighters) f.animate(rawDt, time);
     vcam.update(match.fighters, rawDt, fx.shake);
@@ -979,6 +1099,7 @@ const hooks = {
   fx,
   TUNING,
   forced,
+  online,
   cpus: () => cpus,
   start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal', arenaId: LayoutId = 'rooftop') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; setup.arena = arenaId; startMatch(false); },
   setLives(n: number) { setup.lives = n; },

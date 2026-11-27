@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { srand } from './rng';
 import { RawState, emptyRaw, ActionName } from './input';
 import type { Fighter } from './fighter';
 import type { Match } from './match';
@@ -55,7 +56,7 @@ export class CPU {
 
     if (this.tick >= this.nextThink || !this.plan || this.tick > this.plan.until) {
       this.think();
-      this.nextThink = this.tick + this.p.react + Math.floor(Math.random() * this.p.react * 0.6);
+      this.nextThink = this.tick + this.p.react + Math.floor(srand() * this.p.react * 0.6);
     }
     const plan = this.plan;
     // Unstick: if we're steering but not getting anywhere (an object in the way), detour sideways.
@@ -66,7 +67,7 @@ export class CPU {
       this.lastPos.copy(f.pos);
       if (this.stuckTicks >= 30) {
         const to = f.opp.pos.clone().sub(f.pos).setY(0).normalize();
-        this.detourDir.set(to.z, 0, -to.x).multiplyScalar(Math.random() < 0.5 ? 1 : -1).addScaledVector(to, 0.3).normalize();
+        this.detourDir.set(to.z, 0, -to.x).multiplyScalar(srand() < 0.5 ? 1 : -1).addScaledVector(to, 0.3).normalize();
         this.detourUntil = this.tick + 40;
         this.stuckTicks = 0;
       }
@@ -121,7 +122,7 @@ export class CPU {
     if (f.state === 'launched' && f.t > 8 && f.hasEnergy(TUNING.recoveryCost)) {
       const future = f.pos.clone().addScaledVector(f.vel, 0.5);
       const offRoof = !this.match.arena.inside(future.x, future.z) || !this.match.arena.inside(f.pos.x, f.pos.z);
-      if (offRoof && Math.random() < 1 - this.p.err) {
+      if (offRoof && srand() < 1 - this.p.err) {
         out.down.mobility = true;
         out.down.power = true;
         if (this.lastPress.has('mobility') && this.lastPress.has('power')) { out.down.mobility = false; }
@@ -135,14 +136,14 @@ export class CPU {
       this.stick(out, new THREE.Vector3(-f.pos.x, 0, -f.pos.z));
       return true;
     }
-    if (f.state === 'down' && f.t > 15 && Math.random() < 0.1) { out.down.jump = true; return true; }
+    if (f.state === 'down' && f.t > 15 && srand() < 0.1) { out.down.jump = true; return true; }
     // Incoming thrown prop: catch if able (hard AIs time it), otherwise guard.
     for (const pr of this.match.arena.props) {
       if (pr.state !== 'thrown' || pr.thrower === f) continue;
       const d = pr.pos.distanceTo(f.pos);
       const closing = pr.vel.dot(f.pos.clone().sub(pr.pos)) > 0;
       if (closing && d < 5.5 && d > 1.5 && (f.state === 'ground' || f.state === 'guard')) {
-        if (Math.random() < this.p.guard * 0.15) {
+        if (srand() < this.p.guard * 0.15) {
           f.yaw = Math.atan2(pr.pos.x - f.pos.x, pr.pos.z - f.pos.z);
           out.down.guard = !this.lastPress.has('guard') || f.state === 'guard';
           if (f.def.lift < pr.cls && f.hasEnergy(10) && this.diff !== 'easy') out.down.power = true;
@@ -153,9 +154,9 @@ export class CPU {
     }
     // Incoming melee: guard or evade.
     if (o.state === 'attack' && o.move && o.t < o.move.startup && o.pos.distanceTo(f.pos) < 3.2 && (f.state === 'ground' || f.state === 'guard')) {
-      if (f.state === 'guard' || Math.random() < this.p.guard * 0.25) {
+      if (f.state === 'guard' || srand() < this.p.guard * 0.25) {
         out.down.guard = true;
-        if (f.state === 'guard' && Math.random() < 0.3 * this.p.guard) {
+        if (f.state === 'guard' && srand() < 0.3 * this.p.guard) {
           const side = new THREE.Vector3(o.pos.z - f.pos.z, 0, -(o.pos.x - f.pos.x)).normalize();
           this.stick(out, side);
         }
@@ -163,13 +164,13 @@ export class CPU {
         return true;
       }
     }
-    if (f.state === 'evade' && o.alive && o.pos.distanceTo(f.pos) < 3 && Math.random() < this.p.guard * 0.3) { out.down.attack = !this.lastPress.has('attack'); this.lastPress = new Set(out.down.attack ? ['attack'] : []); return true; }
+    if (f.state === 'evade' && o.alive && o.pos.distanceTo(f.pos) < 3 && srand() < this.p.guard * 0.3) { out.down.attack = !this.lastPress.has('attack'); this.lastPress = new Set(out.down.attack ? ['attack'] : []); return true; }
     if (f.state === 'grabbing') {
       // Throw toward the nearest open edge if any, else away from center.
       const edge = this.match.arena.openEdgeNear(f.pos, 10);
       const dir = edge ? edge.center.clone().sub(f.pos) : f.pos.clone().setY(0).lengthSq() > 4 ? f.pos.clone().setY(0) : f.forward;
       this.stick(out, dir);
-      if (f.pummels < 2 && f.t > 7 && Math.random() < 0.5) out.down.attack = !this.lastPress.has('attack');
+      if (f.pummels < 2 && f.t > 7 && srand() < 0.5) out.down.attack = !this.lastPress.has('attack');
       else if (f.t > 14 && f.pummels >= 2) out.down.grab = !this.lastPress.has('grab');
       else if (f.t > 30) out.down.grab = !this.lastPress.has('grab');
       this.lastPress = new Set((['grab', 'attack'] as ActionName[]).filter((k) => out.down[k]));
@@ -188,7 +189,7 @@ export class CPU {
     const dist = Math.hypot(toO.x, toO.z);
     const dy = o.pos.y - f.pos.y;
     const p = this.p;
-    const rnd = Math.random();
+    const rnd = srand();
     const toward = () => o.pos.clone().sub(f.pos);
     if (!f.alive || !o.alive) { this.plan = null; return; }
     if (f.state === 'guard' && !(o.state === 'attack')) { this.set('drop-guard', 5, {}); return; }
