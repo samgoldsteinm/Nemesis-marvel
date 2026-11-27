@@ -1060,7 +1060,9 @@ export class Arena {
 
   /** Highest supporting surface under (x,z) not more than `step` above y. */
   groundAt(x: number, z: number, y: number, step = 0.35): number {
-    let g = this.inside(x, z) ? 0 : -Infinity;
+    // The deck (y = 0) only supports things at or above it, like every other surface: a body that has already
+    // dropped below the deck edge must keep falling, never be snapped back up when it drifts over the footprint.
+    let g = this.inside(x, z) && y + step >= 0 ? 0 : -Infinity;
     for (const s of this.solids()) {
       if (s.kind === 'mast') continue;
       if (x >= s.min.x && x <= s.max.x && z >= s.min.z && z <= s.max.z && s.max.y <= y + step && s.max.y > g) g = s.max.y;

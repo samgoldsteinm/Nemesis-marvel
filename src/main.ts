@@ -571,10 +571,10 @@ function renderTitle() {
           <button class="bigbtn" data-nav data-act="moves"><span class="ico">?</span><span><b>How to play</b><small>Controls, combat basics and move lists</small></span></button>
         </div>
         <div class="foot">
-          <button class="pill" data-nav data-act="mute">${muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
-          <button class="pill" data-nav data-act="intros">${introsOn ? '🎬 Intros on' : '🎬 Intros off'}</button>
-          <button class="pill" data-nav data-act="voices">${voicesOn ? '🗣 Voices on' : '🗣 Voices off'}</button>
-          <button class="pill" data-nav data-act="layoutcycle">🎮 ${padLayout === 'xbox' ? 'Xbox buttons' : 'GameCube buttons'}</button>
+          <button class="pill" data-nav data-act="mute"><i class="pi">${muted ? '🔇' : '🔊'}</i> Sound ${muted ? 'off' : 'on'}</button>
+          <button class="pill" data-nav data-act="intros"><i class="pi">🎬</i> Intros ${introsOn ? 'on' : 'off'}</button>
+          <button class="pill" data-nav data-act="voices"><i class="pi">🗣</i> Voices ${voicesOn ? 'on' : 'off'}</button>
+          <button class="pill" data-nav data-act="layoutcycle"><i class="pi">🎮</i> ${padLayout === 'xbox' ? 'Xbox' : 'GameCube'}<span class="pl-long"> buttons</span></button>
           <span class="pill static">${connectedPads().length ? connectedPads().length + ' controller' + (connectedPads().length > 1 ? 's' : '') + ' connected' : 'Keyboard: WASD + J K L I U O'}</span>
         </div>
       </div>
@@ -678,7 +678,7 @@ function render(s: Screen): string {
         <button class="btn2 primary wide" data-nav data-act="resume">▶ Resume</button>
         ${online.active ? '<p class="note">Online: the match keeps running while this menu is open.</p>' : '<button class="btn2 wide" data-nav data-act="rematch">↻ Restart bout</button>'}
         <button class="btn2 wide" data-nav data-act="moves">? How to play</button>
-        <button class="btn2 wide" data-nav data-act="mute">${muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
+        <button class="btn2 wide" data-nav data-act="mute"><i class="pi">${muted ? '🔇' : '🔊'}</i> Sound ${muted ? 'off' : 'on'}</button>
         <button class="btn2 wide" data-nav data-act="title">${online.active ? 'Leave match' : 'Quit to menu'}</button>
       </div>
     </div>`;

@@ -364,6 +364,13 @@
     .title-screen .foot { gap: 6px; } .title-screen .pill { padding: 5px 9px; font-size: 11px; }
     .title-screen .pill.static { display: none; }
     .title-screen > .prompts { display: none; }
+    /* Short landscape phones: tighter menu so the settings row stays on screen; scroll as a last resort. */
+    .title-menu { overflow-y: auto; scrollbar-width: none; justify-content: flex-start; padding-top: 6px; }
+    .title-menu::-webkit-scrollbar { display: none; }
+    .title-menu .chrome { font-size: min(44px, 11vh); line-height: 1; margin-bottom: 2px; }
+    .title-screen .foot { flex-wrap: nowrap; gap: 5px; } .title-screen .pill { padding: 5px 7px; font-size: 10.5px; white-space: nowrap; } .title-screen .pill .pi { font-style: normal; }
+    .pl-long { display: none; }
+    .big-btns { gap: 6px; } .bigbtn { padding: 6px 10px; } .bigbtn b { font-size: 14px; } .bigbtn .ico { width: 26px; height: 26px; }
     .select-screen { gap: 5px; padding: 4px 2px; height: 100%; }
     .sel-top { gap: 8px; } .sel-h { font-size: 20px; } .sel-h small { display: none; } .btn-back { padding: 4px 10px; font-size: 12px; }
     .prompts { font-size: 11px; gap: 8px; } .pk { min-width: 18px; height: 18px; font-size: 10px; }
@@ -628,6 +635,7 @@
     #toast { bottom: 24px; }
   }
   .lshort { display: none; }
+  @media (max-width: 720px) and (orientation: landscape) { .title-screen .pill .pi { display: none; } }
   @media (max-width: 1100px) { .fight.confirm .cname { display: none; } }
   @media (orientation: landscape) and (max-width: 720px) { .arena-pick .arena-cur { min-width: 74px; } .arena-pick .anum { display: none; } .lfull { display: none; } .lshort { display: inline; } .fight.confirm .cname { display: none; } .options .segbtn { padding: 6px 5px; } }
   @media (orientation: landscape) and (max-height: 420px) { #touch .tbtns { --tscale: 0.7; } }

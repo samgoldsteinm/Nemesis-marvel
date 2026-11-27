@@ -112,6 +112,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-27 | Menu redesign: red accent (`--hot` #ff3b4e / `--hot2` #b8142c) replaces orange; Anton + Oswald fonts (OFL, `public/fonts`); Press Start screen (chrome logo, smoky teal band, duotone fighter profile, blinking prompt); title with comic-toned hero art; fighter select = two diagonal-split panels (P1 blue, P2 red, skyline + halftone backdrops, posterised poses) + duotone face roster strip + device-aware button prompts; restyled results/pause/how-to |
 | 11-27 | Online 1v1 (`net.ts`, `netplay.ts`, `online.ts`, `rng.ts`): room codes + share links over public MQTT brokers, WebRTC data channel with relay fallback, Metered TURN; deterministic input lockstep (2–6 tick delay from RTT), seeded match RNG, checksums every 60 ticks with snapshot resync; determinism check in tests |
 | 11-27 | Menu spacing pass (8/12/16/24/32 px scale on every screen; logo has its own block so its slash never touches the first button); select panels split into an info zone and an art zone (pose shrinks inside `.art`, never under the stats); roster faces re-framed (camera aimed at the face centre, square tiles, tags in corners, name on a gradient) |
+| 11-27 | Fix: fighters falling off a broken edge could be snapped back onto the deck in a loop (stuck in the air, bout never ends). Title menu fits short landscape phones (settings row on one line) |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -134,7 +135,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 
 **Gameplay / sim**
 - CPU stalled chasing props or with an obstacle between fighters → anti-stall and unstick detours.
-- CPU-vs-CPU bouts occasionally hit the 150 s test limit (rare, AI-only); not user-facing, watch for regressions.
+- CPU-vs-CPU bouts occasionally hit the 150 s test limit. Root cause found 11-27: `groundAt` treated the deck as floor for any point inside the footprint, so a fighter who fell off a broken edge and drifted back over the footprint while falling was snapped up to y=0, fell again, forever (stuck "air" loop, no ring-out). The deck now only supports things at/above it (`y + step >= 0`). This could also happen to players.
 - Taps shorter than one frame were lost → key tap latching (`tapped` set, `endInputRead`).
 - Airborne specials were cancelled on landing → add the special to the landing-exempt list in `fighter.ts`.
 - `faceOpp` is private in Fighter; outside code must compute yaw itself.
