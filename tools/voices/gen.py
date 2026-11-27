@@ -1,5 +1,6 @@
 # Regenerate fighter voice lines: python3 -m venv venv && venv/bin/pip install piper-tts numpy scipy librosa soundfile;
-# download the Piper models listed in PERSONA into ./models (rhasspy/piper-voices), then venv/bin/python gen.py [fighterIds...]
+# download the Piper models listed in PERSONA into ./models (rhasspy/piper-voices), then
+# MODE=all|intro|follow venv/bin/python gen.py [fighterIds...]   (follow = victory follow-ups only)
 # Generates every intro line for every fighter with a persona voice treatment.
 # Output: public/voices/<id>/<key>.mp3 + public/voices/manifest.json (file, duration, 30 fps mouth envelope).
 import re, io, wave, json, os, subprocess, sys
@@ -22,6 +23,13 @@ for m in re.finditer(r"(\w+): \[(.*?)\],", lines_block, re.S):
     LINES[m.group(1)] = [s.replace("\\'", "'") for s in strings(m.group(2))]
 vs_block = src[src.index('const VERSUS'):src.index('};', src.index('const VERSUS'))]
 VERSUS = {m.group(1): m.group(2).replace("\\'", "'") for m in re.finditer(r"'(\w+>\w+)': (?:\"|')(.*?)(?:\"|'),\n", vs_block)}
+fo_block = src[src.index('const FOLLOW'):src.index('};', src.index('const FOLLOW'))]
+FOLLOW = {}
+for m in re.finditer(r"(\w+): \[(.*?)\],", fo_block, re.S):
+    FOLLOW[m.group(1)] = [s.replace("\\'", "'") for s in strings(m.group(2))]
+vf_block = src[src.index('const VERSUS_FOLLOW'):src.index('};', src.index('const VERSUS_FOLLOW'))]
+VERSUS_FOLLOW = {m.group(1): m.group(2).replace("\\'", "'") for m in re.finditer(r"'(\w+>\w+)': (?:\"|')(.*?)(?:\"|'),\n", vf_block)}
+MODE = os.environ.get('MODE', 'all')  # all | follow (victory follow-ups only)
 IDS = ['basalt', 'tether', 'aerin', 'shunt', 'vanta', 'magna', 'ember', 'rift']
 NAME = {i: i.capitalize() for i in IDS}
 
@@ -58,15 +66,20 @@ def crackle(n, rate, amp, hp=2000):
     return bq(c, 'high', hp)
 
 # ---------------------------------------------------------------- personas
-def P_basalt(x):   # rock golem: much deeper, slower, gravel, sub rumble, cavern
-    y = librosa.effects.time_stretch(x.astype(np.float32), rate=0.92)
-    y = shift(y, -7)
-    y = y + 0.5 * shift(y, -12)[:len(y)]
-    e = env_follow(y, 30); grav = bq(rng.standard_normal(len(y)), 'band', [90, 900]) * e * 0.55
-    y = drive(y + grav, 2.2, 0.6)
-    y = bq(y, 'low', 3800)
-    y = y + bq(rng.standard_normal(len(y)), 'low', 70) * e * 0.8  # sub rumble with the voice
-    return reverb(y, 1.6, 0.32, damp=2500, pre=0.03)
+def P_basalt(x):   # rock golem, intelligible: deep but clear, light gravel, short stone room, presence lift
+    y = librosa.effects.time_stretch(x.astype(np.float32), rate=0.95)
+    y = shift(y, -4.5)
+    e = env_follow(y, 30)
+    # Octave-down only on the stressed (loud) parts, and quiet.
+    stress = np.clip((e / (e.max() + 1e-9) - 0.45) * 3, 0, 1)
+    y = y + 0.18 * shift(y, -12)[:len(y)] * stress
+    grav = bq(rng.standard_normal(len(y)), 'band', [120, 700]) * e * 0.18
+    y = drive(y + grav, 1.6, 0.35)
+    # Presence: lift 2-4 kHz so consonants cut through; keep the top end soft.
+    y = y + 0.55 * bq(y, 'band', [2000, 4000])
+    y = bq(y, 'low', 6000)
+    y = y + bq(rng.standard_normal(len(y)), 'low', 70) * e * 0.3  # faint sub rumble
+    return reverb(y, 0.7, 0.14, damp=3500, pre=0.04)
 def P_tether(x):   # young, quick, cocky; light mask muffle
     y = shift(x, 1.5)
     y = bq(y, 'low', 6500)
@@ -191,13 +204,15 @@ for fid in only:
     model, cfg, fx = PERSONA[fid]
     v = PiperVoice.load(f'models/{model}.onnx')
     jobs = []
-    for i, line in enumerate(LINES[fid]):
-        if '{o}' in line:
-            for o in IDS: jobs.append((f'l{i}_{o}', line.replace('{o}', NAME[o])))
-        else: jobs.append((f'l{i}', line))
-    for k, line in VERSUS.items():
-        a, b = k.split('>')
-        if a == fid: jobs.append((f'vs_{b}', line))
+    # Intro lines (l<i>, l<i>_<opp>, vs_<opp>) and victory follow-ups (same keys prefixed with w_).
+    for pre, table, vs in ([('', LINES, VERSUS)] if MODE == 'intro' else []) + ([('', LINES, VERSUS), ('w_', FOLLOW, VERSUS_FOLLOW)] if MODE == 'all' else []) + ([('w_', FOLLOW, VERSUS_FOLLOW)] if MODE == 'follow' else []):
+        for i, line in enumerate(table[fid]):
+            if '{o}' in line:
+                for o in IDS: jobs.append((f'{pre}l{i}_{o}', line.replace('{o}', NAME[o])))
+            else: jobs.append((f'{pre}l{i}', line))
+        for k, line in vs.items():
+            a, b = k.split('>')
+            if a == fid: jobs.append((f'{pre}vs_{b}', line))
     entries = {}
     for key, text in jobs:
         y = finish(fx(synth(v, text, cfg)))
@@ -206,12 +221,13 @@ for fid in only:
         mm = mouth(y); idx = [i for i, c in enumerate(mm) if int(c) >= 2]
         entries[key] = {'f': f'voices/{fid}/{key}.mp3', 'd': round(len(y) / SR, 2), 's': round((idx[-1] + 1) / 30, 2) if idx else round(len(y) / SR, 2), 'm': mm}
         if fid not in wav_samples: wav_samples[fid] = y
+        if key.startswith('w_') and f'{fid}_w' not in wav_samples: wav_samples[f'{fid}_w'] = y
     manifest[fid] = entries
     print(fid, model, len(jobs), 'clips', flush=True)
 
 mpath = f'{OUT}/manifest.json'
-old = json.load(open(mpath)) if os.path.exists(mpath) and sys.argv[1:] else {}
-old.update(manifest)
+old = json.load(open(mpath)) if os.path.exists(mpath) else {}
+for fid, e in manifest.items(): old.setdefault(fid, {}).update(e)
 json.dump(old, open(mpath, 'w'), separators=(',', ':'))
 os.makedirs('samples', exist_ok=True)
 import soundfile as sf

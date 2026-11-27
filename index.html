@@ -493,6 +493,20 @@
   .th .t1 { left: 0; } .th .t2 { right: 0; }
   .th .thn { padding: 10px 4px 3px; background: linear-gradient(180deg, transparent, rgba(0,0,0,0.85) 55%); text-align: center; }
   @media (max-width: 980px) { .half { --infoW: min(33%, 280px); } }
+  /* Stats toggle: only on phones; elsewhere the stats are always shown. */
+  .stats-tog { display: none; align-self: flex-start; margin-top: 4px; padding: 3px 10px; border-radius: 3px; border: 1px solid color-mix(in srgb, var(--c) 70%, #fff 0%); background: rgba(0,0,0,0.55); color: #fff; font: 700 11px var(--cond); letter-spacing: .08em; text-transform: uppercase; transform: skewX(-8deg); pointer-events: auto; }
+  .half.h1 .stats-tog { align-self: flex-end; }
+  @media (orientation: landscape) and (max-height: 560px), (orientation: portrait) and (max-width: 700px) {
+    .stats-tog { display: inline-block; }
+    /* Collapsed: only name, title and the button; the art takes the freed space. */
+    .half:not(.stats-open) .info { bottom: auto; background: linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.25)); }
+    .half:not(.stats-open) .info .stats, .half:not(.stats-open) .info .trait, .half:not(.stats-open) .info .chips { display: none !important; }
+    /* Panels span the full width and are clipped on the diagonal, so the art zone stays on its own side. */
+    .half.h0:not(.stats-open) .art { left: 14% !important; right: 53% !important; top: 4px !important; }
+    .half.h1:not(.stats-open) .art { right: 14% !important; left: 53% !important; top: 4px !important; }
+    /* Open: the stats sit over the art on a solid card. */
+    .half.stats-open .info { z-index: 3; background: rgba(6,6,12,0.92); }
+  }
   @media (orientation: landscape) and (max-height: 560px) {
     :root { --s3: 12px; --s4: 16px; --s5: 20px; }
     .select-screen { gap: 6px; padding: 6px var(--s1); }

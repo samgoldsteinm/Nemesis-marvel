@@ -113,6 +113,8 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-27 | Online 1v1 (`net.ts`, `netplay.ts`, `online.ts`, `rng.ts`): room codes + share links over public MQTT brokers, WebRTC data channel with relay fallback, Metered TURN; deterministic input lockstep (2–6 tick delay from RTT), seeded match RNG, checksums every 60 ticks with snapshot resync; determinism check in tests |
 | 11-27 | Menu spacing pass (8/12/16/24/32 px scale on every screen; logo has its own block so its slash never touches the first button); select panels split into an info zone and an art zone (pose shrinks inside `.art`, never under the stats); roster faces re-framed (camera aimed at the face centre, square tiles, tags in corners, name on a gradient) |
 | 11-27 | Fix: fighters falling off a broken edge could be snapped back onto the deck in a loop (stuck in the air, bout never ends). Title menu fits short landscape phones (settings row on one line) |
+| 11-27 | Basalt's voice reprocessed for clarity (−4.5 st instead of −7, quiet octave-down only on stressed syllables, light gravel, 2–4 kHz presence, short stone room); victory follow-up lines (`FOLLOW`/`VERSUS_FOLLOW` in intro.ts, clips keyed `w_<intro key>`) and a victory cinematic (`VictoryCine`): letterboxed push-in on the winner, power flourish, voiced follow-up with jaw/talk, then results. Presentational only; runs when intros are on and the match was started with its intro |
+| 11-27 | Phone select: stats behind a tap (`stats-tog` button, `statsOpen` in main.ts) |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -212,6 +214,14 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - Reserve zones for art and text. Never let art (poses, logos, slashes) overlap text or buttons: give the art its own box (`.half .art`) and let it shrink (object-fit: contain) instead of overlapping.
 - Wide/short boxes with `object-fit: cover` crop to a strip: keep thumbnails square and frame the render itself (face renders aim at the Head bone + ~0.11 m, the face centre).
 - Check spacing at very wide desktop sizes too (the user plays at ~2000×920); a block-level logo with an absolutely positioned slash spans the whole column.
+
+**Victory cinematic**
+- The follow-up is derived from the same seeded `pickLine` choice as the intro (`victoryLine`), so online both sides hear the same payoff. Keep `pickLine`'s RNG consumption unchanged or the keys stop matching.
+- `VictoryCine` only runs for matches started with their intro (`matchCine`); test matches (`__game.start`) go straight to results. It never touches match state.
+- Esc during a match opens pause: skip cinematics in scripts with a click, not Escape.
+
+**Select screen**
+- The select `.half` panels each span the full width and are clipped diagonally, so position art/info with that in mind (percentages are of the full width).
 
 **Process**
 - Background agents editing files while tests run make Vite hot-reload the page mid-test → failures that say

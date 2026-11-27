@@ -1,6 +1,6 @@
 import { Online } from './online';
 import { CANON, toCanonical, MatchCfg } from './netplay';
-import { FightIntro } from './intro';
+import { FightIntro, VictoryCine } from './intro';
 import { updatePadCursor, hidePadCursor } from './padcursor';
 import { VFX } from './vfx';
 import { TRAITS } from './traits';
@@ -301,7 +301,9 @@ let lastIntroT = -1;
 let introsOn = true, voicesOn = true;
 try { introsOn = localStorage.getItem('bl.intros') !== '0'; voicesOn = localStorage.getItem('bl.voices') !== '0'; } catch { /* storage optional */ }
 const introEl = document.getElementById('intro')!;
-function endIntro() { if (intro) { intro.finish(); intro = null; } }
+function endIntro() { if (intro) { intro.finish(); intro = null; } if (victory) { victory.finish(); victory = null; } victoryDone = false; }
+/** Victory cinematic after the final K.O. (presentational only; skipped when intros are off or for test matches). */
+let victory: VictoryCine | null = null, victoryDone = false, matchCine = false;
 function startMatch(withIntro = true, seed?: number) {
   endIntro();
   if (match) match.dispose();
@@ -323,6 +325,7 @@ function startMatch(withIntro = true, seed?: number) {
   showScreen('none');
   startMusic('fight', setup.arena);
   setIntensity(0);
+  matchCine = introsOn && withIntro;
   if (introsOn && withIntro) intro = new FightIntro(match, vcam, introEl, voicesOn);
 }
 
@@ -424,7 +427,7 @@ function updateNetStat() {
 function rematch(swap = false) {
   if (swap) { const t = setup.p1; setup.p1 = setup.p2; setup.p2 = t; }
   if (swap || !match) startMatch();
-  else { match.restart(); cpus = [null, setup.mode === 'cpu' ? new CPU(match.fighters[1], match, setup.diff) : null]; trackers.forEach((t) => t.reset()); paused = false; showScreen('none'); }
+  else { endIntro(); match.restart(); cpus = [null, setup.mode === 'cpu' ? new CPU(match.fighters[1], match, setup.diff) : null]; trackers.forEach((t) => t.reset()); paused = false; showScreen('none'); }
 }
 
 /** Show touch buttons only for touch players and key hints only for keyboard players; a gamepad hides both. */
@@ -461,7 +464,7 @@ function showScreen(s: Screen) {
   menu.classList.remove('hidden');
   menu.innerHTML = render(s);
   menu.querySelectorAll<HTMLElement>('[data-act]').forEach((el) => {
-    el.addEventListener('click', () => { initAudio(); act(el.dataset.act!, el.dataset.arg); });
+    el.addEventListener('click', (e) => { e.stopPropagation(); initAudio(); act(el.dataset.act!, el.dataset.arg); });
   });
   setFocus(0);
 }
@@ -582,6 +585,8 @@ function renderTitle() {
     </div>`;
 }
 /** One side of the fighter select: a comic-toned pose over a duotone skyline, with the fighter's info. */
+/** Phones: each select panel's stats are tucked behind a tap so the fighter art can be big. */
+const statsOpen: [boolean, boolean] = [false, false];
 function selHalf(side: 0 | 1) {
   const id = side === 0 ? setup.p1 : setup.p2;
   const def = charById(id);
@@ -589,13 +594,14 @@ function selHalf(side: 0 | 1) {
   const active = selectSide === side && !(locked[0] && locked[1]);
   const art = comicOf(def);
   return `
-    <div class="half h${side} ${active ? 'active' : ''} ${locked[side] ? 'locked' : ''}" style="--c:${def.color};--sky:${skyline(side ? 11 : 3)}" data-act="side" data-arg="${side}">
+    <div class="half h${side} ${active ? 'active' : ''} ${locked[side] ? 'locked' : ''} ${statsOpen[side] ? 'stats-open' : ''}" style="--c:${def.color};--sky:${skyline(side ? 11 : 3)}" data-act="side" data-arg="${side}">
       <div class="bg"></div>
       <div class="art">${art ? `<img class="pose" src="${art}" alt="${def.name}">` : `<div class="pose ini">${def.name[0]}</div>`}</div>
       <div class="tag"><span class="badge p${side}">${who}</span>${locked[side] ? '<span class="lockd">✓ LOCKED IN</span>' : active ? '<span class="choosing">CHOOSING…</span>' : ''}</div>
       <div class="info">
         <div class="nm">${def.name}</div>
         <div class="ttl">${def.title}</div>
+        <button class="stats-tog" data-act="stats" data-arg="${side}" aria-expanded="${statsOpen[side]}">${statsOpen[side] ? '✕ Hide stats' : 'ⓘ Stats'}</button>
         <div class="stats">${bars(id)}</div>
         ${TRAITS[id] ? `<div class="trait"><b>✦ ${TRAITS[id].name}</b> ${TRAITS[id].desc}</div>` : ''}
         <div class="chips"><span class="chip">${ICON[def.recovery]} ${def.recovery} recovery</span><span class="chip">💪 ${LIFT[def.lift]}</span><span class="chip">★ ${RATINGS[id].difficulty}</span></div>
@@ -766,6 +772,7 @@ function act(a: string, arg?: string) {
     case 'title-raw': act('title'); break;
     case 'mode': setup.mode = arg as Mode; selectSide = 0; locked[0] = locked[1] = false; showScreen('select'); break;
     case 'side': selectSide = Number(arg) as 0 | 1; locked[selectSide] = false; rerender(); break;
+    case 'stats': { const sd = Number(arg) as 0 | 1; statsOpen[sd] = !statsOpen[sd]; rerender(); break; }
     case 'pick': {
       // Tap = preview (stats, trait, portrait). Tapping the previewed fighter again confirms it.
       const cur = selectSide === 0 ? setup.p1 : setup.p2;
@@ -964,7 +971,10 @@ function simTick() {
   fx.update(DT);
   // Music intensity follows the fight: Rage, Danger and low health raise the extra layer.
   setIntensity(match.ended ? 0 : Math.max(...match.fighters.map((f) => (f.raging ? 1 : f.danger ? 0.8 : f.health < 40 ? 0.45 : 0))));
-  if (match.resultReady && screen === 'none') { showScreen('result'); startMusic('menu'); }
+  if (match.resultReady && screen === 'none' && !victory) {
+    if (matchCine && !victoryDone && match.ended) victory = new VictoryCine(match, vcam, introEl, voicesOn, match.ended.winner);
+    else { showScreen('result'); startMusic('menu'); }
+  }
 }
 
 // ============================================================ performance monitor
@@ -1005,7 +1015,9 @@ function frame(now: number) {
   else hidePadCursor();
   if (intro && match && !paused && screen === 'none' && !intro.update(rawDt)) { intro = null; if (online.active) online.introDone(); }
   if (online.active && intro === null && online.phase === 'intro') online.introDone();
+  if (victory && match && screen === 'none' && !victory.update(rawDt)) { victory = null; victoryDone = true; }
   (window as any).__introT = intro ? intro.t : 99;
+  (window as any).__victoryT = victory ? victory.t : -1;
   // "FIGHT!" stinger the moment the banner appears (READY → FIGHT at introT 45; works for new rounds too).
   if (match) { if (match.introT === 45 && lastIntroT !== 45) sfx.fightStart?.(); lastIntroT = match.introT; }
   if (online.active) {
@@ -1035,8 +1047,8 @@ function frame(now: number) {
     vcam.update(match.fighters, rawDt, fx.shake);
     hud.update(match, time);
     hud.el.classList.toggle('menu-up', screen !== 'none');
-    hud.el.classList.toggle('cine', !!intro);
-    document.body.classList.toggle('cine', !!intro);
+    hud.el.classList.toggle('cine', !!intro || !!victory);
+    document.body.classList.toggle('cine', !!intro || !!victory);
     // X-target markers for human players.
     match.fighters.forEach((f, i) => {
       const mk = markers[i];

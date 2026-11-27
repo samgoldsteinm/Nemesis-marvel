@@ -67,6 +67,63 @@ const VERSUS: Record<string, string> = {
   'basalt>magna': "Pull all you like, Magna. I'm heavier than your ego.",
 };
 
+/** Victory follow-ups: what the winner says at the end, paying off the intro line they opened with. */
+const FOLLOW: Record<string, string[]> = {
+  basalt: [
+    'Told you, {o}. The mountain stays.',
+    'Stone remembers. And now, so will you.',
+    'Mind the street on your way down.',
+  ],
+  tether: [
+    "Told you, {o}. Couldn't catch me.",
+    'Wrapped, hung, done. Under ten seconds.',
+    'Two jumps, one line. Like I said.',
+  ],
+  aerin: [
+    'Your name came up, {o}. The storm answered.',
+    'Lightning said hello. You said goodbye.',
+    "Still down there? It's lovely up here.",
+  ],
+  shunt: [
+    "Told you. You only saw the floor.",
+    'Still behind you, {o}. Always was.',
+    'One blink. Nine metres. Done.',
+  ],
+  vanta: [
+    "You ran, {o}. You tired. I won.",
+    'Lights out. As promised.',
+    "Pounced. Next time, don't sleep.",
+  ],
+  magna: [
+    'Mine, {o}. Like everything else here.',
+    "You came closer. You had no choice.",
+    'Crushed, dropped, and still not enough steel.',
+  ],
+  ember: [
+    "Hotter every hit. You did this to yourself.",
+    'Still burning, {o}? Good.',
+    'You stepped in. The furnace stepped out.',
+  ],
+  rift: [
+    'You never found the right door, {o}.',
+    'Swapped. Waved. Goodbye.',
+    'Return to sender. Every single one.',
+  ],
+};
+/** Follow-ups for the matchup openers. */
+const VERSUS_FOLLOW: Record<string, string> = {
+  'basalt>ember': 'See? Still stone, Ember.',
+  'ember>basalt': 'Cracked you, Basalt. Told you it would.',
+  'aerin>magna': 'Struck, grounded, done. Lightning rod.',
+  'magna>aerin': 'Your electrons came home to me, Aerin.',
+  'shunt>rift': 'Only one of us landed, Rift.',
+  'rift>shunt': 'A door beats a hop. Every time.',
+  'tether>vanta': 'Tangled in the string. Good kitty.',
+  'vanta>tether': 'Breakfast was quick today.',
+  'magna>basalt': 'Iron ore. Pulled, pressed, done.',
+  'basalt>magna': 'Still heavier than your ego, Magna.',
+};
+
 /** How each fighter powers up on camera (a few just posture). */
 type PowerUp = (f: Fighter, m: Match) => void;
 const POWER: Record<string, PowerUp> = {
@@ -305,6 +362,161 @@ function pickLine(f: Fighter, o: Fighter, rng: Rng): { text: string; key: string
   const s = typeof raw === 'function' ? raw(o) : raw;
   // Clip keys match the generator (scratchpad tts/gen.py): l<i>, or l<i>_<opponent> for lines naming them.
   return { text: s.replace(/\{o\}/g, oname), key: s.includes('{o}') ? `l${i}_${o.def.id}` : `l${i}` };
+}
+
+/** The winner's victory follow-up: the payoff to the intro line they opened with (same seeded choice). */
+export function victoryLine(match: Match, winner: Fighter): { text: string; key: string } {
+  const [a, b] = match.fighters;
+  const lineRng = new Rng((match.seed ^ 0x5bd1e995) >>> 0);
+  const la = pickLine(a, b, lineRng), lb = pickLine(b, a, lineRng);
+  const intro = winner === a ? la : lb;
+  const o = winner.opp;
+  const nm = o.def.name.split(' ')[0];
+  const oname = nm.charAt(0) + nm.slice(1).toLowerCase();
+  if (intro.key.startsWith('vs_')) {
+    const t = VERSUS_FOLLOW[`${winner.def.id}>${o.def.id}`] ?? 'Told you.';
+    return { text: t, key: `w_${intro.key}` };
+  }
+  const i = Number(intro.key.slice(1).split('_')[0]);
+  const raw = FOLLOW[winner.def.id]?.[i] ?? 'Told you.';
+  return { text: raw.replace(/\{o\}/g, oname), key: raw.includes('{o}') ? `w_l${i}_${o.def.id}` : `w_l${i}` };
+}
+
+/** Browser speech fallback with the fighter's voice settings. */
+function speakBrowser(f: Fighter, text: string) {
+  if (!('speechSynthesis' in window)) return;
+  try {
+    const synth = window.speechSynthesis;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    const v = VOICE[f.def.id] ?? { pitch: 1, rate: 1 };
+    u.pitch = v.pitch; u.rate = v.rate; u.volume = 0.95;
+    const voices = synth.getVoices().filter((x) => /^en/i.test(x.lang));
+    const fem = /female|samantha|victoria|zira|susan|karen|moira|tessa|fiona|serena|aria|jenny|libby|sonia/i;
+    const pick = voices.find((x) => (v.female ? fem.test(x.name) : !fem.test(x.name)));
+    if (pick) u.voice = pick;
+    audio.duckMusic(0.4, 3);
+    synth.speak(u);
+  } catch { /* speech is optional */ }
+}
+
+// ---------------------------------------------------------------- victory cinematic
+const HOW: Record<string, string> = { ko: 'K.O.', ringout: 'RING OUT', finisher: 'FINISHER' };
+/**
+ * After the final K.O. / ring-out / finisher: letterboxed close shot of the winner pushing in on their face,
+ * a power flourish, and their follow-up line (voiced, lips/jaw moving). Purely presentational: it never
+ * touches match state, so it is safe online. Any button skips (after a short grace so a held attack doesn't).
+ */
+export class VictoryCine {
+  t = 0;
+  done = false;
+  private line: { text: string; key: string };
+  private clip: Clip | null = null;
+  private buf: AudioBuffer | null = null;
+  private src: AudioBufferSourceNode | null = null;
+  private spoken = false;
+  private speakAt = 0;
+  private len = 3.6;
+  private aura: { stop(): void } | null = null;
+  private skip = false;
+  private onKey = () => { if (this.t > 0.6) this.skip = true; };
+  private padPrev = true;
+  private static readonly SPEAK = 0.9;
+
+  constructor(private match: Match, private vcam: VersusCamera, private el: HTMLElement, private voice: boolean, private winner: Fighter) {
+    this.line = victoryLine(match, winner);
+    if (voice) void loadManifest().then(() => {
+      const c = manifest?.[winner.def.id]?.[this.line.key] ?? null;
+      this.clip = c;
+      if (c) { this.len = Math.max(this.len, VictoryCine.SPEAK + c.s + 1.4); void loadClip(c.f).then((b) => { this.buf = b; }); }
+    });
+    const f = winner;
+    const how = match.ended ? HOW[match.ended.how] ?? '' : '';
+    el.style.setProperty('--c', f.def.color);
+    el.classList.remove('right');
+    (el.querySelector('.iname') as HTMLElement).textContent = f.def.name;
+    (el.querySelector('.ititle') as HTMLElement).textContent = `${how} · wins`;
+    (el.querySelector('.iq') as HTMLElement).textContent = '';
+    el.classList.add('on');
+    el.classList.remove('show'); void el.offsetWidth; el.classList.add('show');
+    if (f.state !== 'victory' && f.alive) f.setState('victory');
+    // Start wide-ish off to one side, then push in on the face while orbiting slowly.
+    this.vcam.cinematic = { focus: () => f.center.add(new THREE.Vector3(0, f.def.height * 0.18, 0)), yaw: f.yaw - 0.65, dist: 2.6 + f.def.height * 0.6, h: 0.1, t: 0 };
+    addEventListener('keydown', this.onKey);
+    addEventListener('pointerdown', this.onKey);
+  }
+
+  /** Advance; returns false once finished. */
+  update(dt: number): boolean {
+    if (this.done) return false;
+    this.t += dt;
+    const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
+    const pressed = pads.some((g) => g && g.connected && [0, 1, 2, 3, 9].some((i) => g.buttons[i]?.pressed));
+    if (pressed && !this.padPrev && this.t > 0.6) this.skip = true;
+    this.padPrev = pressed;
+    if (this.skip || this.t > this.len) { this.finish(); return false; }
+    const f = this.winner;
+    const c = this.vcam.cinematic;
+    if (c) c.dist += (1.25 + f.def.height * 0.45 - c.dist) * Math.min(1, dt * 1.6); // push in
+    if (this.t > 0.45 && this.t - dt <= 0.45) {
+      POWER[f.def.id]?.(f, this.match);
+      if (this.match.fx.vfx) this.aura = this.match.fx.vfx.status(() => f.center, 'charge', AURA[f.def.id] ?? new THREE.Color(f.def.color).getHex(), f.def.height);
+    }
+    if (this.aura && this.t > this.len - 0.6) { this.aura.stop(); this.aura = null; }
+    // Speak once the clip is ready (or fall back to browser speech).
+    const S = VictoryCine.SPEAK;
+    if (!this.spoken && this.t >= S) {
+      const waiting = this.voice && (!manifest || (this.clip && !this.buf)) && this.t < S + 0.8;
+      if (!waiting) {
+        this.spoken = true;
+        this.speakAt = this.t;
+        if (!this.play() && this.voice) speakBrowser(f, this.line.text);
+      }
+    }
+    const line = this.line.text;
+    const speechLen = this.clip && this.buf ? this.clip.s : Math.max(1.0, line.length / 15);
+    const t0 = this.spoken ? this.speakAt : Infinity;
+    const k = THREE.MathUtils.clamp((this.t - t0) / speechLen, 0, 1);
+    const n = Math.min(line.length, Math.ceil(k * line.length));
+    (this.el.querySelector('.iq') as HTMLElement).textContent = n > 0 ? `“${line.slice(0, n)}${n < line.length ? '' : '”'}` : '';
+    let talk = 0;
+    if (this.clip && this.src && this.t >= t0) {
+      const fi = Math.floor((this.t - t0) * 30);
+      talk = fi < this.clip.m.length ? Number(this.clip.m[fi]) / 9 : 0;
+    } else if (this.spoken && this.voice && k < 1) talk = 0.35 + 0.35 * Math.abs(Math.sin(this.t * 11));
+    f.talk(talk);
+    return true;
+  }
+
+  private play(): boolean {
+    const ctx = audio.audioCtx(), bus = audio.voiceBus();
+    if (!this.voice || !this.clip || !this.buf || !ctx || !bus) return false;
+    try {
+      const src = ctx.createBufferSource();
+      src.buffer = this.buf;
+      src.connect(bus);
+      src.start();
+      this.src = src;
+      audio.duckMusic(0.55, this.clip.s + 0.3);
+      return true;
+    } catch { return false; }
+  }
+
+  finish() {
+    if (this.done) return;
+    this.done = true;
+    removeEventListener('keydown', this.onKey);
+    removeEventListener('pointerdown', this.onKey);
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+    try { this.src?.stop(); } catch { /* ignore */ }
+    this.src = null;
+    this.aura?.stop();
+    this.winner.talk(0);
+    this.el.classList.remove('on', 'show');
+    // Leave a gentle orbit on the winner behind the results screen.
+    const f = this.winner;
+    this.vcam.cinematic = { focus: () => f.center, yaw: f.yaw, dist: 5.5, h: 1.4, t: 0 };
+  }
 }
 
 function faceOpp(f: Fighter) {
