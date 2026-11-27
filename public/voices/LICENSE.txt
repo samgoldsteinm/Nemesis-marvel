@@ -1,0 +1,14 @@
+Fighter voice lines in this folder were synthesised with Piper TTS (https://github.com/rhasspy/piper)
+and then processed (pitch, filters, effects) to give each fighter their own voice.
+
+Voice models used (rhasspy/piper-voices on Hugging Face) and their licences:
+- BASALT  en_US-john-medium     public domain
+- TETHER  en_US-bryce-medium    public domain
+- AERIN   en_GB-cori-high       public domain
+- SHUNT   en_US-mike-medium     CC0
+- VANTA   en_US-kristin-medium  public domain
+- MAGNA   en_US-norman-medium   public domain
+- EMBER   en_US-joe-medium      CC0
+- RIFT    en_GB-alba-medium     CC BY 4.0 — voice from the Alba dataset; attribution: "Voice model en_GB-alba-medium (rhasspy/piper-voices), CC BY 4.0"
+
+Piper itself is MIT-licensed. No attribution is required for the public-domain/CC0 voices.

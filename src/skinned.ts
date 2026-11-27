@@ -765,8 +765,56 @@ export class SkinnedBody {
   /** Advance clips and blend in the procedural pose by procW (call after the rig pose is applied). */
   update(dt: number) {
     this.updateDriver(dt);
+    this.applyTalk(dt);
     this.retarget();
   }
+
+  // ------------------------------------------------------------------ talking (fight intro lines)
+  /** Face pieces that move with speech: lips part, the mouth line opens. Registered by looks.ts. */
+  talkParts: { o: THREE.Object3D; kind: 'up' | 'down' | 'open' | 'mouth'; p0: THREE.Vector3; s0: THREE.Vector3 }[] = [];
+  private talkTarget = 0;
+  /** Smoothed mouth openness 0..1 (read by the fighter to pulse glow accents). */
+  talkLevel = 0;
+  private talkClock = 0;
+  /** Mouth openness for this frame (0..1); call every frame while speaking, 0 when done. */
+  setTalk(level: number) { this.talkTarget = THREE.MathUtils.clamp(level, 0, 1); }
+  private rotWorld(name: string, axis: THREE.Vector3, angle: number) {
+    const b = this.bone(name);
+    if (!b || !b.parent || angle === 0) return;
+    b.parent.getWorldQuaternion(this.pq);
+    b.getWorldQuaternion(this.tq);
+    this.sq.setFromAxisAngle(axis, angle).multiply(this.tq);
+    b.quaternion.copy(this.pq.invert().multiply(this.sq));
+    b.updateMatrixWorld(true);
+  }
+  private talkAxis = new THREE.Vector3();
+  private applyTalk(dt: number) {
+    const open = this.talkTarget > this.talkLevel;
+    this.talkLevel += (this.talkTarget - this.talkLevel) * Math.min(1, dt * (open ? 28 : 14));
+    const s = this.talkLevel;
+    if (s < 0.002 && this.talkTarget === 0) {
+      if (this.talkClock !== 0) { this.talkClock = 0; for (const p of this.talkParts) { p.o.position.copy(p.p0); p.o.scale.copy(p.s0); if (p.kind === 'mouth') p.o.visible = false; } }
+      return;
+    }
+    this.talkClock += dt;
+    const t = this.talkClock;
+    // Gestures on top of whatever clip or pose is playing: nods on emphasis, a little head tilt and torso sway.
+    this.model.updateMatrixWorld(true);
+    const right = this.talkAxis.set(1, 0, 0).transformDirection(this.model.matrixWorld);
+    const fwd = new THREE.Vector3(0, 0, 1).transformDirection(this.model.matrixWorld);
+    const up = new THREE.Vector3(0, 1, 0);
+    this.rotWorld('spine_03', up, 0.05 * Math.sin(t * 1.7) * Math.min(1, s * 3));
+    this.rotWorld('neck_01', right, 0.05 * s + 0.03 * Math.sin(t * 3.1) * s);
+    this.rotWorld('Head', right, 0.09 * s * Math.sin(t * 5.2 + 0.6) + 0.04 * s);
+    this.rotWorld('Head', fwd, 0.05 * Math.sin(t * 1.9) * Math.min(1, s * 3));
+    for (const p of this.talkParts) {
+      if (p.kind === 'up') p.o.position.set(p.p0.x, p.p0.y + 0.0035 * s, p.p0.z);
+      else if (p.kind === 'down') p.o.position.set(p.p0.x, p.p0.y - 0.0075 * s, p.p0.z);
+      else if (p.kind === 'mouth') { p.o.visible = s > 0.04; p.o.scale.set(p.s0.x * (0.75 + 0.25 * s), p.s0.y * (0.15 + 1.1 * s), p.s0.z); }
+      else p.o.scale.set(p.s0.x * (1 - 0.15 * s), p.s0.y * (1 + 2.5 * s), p.s0.z);
+    }
+  }
+
   private updateDriver(dt: number) {
     const rig = this.rig;
     if (!rig) return;

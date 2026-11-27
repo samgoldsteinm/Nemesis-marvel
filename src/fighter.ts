@@ -354,6 +354,8 @@ export class Fighter {
       } else if (!on[k] && h) { h.stop(); delete this.statusFx[k]; }
     }
   }
+  /** Mouth openness while speaking an intro line (0..1); drives lips/jaw, head gestures and glow pulses. */
+  talk(level: number) { this.skinned?.setTalk(level); }
   clearStatusFx() { for (const h of Object.values(this.statusFx)) h?.stop(); this.statusFx = {}; }
 
   private updateResources(dt: number) {
@@ -2316,7 +2318,7 @@ export class Fighter {
     this.rageAura.rotation.y -= dt * 6;
     for (const m of this.accents) {
       const base = m.userData.baseEI ?? 1;
-      m.emissiveIntensity = base * (this.raging ? 2.2 + Math.sin(time * 18) * 0.5 : 1) + (this.hitFlash > 0 ? 1 : 0);
+      m.emissiveIntensity = base * (this.raging ? 2.2 + Math.sin(time * 18) * 0.5 : 1) * (1 + (this.skinned?.talkLevel ?? 0) * 1.4) + (this.hitFlash > 0 ? 1 : 0);
     }
     // Character glow light.
     {

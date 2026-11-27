@@ -158,7 +158,7 @@ function face(b: SkinnedBody, o: { eye: number; eyeGlow?: number; brow?: number;
     HA(b, G(sph(0.013, 10, 8), eyeM, [s * sx, y, z], [0, 0, s * (o.slant ?? 0)], o.eyeScale ?? [1.4, 0.8, 0.6], false));
     if (o.brow !== undefined) HA(b, G(boxG(0.034, 0.008, 0.012), M(o.brow, 0.8), [s * sx, y + 0.024, z - 0.002], [0, 0, -s * 0.18], undefined, false));
   }
-  if (o.mouth !== undefined) HA(b, G(boxG(0.03, 0.006, 0.01), M(o.mouth, 0.7), [0, y - 0.075, z - 0.008], undefined, undefined, false));
+  if (o.mouth !== undefined) { const mo = G(boxG(0.03, 0.006, 0.01), M(o.mouth, 0.7), [0, y - 0.075, z - 0.008], undefined, undefined, false); HA(b, mo); talkPart(b, mo, 'open'); }
   return eyeM;
 }
 
@@ -226,6 +226,10 @@ function onFace(b: SkinnedBody, geo: THREE.BufferGeometry, m: THREE.Material, x:
   HA(b, o);
   return o;
 }
+/** Register a face piece that animates while the fighter talks (see SkinnedBody.setTalk). */
+function talkPart(b: SkinnedBody, o: THREE.Object3D, kind: 'up' | 'down' | 'open' | 'mouth') {
+  b.talkParts.push({ o, kind, p0: o.position.clone(), s0: o.scale.clone() });
+}
 interface FaceSpec {
   eyes?: { sclera?: number; iris: number; glow?: number; pupil?: number; slit?: boolean; w?: number; h?: number; slant?: number; spread?: number; y?: number; lash?: number; full?: boolean };
   brows?: { color: number; angle?: number; thick?: number; y?: number; w?: number };
@@ -268,9 +272,10 @@ function face2(b: SkinnedBody, f: FaceSpec) {
   }
   if (f.lips) {
     const lw = f.lips.w ?? 0.03, lf = f.lips.full ?? 1, ly = fy(b, f.lips.y ?? 0.22), lm = M(f.lips.color, 0.45);
-    onFace(b, sph(1, 14, 8), lm, 0, ly + 0.0045, 0.0, 0, [lw * 0.5, 0.0045 * lf, 0.006]);
-    onFace(b, sph(1, 14, 8), lm, 0, ly - 0.004, 0.0, 0, [lw * 0.46, 0.0058 * lf, 0.007]);
-    onFace(b, boxG(lw * 0.9, 0.0018, 0.004), M(0x2a1010, 0.8), 0, ly, 0.004);
+    // Lips and the dark mouth line are registered as talk parts: they part when the fighter speaks.
+    talkPart(b, onFace(b, sph(1, 14, 8), lm, 0, ly + 0.0045, 0.0, 0, [lw * 0.5, 0.0045 * lf, 0.006]), 'up');
+    talkPart(b, onFace(b, sph(1, 14, 8), lm, 0, ly - 0.004, 0.0, 0, [lw * 0.46, 0.0058 * lf, 0.007]), 'down');
+    talkPart(b, onFace(b, boxG(lw * 0.9, 0.0018, 0.004), M(0x2a1010, 0.8), 0, ly, 0.004), 'open');
   }
   return glowM;
 }
@@ -400,7 +405,7 @@ const tetherAdorn: Adorn = (b) => {
   }
   onFace(b, boxG(0.004, 0.13, 0.004), frame, 0, 0.17, 0.003); // centre seam over the head
   onFace(b, boxG(0.09, 0.006, 0.006), frame, 0, 0.2, 0.003, 0, undefined);
-  onFace(b, boxG(0.03, 0.004, 0.004), frame, 0, 0.088, 0.003); // mouth seam
+  talkPart(b, onFace(b, boxG(0.03, 0.004, 0.004), frame, 0, 0.088, 0.003), 'open'); // mouth seam moves with speech
   // Scarf round the neck with trailing tails.
   b.attach('spine', G(torus(0.1, 0.035), scarf, [0, 0.3, 0.0], [Math.PI / 2 - 0.15, 0, 0], [1.1, 1, 1]));
   const segs = [0, 1, 2, 3].map((i) => new THREE.Mesh(boxG(0.09 - i * 0.012, 0.16, 0.015), scarf));
@@ -787,13 +792,42 @@ const riftAdorn: Adorn = (b) => {
   return [glow];
 };
 
+/** A mouth that opens when the fighter speaks: a dark (or glowing) opening on the face surface, flat when closed. */
+function talkMouth(b: SkinnedBody, o: { y: number; w: number; color?: number; glow?: number; teeth?: number }) {
+  const y = fy(b, o.y);
+  const m = o.glow ? M(o.color ?? 0x200808, 0.6, 0, o.glow, 2.2) : M(o.color ?? 0x1a0a0a, 0.9, 0);
+  const mouth = onFace(b, sph(1, 18, 10), m, 0, y, 0.002, 0, [o.w * 0.5, 0.012, 0.004]);
+  mouth.visible = false;
+  talkPart(b, mouth, 'mouth');
+  if (o.teeth) {
+    const tm = M(o.teeth, 0.4, 0);
+    talkPart(b, onFace(b, boxG(o.w * 0.7, 0.0035, 0.003), tm, 0, y + 0.0055, 0.004), 'up');
+  }
+}
+const MOUTHS: Record<string, Parameters<typeof talkMouth>[1] | null> = {
+  basalt: null, // golem: real jaw bone + lava glow
+  tether: null, // full mask: lens glow and head motion
+  shunt: null,  // rebreather: vents pulse
+  aerin: { y: 0.2, w: 0.034, color: 0x3a0e1e, teeth: 0xf0e8e8 },
+  vanta: { y: 0.2, w: 0.034, color: 0x6a0a20, teeth: 0xf4f0e0 },
+  magna: { y: 0.18, w: 0.034, color: 0x2a0c0c, teeth: 0xeee6e0 },
+  ember: { y: 0.16, w: 0.05, color: 0x401004, glow: 0xff5a10 },
+  rift: { y: 0.18, w: 0.036, color: 0x0e1a0a, glow: 0x5aff4a },
+};
+const withMouth = (id: string, adorn: Adorn): Adorn => (b, rig) => {
+  const mats = adorn(b, rig);
+  const spec = MOUTHS[id];
+  if (spec && !b.isGolem) talkMouth(b, spec);
+  return mats;
+};
+
 export const LOOKS: Record<string, { look: BodyLook; adorn: Adorn }> = {
-  basalt: { look: basaltLook, adorn: basaltAdorn },
-  tether: { look: tetherLook, adorn: tetherAdorn },
-  aerin: { look: aerinLook, adorn: aerinAdorn },
-  shunt: { look: shuntLook, adorn: shuntAdorn },
-  vanta: { look: vantaLook, adorn: vantaAdorn },
-  magna: { look: magnaLook, adorn: magnaAdorn },
-  ember: { look: emberLook, adorn: emberAdorn },
-  rift: { look: riftLook, adorn: riftAdorn },
+  basalt: { look: basaltLook, adorn: withMouth('basalt', basaltAdorn) },
+  tether: { look: tetherLook, adorn: withMouth('tether', tetherAdorn) },
+  aerin: { look: aerinLook, adorn: withMouth('aerin', aerinAdorn) },
+  shunt: { look: shuntLook, adorn: withMouth('shunt', shuntAdorn) },
+  vanta: { look: vantaLook, adorn: withMouth('vanta', vantaAdorn) },
+  magna: { look: magnaLook, adorn: withMouth('magna', magnaAdorn) },
+  ember: { look: emberLook, adorn: withMouth('ember', emberAdorn) },
+  rift: { look: riftLook, adorn: withMouth('rift', riftAdorn) },
 };
