@@ -117,11 +117,13 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
     face: {
       w: 256, h: 256, rotY: 0.32, fov: 26,
       cam: (sk, def, cam) => {
+        // The Head bone sits at the skull base; the face centre is ~0.1 m above it. Frame head + shoulders
+        // with the eyes a little above centre (≈45% from the top) and the chin well inside the frame.
         sk.boneWorld('Head', head);
         const s = def.look!.height / 1.95;
-        head.y += 0.1 * s;
-        cam.position.set(head.x + 0.2 * s, head.y + 0.02 * s, head.z + 1.9 * s);
-        cam.lookAt(head.x, head.y - 0.1 * s, head.z);
+        const fy = head.y + 0.11 * s;
+        cam.position.set(head.x + 0.18 * s, fy + 0.03 * s, head.z + 1.55 * s);
+        cam.lookAt(head.x, fy - 0.04 * s, head.z);
       },
     },
     profile: {

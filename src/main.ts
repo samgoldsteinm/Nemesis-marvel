@@ -591,7 +591,7 @@ function selHalf(side: 0 | 1) {
   return `
     <div class="half h${side} ${active ? 'active' : ''} ${locked[side] ? 'locked' : ''}" style="--c:${def.color};--sky:${skyline(side ? 11 : 3)}" data-act="side" data-arg="${side}">
       <div class="bg"></div>
-      ${art ? `<img class="pose" src="${art}" alt="${def.name}">` : `<div class="pose ini">${def.name[0]}</div>`}
+      <div class="art">${art ? `<img class="pose" src="${art}" alt="${def.name}">` : `<div class="pose ini">${def.name[0]}</div>`}</div>
       <div class="tag"><span class="badge p${side}">${who}</span>${locked[side] ? '<span class="lockd">✓ LOCKED IN</span>' : active ? '<span class="choosing">CHOOSING…</span>' : ''}</div>
       <div class="info">
         <div class="nm">${def.name}</div>

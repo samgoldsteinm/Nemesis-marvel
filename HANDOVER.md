@@ -111,6 +111,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-27 | Real talking jaws: per-vertex `aJaw` weights computed from each face (nose/chin profile) + vertex-shader rotation about a hinge before skinning, on grafted heads, painted mannequin heads and the golem; outlines deform too; lower lip pieces rotate with the chin; golem gets a magma glow inside the mouth. Per-fighter strength in `looks.ts` (`look.jaw`) |
 | 11-27 | Menu redesign: red accent (`--hot` #ff3b4e / `--hot2` #b8142c) replaces orange; Anton + Oswald fonts (OFL, `public/fonts`); Press Start screen (chrome logo, smoky teal band, duotone fighter profile, blinking prompt); title with comic-toned hero art; fighter select = two diagonal-split panels (P1 blue, P2 red, skyline + halftone backdrops, posterised poses) + duotone face roster strip + device-aware button prompts; restyled results/pause/how-to |
 | 11-27 | Online 1v1 (`net.ts`, `netplay.ts`, `online.ts`, `rng.ts`): room codes + share links over public MQTT brokers, WebRTC data channel with relay fallback, Metered TURN; deterministic input lockstep (2–6 tick delay from RTT), seeded match RNG, checksums every 60 ticks with snapshot resync; determinism check in tests |
+| 11-27 | Menu spacing pass (8/12/16/24/32 px scale on every screen; logo has its own block so its slash never touches the first button); select panels split into an info zone and an art zone (pose shrinks inside `.art`, never under the stats); roster faces re-framed (camera aimed at the face centre, square tiles, tags in corners, name on a gradient) |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -205,6 +206,11 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
   tests pass `?nettimeout=120000`.
 - Under heavy sandbox load the page can take ~2 min to finish "LOADING FIGHTERS…"; `checks.cjs` waits up to 240 s for boot.
 - Another agent rewrote the shared vite config file mid-test → use your own config/port per agent.
+
+**Layout**
+- Reserve zones for art and text. Never let art (poses, logos, slashes) overlap text or buttons: give the art its own box (`.half .art`) and let it shrink (object-fit: contain) instead of overlapping.
+- Wide/short boxes with `object-fit: cover` crop to a strip: keep thumbnails square and frame the render itself (face renders aim at the Head bone + ~0.11 m, the face centre).
+- Check spacing at very wide desktop sizes too (the user plays at ~2000×920); a block-level logo with an absolutely positioned slash spans the whole column.
 
 **Process**
 - Background agents editing files while tests run make Vite hot-reload the page mid-test → failures that say
