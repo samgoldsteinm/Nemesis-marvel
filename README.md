@@ -23,17 +23,17 @@ node tests/checks.cjs
 
 ## Controls
 
-| Action | Gamepad | Keyboard P1 | Keyboard P2 | Touch |
+| Action | Xbox controller | Keyboard P1 | Keyboard P2 | Touch |
 |---|---|---|---|---|
 | Move | Left stick / d-pad | WASD | Arrows | Left virtual stick |
-| A: attack (chain ×3, rising/descending air attacks) | A | J | `.` / Num1 | A |
-| B: jump | B | K | `/` / Num2 | B |
-| X: grapple / pick up / throw | X | L | `,` / Num3 | X |
-| Y: guard; + direction = evade; A in evade = counter; timed Y catches | Y | I | `;` / Num5 | Y |
-| L: mobility (sprint / swing / flight / teleport); L+A mobility attack | LB / LT | U | Right Shift / Num4 | L |
-| R: power modifier (R+A, R+B, R+X, R+Y); hold to recharge; tap to Rage | RB / RT | O | Enter / Num6 | R |
-| L+R while launched: recovery | LB+RB | U+O | | **L+R** chord button |
-| Super block | R+Y | O+I | | **R+Y** chord button |
+| Attack (chain ×3, rising/descending air attacks) | X | J | `.` / Num1 | X |
+| Jump | A | K | `/` / Num2 | A |
+| Grab / pick up / throw | Y | L | `,` / Num3 | Y |
+| Guard; + direction = evade; X in evade = counter; timed guard catches | B / LT | I | `;` / Num5 | B |
+| Mobility (sprint / swing / flight / teleport); LB+X mobility attack | LB | U | Right Shift / Num4 | LB |
+| Power modifier (RT+X, RT+A, RT+Y, RT+B); hold to recharge; tap to Rage | RT / RB | O | Enter / Num6 | RT |
+| LB+RT while launched: recovery | LB+RT | U+O | | **LB+RT** chord button |
+| Super block | RT+B | O+I | | **RT+B** chord button |
 | Pause | Start | Esc | Backspace | ‖ |
 
 In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A or Enter to confirm, and B or Esc to go back. Unplugging a human player's pad mid-bout pauses the game. On-screen touch buttons and keyboard hints only show for the input you last used, so they disappear as soon as a gamepad is used.

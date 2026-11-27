@@ -26,7 +26,7 @@ export class HUD {
           <div class="pips">${'<b><i></i></b>'.repeat(4)}<span class="nm"></span><span class="lives"></span></div>
           <div class="bar vit"><div class="hp"></div><div class="st"></div></div>
           <div class="bar rg"><div class="fill"></div></div>
-          <div class="flags"><span class="danger">DANGER</span><span class="rage">RAGE</span><span class="fin"><kbd>R</kbd>+<kbd>X</kbd> FINISH</span><span class="note"></span></div>
+          <div class="flags"><span class="danger">DANGER</span><span class="rage">RAGE</span><span class="fin"><kbd>RT</kbd>+<kbd>Y</kbd> FINISH</span><span class="note"></span></div>
           <div class="ctl"></div>
         </div>`;
       this.panels.push(p);
@@ -107,7 +107,7 @@ export class HUD {
       const ready = f.rage >= 100;
       rg.parentElement!.classList.toggle('ready', ready);
       rageTag.style.display = ready ? '' : 'none';
-      rageTag.textContent = 'RAGE · TAP R';
+      rageTag.textContent = 'RAGE · TAP RT';
     }
     (p.querySelector('.danger') as HTMLElement).style.display = f.danger ? '' : 'none';
     (p.querySelector('.danger') as HTMLElement).style.opacity = Math.floor(time * 4) % 2 === 0 ? '1' : '0.45';

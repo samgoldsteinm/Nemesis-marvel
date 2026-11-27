@@ -19,8 +19,8 @@ Core mechanics: lift classes (light/medium/heavy props, cars), breakable fences/
 layered vitality (recoverable stamina in front of lasting health), energy pips, Rage, Danger state + finishers,
 per-fighter recovery families (ground / swing / flight / teleport), power grapples, charged powers.
 
-Controls (GameCube semantics): A attack, B jump, X grab/throw, Y guard (+dir = evade), L mobility, R power
-modifier. Gamepad (standard mapping), two keyboard layouts, and touch.
+Controls (Xbox layout since 11-27): X attack, A jump, Y grab/throw, B or LT guard (+dir = evade), LB mobility,
+RT/RB power modifier. Internally the actions are still named attack/jump/grab/guard/mobility/power. Gamepad (standard mapping), two keyboard layouts, and touch.
 
 ## 2. Tech and layout
 
@@ -101,6 +101,7 @@ modifier. Gamepad (standard mapping), two keyboard layouts, and touch.
 | 11-27 | Rage tap works from controllers (24-tick window, from charge, mid-move); grab is a clinch with knee pummels, victim stays grounded and flinches |
 | 11-27 | Select screen: full trait text (panel scrolls), compact bar on small phones; HUD names can't overlap |
 | 11-27 | Three new arenas: Skyline Site (construction floor, crane/hoist/scaffold, safety-mesh edges, beams/lumber/cement props), Harbor Pier 7 (container ends, pier railings over water with splash, fuel drums, quay cranes, cargo ship), Neon Helipad (circular deck via `SHAPE.circle`, 3 low rims, neon district). Per-arena palettes and fight tempos; select-screen arena picker is ◀ name ▶ (fits 667×375) |
+| 11-27 | Controls remapped from GameCube to Xbox: X attack, A jump, Y grab, B/LT guard, LB mobility, RT/RB power; all move lists, tips, HUD prompts, touch buttons (Xbox colours) and README updated |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 

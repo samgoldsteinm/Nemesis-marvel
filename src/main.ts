@@ -313,7 +313,7 @@ function startMatch(withIntro = true) {
   trackers.forEach((t) => t.reset());
   hud.setNames(match, setup.mode === 'cpu' ? ['YOU', `CPU · ${setup.diff}`] : ['PAD 1 / WASD', 'PAD 2 / ARROWS']);
   hud.show(true);
-  keysHint.innerHTML = 'Move <b>WASD</b> · A attack <b>J</b> · B jump <b>K</b> · X grab <b>L</b> · Y guard <b>I</b> · L mobility <b>U</b> · R power <b>O</b> · Pause <b>Esc</b>' + (setup.mode === 'versus' ? '<br>P2: Arrows · A <b>.</b> · B <b>/</b> · X <b>,</b> · Y <b>;</b> · L <b>R-Shift</b> · R <b>Enter</b> (or numpad 1 2 3 5 4 6)' : '');
+  keysHint.innerHTML = 'Move <b>WASD</b> · Attack <b>J</b> · Jump <b>K</b> · Grab <b>L</b> · Guard <b>I</b> · Mobility <b>U</b> · Power <b>O</b> · Pause <b>Esc</b>' + (setup.mode === 'versus' ? '<br>P2: Arrows · Attack <b>.</b> · Jump <b>/</b> · Grab <b>,</b> · Guard <b>;</b> · Mobility <b>R-Shift</b> · Power <b>Enter</b> (or numpad 1 2 3 5 4 6)' : '');
   if (connectedPads().length) noteInput('pad');
   updateControlOverlay();
   paused = false;
@@ -500,12 +500,12 @@ function render(s: Screen): string {
     const k = (x: string) => `<kbd>${x}</kbd>`;
     const ctl: [string, string, string, string][] = [
       ['Move', 'Left stick', k('W') + k('A') + k('S') + k('D'), 'Left pad'],
-      ['Attack', k('A'), k('J'), 'A'],
-      ['Jump', k('B'), k('K'), 'B'],
-      ['Grab / pick up / throw', k('X'), k('L'), 'X'],
-      ['Guard (tap as a prop arrives to catch it)', k('Y'), k('I'), 'Y'],
-      ['Mobility: sprint, swing, fly, teleport', k('LB') + '/' + k('LT'), k('U'), 'L'],
-      ['Power modifier', k('RB') + '/' + k('RT'), k('O'), 'R'],
+      ['Attack', k('X'), k('J'), 'X'],
+      ['Jump', k('A'), k('K'), 'A'],
+      ['Grab / pick up / throw', k('Y'), k('L'), 'Y'],
+      ['Guard (tap as a prop arrives to catch it)', k('B') + '/' + k('LT'), k('I'), 'B'],
+      ['Mobility: sprint, swing, fly, teleport', k('LB'), k('U'), 'LB'],
+      ['Power modifier', k('RT') + '/' + k('RB'), k('O'), 'RT'],
       ['Pause', k('Start'), k('Esc'), '❚❚'],
     ];
     const body = howTab === 'controls' ? `
@@ -514,13 +514,13 @@ function render(s: Screen): string {
       <p class="note">Player 2 on keyboard: arrows to move, ${k('.')} attack, ${k('/')} jump, ${k(',')} grab, ${k(';')} guard, ${k('Right Shift')} mobility, ${k('Enter')} power.</p>`
       : howTab === 'combat' ? `
       <div class="tips">
-        <div class="tip"><h4>Combos</h4><p>Press ${k('A')} up to three times for a chain. Attack while running, jumping or using mobility for different moves.</p></div>
-        <div class="tip"><h4>Power moves</h4><p>Hold ${k('R')} and press ${k('A')}. Keep ${k('A')} held to charge a stronger version, or use it while running for a dash attack. Power moves cost energy (the blue pips).</p></div>
-        <div class="tip"><h4>Grabs &amp; throws</h4><p>${k('X')} grabs the opponent or picks up an object. Press ${k('A')} to pummel, ${k('X')} to throw. ${k('R')}+${k('X')} is your fighter's power grapple.</p></div>
-        <div class="tip"><h4>Defence</h4><p>Hold ${k('Y')} to guard, and add a direction to roll away. ${k('R')}+${k('Y')} super-blocks and reflects projectiles.</p></div>
-        <div class="tip"><h4>Energy &amp; Rage</h4><p>Hold ${k('R')} while standing still to recharge. Landing hits fills Rage: tap ${k('R')} when it's full for ${TUNING.rageDuration}s of unlimited power.</p></div>
-        <div class="tip"><h4>Winning</h4><p>Empty their health (<b>K.O.</b>), knock them off the edge (<b>Ring out</b>), or press ${k('R')}+${k('X')} when they flash <b>DANGER</b> and you have one energy pip (<b>Finisher</b>).</p></div>
-        <div class="tip"><h4>Recovery</h4><p>Knocked into the air? Press ${k('L')}+${k('R')} to recover. Each fighter recovers differently, and it costs energy.</p></div>
+        <div class="tip"><h4>Combos</h4><p>Press ${k('X')} up to three times for a chain. Attack while running, jumping or using mobility for different moves.</p></div>
+        <div class="tip"><h4>Power moves</h4><p>Hold ${k('RT')} and press ${k('X')}. Keep ${k('X')} held to charge a stronger version, or use it while running for a dash attack. Power moves cost energy (the blue pips).</p></div>
+        <div class="tip"><h4>Grabs &amp; throws</h4><p>${k('Y')} grabs the opponent or picks up an object. Press ${k('X')} to pummel, ${k('Y')} to throw. ${k('RT')}+${k('Y')} is your fighter's power grapple.</p></div>
+        <div class="tip"><h4>Defence</h4><p>Hold ${k('B')} to guard, and add a direction to roll away. ${k('RT')}+${k('B')} super-blocks and reflects projectiles.</p></div>
+        <div class="tip"><h4>Energy &amp; Rage</h4><p>Hold ${k('RT')} while standing still to recharge. Landing hits fills Rage: tap ${k('RT')} when it's full for ${TUNING.rageDuration}s of unlimited power.</p></div>
+        <div class="tip"><h4>Winning</h4><p>Empty their health (<b>K.O.</b>), knock them off the edge (<b>Ring out</b>), or press ${k('RT')}+${k('Y')} when they flash <b>DANGER</b> and you have one energy pip (<b>Finisher</b>).</p></div>
+        <div class="tip"><h4>Recovery</h4><p>Knocked into the air? Press ${k('LB')}+${k('RT')} to recover. Each fighter recovers differently, and it costs energy.</p></div>
         <div class="tip"><h4>The arena</h4><p>Fences and barriers break. Every broken section is a new way to win by ring out, for either fighter.</p></div>
       </div>`
       : `<div class="fcards">${ROSTER.map((c) => `

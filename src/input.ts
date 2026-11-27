@@ -128,7 +128,7 @@ function readKeyboard(layout: number, out: RawState) {
 
 // ---------------------------------------------------------------- gamepad
 // Standard mapping: face buttons are mapped by label position, which matches GameCube semantics
-// on an Xbox-style pad (A attack, B jump, X grab, Y guard). LB/LT = L, RB/RT = R.
+// Xbox layout (standard mapping): X attack, A jump, Y grab, B/LT guard, LB mobility, RT/RB power.
 /** Which kind of device the player used most recently: drives which on-screen hints are shown. */
 export let lastInputKind: 'touch' | 'pad' | 'keys' = (('ontouchstart' in window) || navigator.maxTouchPoints > 0) ? 'touch' : 'keys';
 export function noteInput(kind: 'touch' | 'pad' | 'keys') { lastInputKind = kind; }
@@ -157,11 +157,12 @@ export function readGamepad(index: number, out: RawState): boolean {
   if (btn(15)) x = 1;
   out.mx += x;
   out.my += y;
-  if (btn(0)) out.down.attack = true;
-  if (btn(1)) out.down.jump = true;
-  if (btn(2)) out.down.grab = true;
-  if (btn(3)) out.down.guard = true;
-  if (btn(4) || btn(6)) out.down.mobility = true;
+  // Xbox layout: X attack, A jump, Y grab, B (or LT) guard, LB mobility, RT (or RB) power.
+  if (btn(2)) out.down.attack = true;
+  if (btn(0)) out.down.jump = true;
+  if (btn(3)) out.down.grab = true;
+  if (btn(1) || btn(6)) out.down.guard = true;
+  if (btn(4)) out.down.mobility = true;
   if (btn(5) || btn(7)) out.down.power = true;
   if (btn(9)) out.pause = true;
   return true;
@@ -180,14 +181,14 @@ export function installTouch(root: HTMLElement) {
   root.innerHTML = `
     <div class="tstick" id="tstick"><div class="tknob" id="tknob"></div></div>
     <div class="tbtns">
-      <button data-a="mobility" class="tb tl">L</button>
-      <button data-a="power" class="tb tr">R</button>
-      <button data-a="guard" class="tb ty">Y</button>
-      <button data-a="grab" class="tb tx">X</button>
-      <button data-a="attack" class="tb ta">A</button>
-      <button data-a="jump" class="tb tbb">B</button>
-      <button data-a="mobility+power" class="tb tchord tc1">L+R<small>recover</small></button>
-      <button data-a="power+guard" class="tb tchord tc2">R+Y<small>s.block</small></button>
+      <button data-a="mobility" class="tb tl">LB</button>
+      <button data-a="power" class="tb tr">RT</button>
+      <button data-a="guard" class="tb ty">B</button>
+      <button data-a="grab" class="tb tx">Y</button>
+      <button data-a="attack" class="tb ta">X</button>
+      <button data-a="jump" class="tb tbb">A</button>
+      <button data-a="mobility+power" class="tb tchord tc1">LB+RT<small>recover</small></button>
+      <button data-a="power+guard" class="tb tchord tc2">RT+B<small>s.block</small></button>
     </div>
     <button data-a="pause" class="tb tpause">II</button>`;
   if (!isTouch) root.style.display = 'none';

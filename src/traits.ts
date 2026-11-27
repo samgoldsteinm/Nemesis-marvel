@@ -1,7 +1,7 @@
 // Each fighter's passive trait: a rule that only they play by.
 export const TRAITS: Record<string, { name: string; desc: string }> = {
   basalt: { name: 'Bedrock', desc: 'Hyper armour: light hits during his power moves don\'t interrupt him, and he takes 15% less damage.' },
-  tether: { name: 'Web Flip', desc: 'Press B again in the air for a second jump.' },
+  tether: { name: 'Web Flip', desc: 'Press A again in the air for a second jump.' },
   aerin: { name: 'Static Charge', desc: 'Every third hit she lands discharges a shock that stuns longer and drains extra stamina.' },
   shunt: { name: 'Phase Shift', desc: 'His evade is a blink: he vanishes, travels further and is untouchable the whole way.' },
   vanta: { name: 'Bloodletting', desc: 'Her claw hits make the target bleed, draining stamina over time.' },
