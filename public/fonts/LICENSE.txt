@@ -1,0 +1,3 @@
+Anton (Vernon Adams) and Oswald (Vernon Adams, Kalapi Gajjar, Cyreal) are licensed under the
+SIL Open Font License, Version 1.1 — https://openfontlicense.org
+Files taken from the @fontsource/anton and @fontsource/oswald packages (latin subset, woff2).

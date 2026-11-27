@@ -20,7 +20,7 @@ import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, e
 import { initAudio, sfx, startMusic, stopMusic, setMuted, muted, setIntensity } from './audio';
 import { TUNING } from './fighter';
 import { RIM_COLOR } from './characters';
-import { renderPortraits, portraitOf } from './portraits';
+import { renderPortraits, portraitOf, comicOf, faceOf, profileOf } from './portraits';
 import { loadBodyModels, loadPropModels } from './skinned';
 import { loadCityKit, hasCityKit } from './citykit';
 import { PROP_MODELS } from './arena';
@@ -282,7 +282,7 @@ let match: Match | null = null;
 let cpus: (CPU | null)[] = [null, null];
 const trackers = [new EdgeTracker(), new EdgeTracker()];
 let paused = false;
-type Screen = 'title' | 'mode' | 'select' | 'result' | 'pause' | 'moves' | 'padsetup' | 'none';
+type Screen = 'start' | 'title' | 'mode' | 'select' | 'result' | 'pause' | 'moves' | 'padsetup' | 'none';
 let screen: Screen = 'title' as Screen;
 /** Test/automation override: when set, replaces a player's raw input each tick. */
 const forced: (RawState | null)[] = [null, null];
@@ -410,67 +410,142 @@ function sidePanel(side: 0 | 1) {
     </div>`;
 }
 
-function render(s: Screen): string {
-  if (s === 'title') return `
+// ------------------------------------------------------------ menu art helpers
+/** A city skyline silhouette (deterministic per seed) as an SVG data URL, for comic-style panel backdrops. */
+const skylineCache = new Map<number, string>();
+function skyline(seed: number) {
+  let url = skylineCache.get(seed);
+  if (url) return url;
+  let r = seed * 9301 + 49297;
+  const rnd = () => ((r = (r * 9301 + 49297) % 233280) / 233280);
+  let x = 0, back = '', front = '', wins = '';
+  while (x < 400) { const w = 14 + rnd() * 30, h = 70 + rnd() * 110; back += `<rect x="${x.toFixed(1)}" y="${(260 - h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"/>`; x += w + 1; }
+  x = -6;
+  while (x < 400) {
+    const w = 22 + rnd() * 40, h = 40 + rnd() * 120;
+    front += `<rect x="${x.toFixed(1)}" y="${(260 - h).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}"/>`;
+    if (rnd() < 0.35) front += `<rect x="${(x + w * 0.45).toFixed(1)}" y="${(260 - h - 14).toFixed(1)}" width="2" height="14"/>`;
+    for (let wy = 260 - h + 8; wy < 250; wy += 9) for (let wx = x + 4; wx < x + w - 4; wx += 7) if (rnd() < 0.16) wins += `<rect x="${wx.toFixed(1)}" y="${wy.toFixed(1)}" width="3" height="4"/>`;
+    x += w + 2;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 260" preserveAspectRatio="xMidYMax slice"><g fill="rgba(0,0,0,0.28)">${back}</g><g fill="rgba(0,0,0,0.55)">${front}</g><g fill="rgba(255,255,255,0.18)">${wins}</g></svg>`;
+  url = `url('data:image/svg+xml;utf8,${encodeURIComponent(svg)}')`; // single quotes: it goes inside a double-quoted style attribute
+  skylineCache.set(seed, url);
+  return url;
+}
+/** Button prompts that follow the device in use: pad (A/B), keyboard (Enter/Esc) or touch. */
+function prompts(items: ['confirm' | 'back' | 'tab', string][]) {
+  const pad = connectedPads().length > 0 && lastInputKind !== 'touch';
+  const touch = lastInputKind === 'touch';
+  const key = (k: string) => (pad ? { confirm: 'A', back: 'B', tab: 'LB/RB' } : { confirm: 'Enter', back: 'Esc', tab: '←→' })[k as 'confirm'];
+  if (touch) return `<div class="prompts"><span><i class="pk tap">☝</i>${items.find(([k]) => k === 'confirm')?.[1] ?? 'Tap'}</span></div>`;
+  return `<div class="prompts">${items.map(([k, t]) => `<span><i class="pk ${pad ? 'pad-' + k : 'key'}">${key(k)}</i>${t}</span>`).join('')}</div>`;
+}
+function pressLabel() {
+  if (lastInputKind === 'touch') return 'Tap to start';
+  if (connectedPads().length) return 'Press START';
+  return 'Press Enter';
+}
+/** The fighter shown on the title screen (changes each visit). */
+let titleHero = ROSTER[Math.floor(Math.random() * ROSTER.length)];
+
+function renderStart() {
+  const prof = profileOf('shunt') || profileOf('rift');
+  return `
+    <div class="screen start-screen" data-act="start">
+      <div class="band"><i class="smoke s1"></i><i class="smoke s2"></i><i class="smoke s3"></i>${prof ? `<img class="prof" src="${prof}" alt="">` : ''}</div>
+      <div class="logo-wrap"><h1 class="chrome">BREAK<span>LINE</span></h1><div class="chrome-sub">ROOFTOP · OVERPASS · NO WAY DOWN</div></div>
+      <div class="press">${pressLabel()}</div>
+      <div class="copy">© 2026 BREAKLINE</div>
+    </div>`;
+}
+function renderTitle() {
+  const h = titleHero;
+  return `
     <div class="screen title-screen">
-      <h1 class="logo">BREAK<span>LINE</span></h1>
-      <p class="tagline">Superpowered brawls on breakable rooftops and overpasses</p>
-      <div class="big-btns">
-        <button class="bigbtn primary" data-nav data-act="mode" data-arg="cpu"><span class="ico">▶</span><span><b>Fight the CPU</b><small>Single player</small></span></button>
-        <button class="bigbtn" data-nav data-act="mode" data-arg="versus"><span class="ico">⚔</span><span><b>2 Players</b><small>Same screen · two pads, or pad + keyboard</small></span></button>
-        <button class="bigbtn" data-nav data-act="moves"><span class="ico">?</span><span><b>How to play</b><small>Controls, combat basics and move lists</small></span></button>
+      <div class="title-art" style="--c:${h.color};--sky:${skyline(7)}"><div class="bg"></div>${comicOf(h) ? `<img class="pose" src="${comicOf(h)}" alt="">` : ''}<div class="hero-name">${h.name}</div></div>
+      <div class="title-menu">
+        <h1 class="chrome small">BREAK<span>LINE</span></h1>
+        <div class="big-btns">
+          <button class="bigbtn primary" data-nav data-act="mode" data-arg="cpu"><span class="ico">▶</span><span><b>Fight the CPU</b><small>Single player</small></span></button>
+          <button class="bigbtn" data-nav data-act="mode" data-arg="versus"><span class="ico">⚔</span><span><b>2 Players</b><small>Same screen · two pads, or pad + keyboard</small></span></button>
+          <button class="bigbtn" data-nav data-act="moves"><span class="ico">?</span><span><b>How to play</b><small>Controls, combat basics and move lists</small></span></button>
+        </div>
+        <div class="foot">
+          <button class="pill" data-nav data-act="mute">${muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
+          <button class="pill" data-nav data-act="intros">${introsOn ? '🎬 Intros on' : '🎬 Intros off'}</button>
+          <button class="pill" data-nav data-act="voices">${voicesOn ? '🗣 Voices on' : '🗣 Voices off'}</button>
+          <button class="pill" data-nav data-act="layoutcycle">🎮 ${padLayout === 'xbox' ? 'Xbox buttons' : 'GameCube buttons'}</button>
+          <span class="pill static">${connectedPads().length ? connectedPads().length + ' controller' + (connectedPads().length > 1 ? 's' : '') + ' connected' : 'Keyboard: WASD + J K L I U O'}</span>
+        </div>
       </div>
-      <div class="foot">
-        <button class="pill" data-nav data-act="mute">${muted ? '🔇 Sound off' : '🔊 Sound on'}</button>
-        <button class="pill" data-nav data-act="intros">${introsOn ? '🎬 Fight intros on' : '🎬 Fight intros off'}</button>
-        <button class="pill" data-nav data-act="voices">${voicesOn ? '🗣 Voices on' : '🗣 Voices off'}</button>
-        <span class="pill static">🎮 ${connectedPads().length ? connectedPads().length + ' controller' + (connectedPads().length > 1 ? 's' : '') + ' connected' : 'Keyboard: WASD + J K L I U O'}</span>
-        <button class="pill" data-nav data-act="layoutcycle">${padLayout === 'xbox' ? 'Xbox buttons' : 'GameCube buttons'}</button>
+      ${prompts([['confirm', 'Select']])}
+    </div>`;
+}
+/** One side of the fighter select: a comic-toned pose over a duotone skyline, with the fighter's info. */
+function selHalf(side: 0 | 1) {
+  const id = side === 0 ? setup.p1 : setup.p2;
+  const def = charById(id);
+  const who = side === 0 ? 'PLAYER 1' : setup.mode === 'cpu' ? 'CPU' : 'PLAYER 2';
+  const active = selectSide === side && !(locked[0] && locked[1]);
+  const art = comicOf(def);
+  return `
+    <div class="half h${side} ${active ? 'active' : ''} ${locked[side] ? 'locked' : ''}" style="--c:${def.color};--sky:${skyline(side ? 11 : 3)}" data-act="side" data-arg="${side}">
+      <div class="bg"></div>
+      ${art ? `<img class="pose" src="${art}" alt="${def.name}">` : `<div class="pose ini">${def.name[0]}</div>`}
+      <div class="tag"><span class="badge p${side}">${who}</span>${locked[side] ? '<span class="lockd">✓ LOCKED IN</span>' : active ? '<span class="choosing">CHOOSING…</span>' : ''}</div>
+      <div class="info">
+        <div class="nm">${def.name}</div>
+        <div class="ttl">${def.title}</div>
+        <div class="stats">${bars(id)}</div>
+        ${TRAITS[id] ? `<div class="trait"><b>✦ ${TRAITS[id].name}</b> ${TRAITS[id].desc}</div>` : ''}
+        <div class="chips"><span class="chip">${ICON[def.recovery]} ${def.recovery} recovery</span><span class="chip">💪 ${LIFT[def.lift]}</span><span class="chip">★ ${RATINGS[id].difficulty}</span></div>
       </div>
     </div>`;
-  if (s === 'select') {
-    const who = selectSide === 0 ? 'Player 1' : setup.mode === 'cpu' ? 'the CPU' : 'Player 2';
-    return `
+}
+function renderSelect() {
+  const who = selectSide === 0 ? 'Player 1' : setup.mode === 'cpu' ? 'the CPU' : 'Player 2';
+  const cur = LAYOUTS.find((l) => l.id === setup.arena)!;
+  return `
     <div class="screen select-screen">
-      <div class="topbar">
-        <button class="pill" data-nav data-act="title">← Back</button>
-        <h2>Choose fighters</h2>
-        <span class="hintline">${locked[0] && locked[1] ? 'Ready to <b>fight</b>' : `Picking for <b>${who}</b> · tap to preview`}</span>
+      <div class="sel-top">
+        <button class="btn-back" data-nav data-act="title">◀ Back</button>
+        <h2 class="sel-h">${locked[0] && locked[1] ? 'Ready to fight' : `Choose a fighter <small>for ${who}</small>`}</h2>
+        ${prompts([['confirm', locked[0] && locked[1] ? 'Fight' : 'Preview · again to lock in'], ['back', 'Back']])}
       </div>
-      <div class="select-grid">
-        ${sidePanel(0)}
-        <div class="roster">
-          ${ROSTER.map((c) => `
-            <button class="rcard ${setup.p1 === c.id ? 'pick1' : ''} ${setup.p2 === c.id ? 'pick2' : ''}" data-nav data-act="pick" data-arg="${c.id}" style="--c:${c.color}">
-              ${por(c, 'rimg')}
-              <span class="rname">${c.name}</span>
-              <span class="rtags">${setup.p1 === c.id ? '<i class="t1">P1</i>' : ''}${setup.p2 === c.id ? `<i class="t2">${setup.mode === 'cpu' ? 'CPU' : 'P2'}</i>` : ''}</span>
-            </button>`).join('')}
-          <p class="blurb">${charById(selectSide === 0 ? setup.p1 : setup.p2).blurb}</p>
-        </div>
-        ${sidePanel(1)}
+      <div class="vs">${selHalf(0)}${selHalf(1)}<svg class="seam" viewBox="0 0 100 100" preserveAspectRatio="none">${['glow', 'edge', 'core'].map((k) => `<line class="${k} ls" x1="54" y1="0" x2="46" y2="100"/><line class="${k} pt" x1="0" y1="54" x2="100" y2="46"/>`).join('')}</svg><div class="vsmark">VS</div></div>
+      <div class="strip">
+        ${ROSTER.map((c) => {
+          const f = faceOf(c);
+          return `<button class="th ${setup.p1 === c.id ? 'pick1' : ''} ${setup.p2 === c.id ? 'pick2' : ''}" data-nav data-act="pick" data-arg="${c.id}" style="--c:${c.color}" title="${c.name}">
+            <span class="thi">${f ? `<img src="${f}" alt="${c.name}">` : `<b>${c.name[0]}</b>`}</span>
+            <span class="thn">${c.name}</span>
+            ${setup.p1 === c.id ? '<i class="t1">1</i>' : ''}${setup.p2 === c.id ? `<i class="t2">${setup.mode === 'cpu' ? 'C' : '2'}</i>` : ''}
+          </button>`;
+        }).join('')}
       </div>
       <div class="options">
-        <div class="opt"><span class="opt-label">Arena</span><div class="seg arena-pick"><button class="segbtn arr" data-nav data-act="arenaStep" data-arg="-1" aria-label="Previous arena">◀</button><button class="segbtn on arena-cur" data-nav data-act="arenaStep" data-arg="1" title="${LAYOUTS.find((l) => l.id === setup.arena)!.blurb}"><span class="arena-sw ${setup.arena}"></span><span class="lfull">${LAYOUTS.find((l) => l.id === setup.arena)!.name}</span><span class="lshort">${LAYOUTS.find((l) => l.id === setup.arena)!.short}</span><small class="anum">${LAYOUTS.findIndex((l) => l.id === setup.arena) + 1}/${LAYOUTS.length}</small></button><button class="segbtn arr" data-nav data-act="arenaStep" data-arg="1" aria-label="Next arena">▶</button></div></div>
+        <div class="opt"><span class="opt-label">Arena</span><div class="seg arena-pick"><button class="segbtn arr" data-nav data-act="arenaStep" data-arg="-1" aria-label="Previous arena">◀</button><button class="segbtn on arena-cur" data-nav data-act="arenaStep" data-arg="1" title="${cur.blurb}"><span class="arena-sw ${setup.arena}"></span><span class="lfull">${cur.name}</span><span class="lshort">${cur.short}</span><small class="anum">${LAYOUTS.findIndex((l) => l.id === setup.arena) + 1}/${LAYOUTS.length}</small></button><button class="segbtn arr" data-nav data-act="arenaStep" data-arg="1" aria-label="Next arena">▶</button></div></div>
         <div class="opt"><span class="opt-label">Lives</span><div class="seg">${[1, 2, 3, 5].map((n) => `<button class="segbtn ${setup.lives === n ? 'on' : ''}" data-nav data-act="lives" data-arg="${n}">${n} ♥</button>`).join('')}</div></div>
         ${setup.mode === 'cpu' ? `<div class="opt"><span class="opt-label">CPU level</span><div class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="segbtn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div></div>` : ''}
         ${locked[0] && locked[1]
           ? '<button class="fight" data-nav data-act="fight">FIGHT ▶</button>'
-          : `<button class="fight confirm" data-nav data-act="confirm">✓ Confirm<span class="cname"> ${charById(selectSide === 0 ? setup.p1 : setup.p2).name}</span></button>`}
+          : `<button class="fight confirm" data-nav data-act="confirm">✓ Lock in<span class="cname"> ${charById(selectSide === 0 ? setup.p1 : setup.p2).name}</span></button>`}
       </div>
     </div>`;
-  }
-  if (s === 'result' && match?.ended) {
-    const e = match.ended;
-    const how = e.how === 'ko' ? 'K.O.' : e.how === 'ringout' ? 'Ring out' : 'Finisher';
-    const wIdx = e.winner.idx;
-    const label = setup.mode === 'cpu' ? (wIdx === 0 ? 'You win!' : 'CPU wins') : `Player ${wIdx + 1} wins!`;
-    const stat = (f: typeof e.winner) => `
-      <div class="rstat" style="--c:${f.def.color}">${por(f.def, 'mini')}<div><b>${f.def.name}</b>
-        <span>${f.stats.hits} hits · ${f.stats.throws} throws · ${f.stats.catches} catches · ${f.stats.recoveries} recoveries</span></div></div>`;
-    return `
-    <div class="screen result-screen" style="--c:${e.winner.def.color}">
-      <div class="result-art">${por(e.winner.def, 'result-img')}</div>
+}
+function renderResult() {
+  if (!match?.ended) return '';
+  const e = match.ended;
+  const how = e.how === 'ko' ? 'K.O.' : e.how === 'ringout' ? 'Ring out' : 'Finisher';
+  const wIdx = e.winner.idx;
+  const label = setup.mode === 'cpu' ? (wIdx === 0 ? 'You win!' : 'CPU wins') : `Player ${wIdx + 1} wins!`;
+  const stat = (f: typeof e.winner) => `
+    <div class="rstat" style="--c:${f.def.color}">${faceOf(f.def) ? `<img class="mini" src="${faceOf(f.def)}" alt="">` : por(f.def, 'mini')}<div><b>${f.def.name}</b>
+      <span>${f.stats.hits} hits · ${f.stats.throws} throws · ${f.stats.catches} catches · ${f.stats.recoveries} recoveries</span></div></div>`;
+  return `
+    <div class="screen result-screen" style="--c:${e.winner.def.color};--sky:${skyline(19)}">
+      <div class="result-art"><div class="bg"></div>${comicOf(e.winner.def) ? `<img class="result-img" src="${comicOf(e.winner.def)}" alt="">` : por(e.winner.def, 'result-img')}</div>
       <div class="result-body">
         <p class="kicker">${how}</p>
         <h1 class="result-big">${label}</h1>
@@ -484,11 +559,17 @@ function render(s: Screen): string {
         </div>
       </div>
     </div>`;
-  }
+}
+
+function render(s: Screen): string {
+  if (s === 'start') return renderStart();
+  if (s === 'title') return renderTitle();
+  if (s === 'select') return renderSelect();
+  if (s === 'result') return renderResult();
   if (s === 'pause') return `
     <div class="screen pause-screen">
       <div class="card">
-        <h2>Paused</h2>
+        <h2 class="paused-h">Paused</h2>
         <button class="btn2 primary wide" data-nav data-act="resume">▶ Resume</button>
         <button class="btn2 wide" data-nav data-act="rematch">↻ Restart bout</button>
         <button class="btn2 wide" data-nav data-act="moves">? How to play</button>
@@ -570,6 +651,7 @@ function rerender(keepFocus = true) {
 function act(a: string, arg?: string) {
   if (a === 'back' || a === 'title') sfx.back(); else if (a === 'confirm' || a === 'fight') sfx.lockIn(); else sfx.select();
   switch (a) {
+    case 'start': startPressed(); break;
     case 'mode': setup.mode = arg as Mode; selectSide = 0; locked[0] = locked[1] = false; showScreen('select'); break;
     case 'side': selectSide = Number(arg) as 0 | 1; locked[selectSide] = false; rerender(); break;
     case 'pick': {
@@ -602,7 +684,7 @@ function act(a: string, arg?: string) {
     case 'diff': setup.diff = arg as Difficulty; rerender(); break;
     case 'lives': setup.lives = Number(arg); try { localStorage.setItem('bl.lives', String(setup.lives)); } catch { /* */ } rerender(); break;
     case 'tab': howTab = arg as typeof howTab; rerender(); break;
-    case 'title': endIntro(); if (match) { match.dispose(); match = null; } hud.show(false); startMusic('menu'); touchRoot.classList.add('off'); showScreen('title'); break;
+    case 'title': titleHero = ROSTER[Math.floor(Math.random() * ROSTER.length)]; endIntro(); if (match) { match.dispose(); match = null; } hud.show(false); startMusic('menu'); touchRoot.classList.add('off'); showScreen('title'); break;
     case 'select': startMusic('menu'); endIntro(); selectSide = 0; locked[0] = locked[1] = false; if (match) { match.dispose(); match = null; } hud.show(false); showScreen('select'); break;
     case 'rematch': rematch(false); break;
     case 'swap': rematch(true); break;
@@ -670,6 +752,24 @@ function refreshLayoutLabels() {
   refreshTouchLabels(touchRoot);
 }
 
+// ------------------------------------------------------------ Press Start
+/** Leaves the Press Start screen: unlocks audio, starts the menu music, opens the title menu. */
+function startPressed() {
+  if (screen !== 'start') return;
+  initAudio();
+  startMusic('menu');
+  sfx.lockIn?.();
+  showScreen('title');
+}
+let startPadPrev = true; // ignore a button already held when the screen appears
+function pollStartPads() {
+  const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
+  const any = pads.some((g) => g && g.connected && g.buttons.some((b) => b && (b.pressed || b.value > 0.5)));
+  if (any && !startPadPrev) startPressed();
+  startPadPrev = any;
+}
+document.addEventListener('keydown', (e) => { if (screen === 'start' && !e.repeat && !['F3', 'F5', 'F12'].includes(e.code)) { e.preventDefault(); startPressed(); } });
+
 function menuBack() {
   if (screen === 'select') {
     // Back steps out of the last lock-in first, then leaves the screen.
@@ -683,6 +783,8 @@ function menuBack() {
 }
 function menuInput(dtMs: number) {
   // Controllers drive an on-screen arrow cursor; the keyboard keeps step-by-step focus navigation.
+  if (screen === 'start') { hidePadCursor(); pollStartPads(); endInputRead(); return; }
+  startPadPrev = true;
   if (screen === 'padsetup') { hidePadCursor(); pollPadSetup(); }
   const padUsed = screen === 'padsetup' ? false : updatePadCursor(menu, screen, dtMs, () => { if (navCooldown <= 0) { navCooldown = 180; sfx.menu(); menuBack(); } });
   if (padUsed) initAudio();
@@ -703,7 +805,7 @@ function menuInput(dtMs: number) {
   endInputRead();
 }
 
-window.addEventListener('gamepadconnected', (e) => { toast(`Controller ${(e as GamepadEvent).gamepad.index + 1} connected`); if (screen === 'title') showScreen('title'); });
+window.addEventListener('gamepadconnected', (e) => { toast(`Controller ${((e as GamepadEvent).gamepad?.index ?? 0) + 1} connected`); if (screen === 'title' || screen === 'start' || screen === 'select') rerender(); });
 window.addEventListener('gamepaddisconnected', (e) => {
   const idx = (e as GamepadEvent).gamepad.index;
   toast(`Controller ${idx + 1} disconnected`);
@@ -863,7 +965,7 @@ function frame(now: number) {
   }
 }
 applyPalette('rooftop');
-menu.innerHTML = '<div class="screen"><h1 class="logo">BREAK<span>LINE</span></h1><div class="tagline">Loading fighters…</div></div>';
+menu.innerHTML = '<div class="screen start-screen loading"><div class="band"><i class="smoke s1"></i><i class="smoke s2"></i></div><div class="logo-wrap"><h1 class="chrome">BREAK<span>LINE</span></h1></div><div class="press">Loading fighters…</div></div>';
 requestAnimationFrame(frame);
 
 // ============================================================ automation / test hooks
@@ -907,5 +1009,5 @@ Promise.all([loadBodyModels('./models'), loadPropModels('./models/props', PROP_M
     hud.portraits = (id: string) => portraitOf(charById(id));
     (window as any).__game = hooks;
     startMusic('menu'); // begins as soon as audio is unlocked by the first tap/key
-    showScreen('title');
+    showScreen('start');
   });

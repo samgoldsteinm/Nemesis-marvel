@@ -105,6 +105,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-27 | Voiced intro lines: 90 Piper TTS clips (one per line; lines naming the opponent recorded per opponent) with per-fighter persona processing, `public/voices/<id>/<key>.mp3` + `manifest.json` (duration, speech end, 30 fps mouth envelope). Intro plays them on the voice bus, ducks music, stretches shots to fit, types subtitles in sync; talking animation (lips/mouth open, head nods, accent glow pulse). Generator: scratchpad `tts/gen.py` (copy kept in `tools/voices/gen.py`) |
 | 11-27 | Both layouts: Xbox and GameCube (switch on the title screen or in How to Play → Controls; GameCube controllers/adapters auto-switch). Non-standard GameCube adapters (Mayflash etc.) get a raw button map; a "Set up controller" screen records each action's button/trigger per controller (`bl.bind.<pad id>` in localStorage). Menu confirm/back, HUD prompts, move lists, tips and touch labels follow the layout (`layoutText`, `actionLabel` in input.ts) |
 | 11-27 | Real talking jaws: per-vertex `aJaw` weights computed from each face (nose/chin profile) + vertex-shader rotation about a hinge before skinning, on grafted heads, painted mannequin heads and the golem; outlines deform too; lower lip pieces rotate with the chin; golem gets a magma glow inside the mouth. Per-fighter strength in `looks.ts` (`look.jaw`) |
+| 11-27 | Menu redesign: red accent (`--hot` #ff3b4e / `--hot2` #b8142c) replaces orange; Anton + Oswald fonts (OFL, `public/fonts`); Press Start screen (chrome logo, smoky teal band, duotone fighter profile, blinking prompt); title with comic-toned hero art; fighter select = two diagonal-split panels (P1 blue, P2 red, skyline + halftone backdrops, posterised poses) + duotone face roster strip + device-aware button prompts; restyled results/pause/how-to |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -180,6 +181,11 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - Jaw verification shots: freeze the fighter (`f.animate = () => {}`, `skeleton.pose()`) and place `vcam.cam` by hand (`vcam.update = () => {}`); the cinematic camera orbits and clamps height, which made earlier comparisons useless.
 - Dark mouths vanish on dark faces (Vanta): use a coloured mouth interior.
 - AudioBuffers decode on a throwaway OfflineAudioContext if sound isn't unlocked yet (decode isn't tied to the playing context).
+
+**Menus**
+- Inline SVG data URLs used inside a double-quoted `style="..."` attribute must use single quotes in `url('...')`, or the attribute ends early and the backdrop silently vanishes.
+- Portrait variants (`portraits.ts`): pose, comic (posterised), face (duotone), profile (duotone) — all rendered once at load; faces need the camera ~1.9× head scale away or they crop to the forehead.
+- The Press Start screen is `screen = 'start'`; test hooks (`__game.start`) bypass it.
 
 **Process**
 - Background agents editing files while tests run make Vite hot-reload the page mid-test → failures that say
