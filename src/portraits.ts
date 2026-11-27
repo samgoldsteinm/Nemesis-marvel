@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Rig } from './rig';
 import { SkinnedBody, hasBodyModel, hasClip } from './skinned';
-import { ROSTER, CharacterDef, finishMaterial } from './characters';
+import { ROSTER, CharacterDef, finishMaterial, RIM_COLOR } from './characters';
 
 // Character art rendered from each fighter's actual 3D model in a small studio scene, as transparent
 // PNG data URLs for the menus and HUD:
@@ -61,6 +61,54 @@ function posterize(src: HTMLCanvasElement, bands = 4) {
   return c;
 }
 
+/**
+ * Comic tone for the stone golem: charcoal stone in three tight bands (no muddy beige mid-tones),
+ * with saturated warm pixels (the lava cracks) kept bright and glowing.
+ */
+function posterizeStone(src: HTMLCanvasElement) {
+  const c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  const g = c.getContext('2d')!;
+  g.drawImage(src, 0, 0);
+  const img = g.getImageData(0, 0, c.width, c.height);
+  const d = img.data;
+  const ramp = [[30, 30, 35], [64, 63, 70], [106, 104, 112], [158, 156, 164]];
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] === 0) continue;
+    const r = d[i], gg = d[i + 1], b = d[i + 2];
+    const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b);
+    const sat = mx > 0 ? (mx - mn) / mx : 0;
+    // Lava: clearly red/orange and bright — keep, pushed hotter.
+    if (r > 120 && r > gg * 1.35 && r > b * 1.6 && sat > 0.45) {
+      d[i] = Math.min(255, r * 1.15); d[i + 1] = Math.min(255, gg * 0.95); d[i + 2] = b * 0.6;
+      continue;
+    }
+    const L = (0.3 * r + 0.59 * gg + 0.11 * b) / 255;
+    const k = Math.min(3, Math.floor(Math.pow(L, 0.8) * 4.4));
+    d[i] = ramp[k][0]; d[i + 1] = ramp[k][1]; d[i + 2] = ramp[k][2];
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+
+/** Crops a render to its opaque bounding box plus a small padding, so CSS contain fills the box. */
+function autocrop(src: HTMLCanvasElement, pad = 0.03) {
+  const g = src.getContext('2d')!;
+  const { width: W, height: H } = src;
+  const d = g.getImageData(0, 0, W, H).data;
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (d[(y * W + x) * 4 + 3] > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  if (x1 < 0) return src;
+  const p = Math.round(Math.max(x1 - x0, y1 - y0) * pad);
+  x0 = Math.max(0, x0 - p); y0 = Math.max(0, y0 - p); x1 = Math.min(W - 1, x1 + p); y1 = H - 1; // keep the feet line
+  const c = document.createElement('canvas');
+  c.width = x1 - x0 + 1; c.height = y1 - y0 + 1;
+  c.getContext('2d')!.drawImage(src, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
+  return c;
+}
+
 /** Duotone: luminance mapped from a dark ink to a light tint (alpha kept). */
 export function duotone(src: HTMLCanvasElement, dark: number, light: number, gamma = 0.85) {
   const c = document.createElement('canvas');
@@ -99,7 +147,8 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
   const key = new THREE.DirectionalLight(0xfff0e0, 3.2);
   key.position.set(2.5, 4, 4);
   scene.add(key);
-  const rim = new THREE.DirectionalLight(0x8ab8ff, 2.6);
+  // Neutral-cool back light (a saturated blue rim gave the golem a lavender outline).
+  const rim = new THREE.DirectionalLight(0xd8e0ea, 1.6);
   rim.position.set(-3, 3, -4);
   scene.add(rim);
   const prevTarget = renderer.getRenderTarget();
@@ -107,6 +156,9 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
   const prevAlpha = renderer.getClearAlpha();
   const prevTM = renderer.toneMapping;
   renderer.setClearColor(0x000000, 0);
+  // The material rim colour follows the arena palette; keep it neutral and dim for studio portraits.
+  const prevRim = RIM_COLOR.value.clone();
+  RIM_COLOR.value.setRGB(0.55, 0.55, 0.58);
   const head = new THREE.Vector3();
 
   const shots: Record<'pose' | 'face' | 'profile', Shot> = {
@@ -186,8 +238,9 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
         }
       }
       if (kind === 'pose') {
-        portraits.set(def.id, c.toDataURL('image/png'));
-        comics.set(def.id, posterize(c).toDataURL('image/png'));
+        const cropped = autocrop(c);
+        portraits.set(def.id, cropped.toDataURL('image/png'));
+        comics.set(def.id, (def.look!.golem ? posterizeStone(cropped) : posterize(cropped)).toDataURL('image/png'));
       } else if (kind === 'face') {
         faces.set(def.id, duotone(c, 0x0a2436, 0xd6f3ff, 0.62).toDataURL('image/png'));
       } else {
@@ -196,6 +249,7 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
     }
     scene.remove(rig.root);
   }
+  RIM_COLOR.value.copy(prevRim);
   renderer.setRenderTarget(prevTarget);
   renderer.setClearColor(prevClear, prevAlpha);
   renderer.toneMapping = prevTM;

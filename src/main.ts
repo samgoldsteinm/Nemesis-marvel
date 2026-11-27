@@ -18,7 +18,7 @@ import { Match } from './match';
 import { HUD } from './hud';
 import { CPU, Difficulty } from './ai';
 import { ROSTER, CharacterDef, charById } from './characters';
-import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, refreshTouchLabels, padLayout, setPadLayout, autoLayoutForPads, layoutText, actionLabel, getBinding, saveBinding, bindingFor, PadBinding, PadSrc, ACTIONS, keyDown, endInputRead, padActivity, noteInput, lastInputKind } from './input';
+import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, refreshTouchLabels, padLayout, setPadLayout, autoLayoutForPads, layoutText, actionLabel, getBinding, saveBinding, bindingFor, PadBinding, PadSrc, ACTIONS, keyDown, endInputRead, padActivity, noteInput, lastInputKind, setTouchContext } from './input';
 import { initAudio, sfx, startMusic, stopMusic, setMuted, muted, setIntensity } from './audio';
 import { TUNING } from './fighter';
 import { RIM_COLOR } from './characters';
@@ -437,6 +437,19 @@ function updateControlOverlay() {
   touchRoot.classList.toggle('off', !(inMatch && lastInputKind === 'touch'));
   keysHint.style.display = inMatch && lastInputKind === 'keys' ? '' : 'none';
   document.body.classList.toggle('in-match', inMatch);
+  document.body.classList.toggle('touch-mode', lastInputKind === 'touch');
+  // Contextual touch buttons (Rage, Finish, Recover, Charge, Throw) for the local touch player.
+  if (inMatch && lastInputKind === 'touch' && match) {
+    const f = match.fighters[setup.mode === 'online' ? online.side : 0];
+    setTouchContext({
+      rage: f.alive && f.rage >= 100 && !f.raging,
+      finish: f.alive && f.opp.danger && f.hasEnergy(TUNING.finisherCost),
+      recover: f.alive && f.state === 'launched' && f.t > 6 && f.hasEnergy(TUNING.recoveryCost),
+      holding: !!f.heldProp,
+      charge: f.alive && f.onGround && (f.state === 'ground' || f.state === 'charge') && f.energy < 100 && !f.raging,
+      guarding: f.state === 'guard' || f.state === 'sblock',
+    });
+  }
 }
 window.addEventListener('gamepadconnected', () => { noteInput('pad'); autoLayoutForPads(); refreshLayoutLabels(); updateControlOverlay(); });
 window.addEventListener('gamepaddisconnected', () => {
@@ -711,13 +724,13 @@ function render(s: Screen): string {
     const k = (x: string) => `<kbd>${x}</kbd>`;
     const kp = (x: string) => `<kbd>${layoutText(x)}</kbd>`; // pad button, named for the active layout
     const ctl: [string, string, string, string][] = [
-      ['Move', 'Left stick', k('W') + k('A') + k('S') + k('D'), 'Left pad'],
-      ['Attack', kp('X'), k('J'), layoutText('X')],
-      ['Jump', kp('A'), k('K'), layoutText('A')],
-      ['Grab / pick up / throw', kp('Y'), k('L'), layoutText('Y')],
-      ['Guard (tap as a prop arrives to catch it)', padLayout === 'gamecube' ? kp('B') : kp('B') + '/' + kp('LT'), k('I'), layoutText('B')],
-      ['Mobility: sprint, swing, fly, teleport', kp('LB'), k('U'), layoutText('LB')],
-      ['Power modifier', padLayout === 'gamecube' ? kp('RT') : kp('RT') + '/' + kp('RB'), k('O'), layoutText('RT')],
+      ['Move', 'Left stick', k('W') + k('A') + k('S') + k('D'), 'Drag anywhere on the left'],
+      ['Attack', kp('X'), k('J'), 'ATTACK'],
+      ['Jump', kp('A'), k('K'), 'JUMP'],
+      ['Grab / pick up / throw', kp('Y'), k('L'), 'GRAB (becomes THROW)'],
+      ['Guard (tap as a prop arrives to catch it)', padLayout === 'gamecube' ? kp('B') : kp('B') + '/' + kp('LT'), k('I'), 'GUARD (+ stick = dodge)'],
+      ['Mobility: sprint, swing, fly, teleport', kp('LB'), k('U'), 'DASH (hold)'],
+      ['Power modifier', padLayout === 'gamecube' ? kp('RT') : kp('RT') + '/' + kp('RB'), k('O'), 'SPECIAL = power attack · hold to charge it up'],
       ['Pause', k('Start'), k('Esc'), '❚❚'],
     ];
     const body = howTab === 'controls' ? `
@@ -725,6 +738,7 @@ function render(s: Screen): string {
       <tbody>${ctl.map(([a, g, kb, t]) => `<tr><td>${a}</td><td>${g}</td><td>${kb}</td><td>${t}</td></tr>`).join('')}</tbody></table>
       <div class="padopts"><span class="opt-label">Button layout</span><div class="seg">${(['xbox', 'gamecube'] as const).map((l) => `<button class="segbtn ${padLayout === l ? 'on' : ''}" data-nav data-act="layout" data-arg="${l}">${l === 'xbox' ? 'Xbox' : 'GameCube'}</button>`).join('')}</div>
         <button class="pill" data-nav data-act="padsetup">🎮 Set up controller</button></div>
+      <p class="note"><b>On a phone:</b> drag anywhere on the left half to move. <b>GUARD + SPECIAL</b> together = super block. Extra buttons pop up when you can use them: <b>RAGE</b> (meter full), <b>FINISH</b> (opponent in Danger), <b>RECOVER</b> (knocked into the air) and <b>CHARGE</b> (hold to refill energy).</p>
       <p class="note">GameCube controllers switch to the GameCube layout automatically. If a button doesn't respond (some adapters report unusual button numbers), use <b>Set up controller</b> and press each button once.</p>
       <p class="note">Player 2 on keyboard: arrows to move, ${k('.')} attack, ${k('/')} jump, ${k(',')} grab, ${k(';')} guard, ${k('Right Shift')} mobility, ${k('Enter')} power.</p>`
       : howTab === 'combat' ? `

@@ -54,7 +54,7 @@ export class HUD {
 
   /** Button names in the prompts follow the active controller layout. */
   refreshLabels() {
-    for (const p of this.panels) (p.querySelector('.fin') as HTMLElement).innerHTML = `<kbd>${actionLabel('power')}</kbd>+<kbd>${actionLabel('grab')}</kbd> FINISH`;
+    for (const p of this.panels) (p.querySelector('.fin') as HTMLElement).innerHTML = `<span class="padk"><kbd>${actionLabel('power')}</kbd>+<kbd>${actionLabel('grab')}</kbd> </span>FINISH`;
   }
 
   show(on: boolean) {
@@ -114,7 +114,7 @@ export class HUD {
       const ready = f.rage >= 100;
       rg.parentElement!.classList.toggle('ready', ready);
       rageTag.style.display = ready ? '' : 'none';
-      rageTag.textContent = `RAGE · TAP ${actionLabel('power')}`;
+      rageTag.textContent = document.body.classList.contains('touch-mode') ? 'RAGE READY' : `RAGE · TAP ${actionLabel('power')}`;
     }
     (p.querySelector('.danger') as HTMLElement).style.display = f.danger ? '' : 'none';
     (p.querySelector('.danger') as HTMLElement).style.opacity = Math.floor(time * 4) % 2 === 0 ? '1' : '0.45';

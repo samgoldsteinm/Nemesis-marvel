@@ -259,63 +259,90 @@ export function layoutText(t: string): string {
   return t.replace(/\b(LB|RT|LT|RB|X|A|Y|B)\b/g, (k) => m[k] ?? k);
 }
 
-/** Touch buttons show the active layout's names. */
-export function refreshTouchLabels(root: HTMLElement) {
-  const set = (sel: string, html: string) => { const el = root.querySelector(sel) as HTMLElement | null; if (el) el.innerHTML = html; };
-  set('.ta', actionLabel('attack')); set('.tbb', actionLabel('jump')); set('.tx', actionLabel('grab')); set('.ty', actionLabel('guard'));
-  set('.tl', actionLabel('mobility')); set('.tr', actionLabel('power'));
-  set('.tc1', `${actionLabel('mobility')}+${actionLabel('power')}<small>recover</small>`);
-  set('.tc2', `${actionLabel('power')}+${actionLabel('guard')}<small>s.block</small>`);
-}
+/** Touch controls use plain words, not pad letters, so there is nothing to relabel. Kept for callers. */
+export function refreshTouchLabels(_root: HTMLElement) { /* touch buttons are named by action */ }
 
 // ---------------------------------------------------------------- touch
+// Phone-first controls: a floating stick on the left half (it appears under your thumb), named action
+// buttons in an arc on the right, and buttons that only appear when they're useful (Rage, Finish,
+// Recover, Charge). Each button maps to the same actions a pad sends, so the game logic is shared.
 export const touchState: RawState = emptyRaw();
 let touchActive = false;
 export function isTouchActive() {
   return touchActive;
 }
 
+/** What the touch HUD should offer right now (set by the game each frame). */
+export interface TouchContext { rage: boolean; finish: boolean; recover: boolean; holding: boolean; charge: boolean; guarding: boolean }
+let touchCtx: TouchContext = { rage: false, finish: false, recover: false, holding: false, charge: false, guarding: false };
+let touchRootEl: HTMLElement | null = null;
+export function setTouchContext(c: TouchContext) {
+  const prev = touchCtx;
+  touchCtx = c;
+  const root = touchRootEl;
+  if (!root) return;
+  if (c.rage !== prev.rage) root.classList.toggle('c-rage', c.rage);
+  if (c.finish !== prev.finish) root.classList.toggle('c-finish', c.finish);
+  if (c.recover !== prev.recover) root.classList.toggle('c-recover', c.recover);
+  if (c.charge !== prev.charge) root.classList.toggle('c-charge', c.charge);
+  if (c.holding !== prev.holding) { const g = root.querySelector('.k-grab .lb'); if (g) g.textContent = c.holding ? 'THROW' : 'GRAB'; }
+}
+
+type TouchBtn = { el: HTMLElement; ids: Set<number>; acts: ActionName[]; pause?: boolean; dyn?: () => ActionName[] };
+
 export function installTouch(root: HTMLElement) {
+  touchRootEl = root;
   window.addEventListener('touchstart', () => noteInput('touch'), { passive: true });
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  const btn = (cls: string, label: string, icon: string, hint = '') => `<button class="tk ${cls}"><span class="ic">${icon}</span><span class="lb">${label}</span>${hint ? `<small>${hint}</small>` : ''}</button>`;
   root.innerHTML = `
-    <div class="tstick" id="tstick"><div class="tknob" id="tknob"></div></div>
-    <div class="tbtns">
-      <button data-a="mobility" class="tb tl">LB</button>
-      <button data-a="power" class="tb tr">RT</button>
-      <button data-a="guard" class="tb ty">B</button>
-      <button data-a="grab" class="tb tx">Y</button>
-      <button data-a="attack" class="tb ta">X</button>
-      <button data-a="jump" class="tb tbb">A</button>
-      <button data-a="mobility+power" class="tb tchord tc1">LB+RT<small>recover</small></button>
-      <button data-a="power+guard" class="tb tchord tc2">RT+B<small>s.block</small></button>
+    <div class="tzone"></div>
+    <div class="tstick rest"><div class="tknob"></div></div>
+    <div class="tpad">
+      ${btn('k-attack', 'ATTACK', '👊')}
+      ${btn('k-jump', 'JUMP', '⤒')}
+      ${btn('k-special', 'SPECIAL', '✦', 'hold = charged')}
+      ${btn('k-grab', 'GRAB', '✋')}
+      ${btn('k-guard', 'GUARD', '🛡')}
+      ${btn('k-dash', 'DASH', '»')}
+      ${btn('k-charge ctx', 'CHARGE', '⚡', 'hold')}
+      ${btn('k-rage ctx', 'RAGE', '🔥')}
+      ${btn('k-finish ctx', 'FINISH', '☠')}
+      ${btn('k-recover ctx', 'RECOVER', '⇧')}
     </div>
-    <button data-a="pause" class="tb tpause">II</button>`;
-  refreshTouchLabels(root);
+    <button class="tk tpause" aria-label="Pause">❚❚</button>`;
   if (!isTouch) root.style.display = 'none';
-  const stick = root.querySelector('#tstick') as HTMLElement;
-  const knob = root.querySelector('#tknob') as HTMLElement;
+
+  // ---- floating stick: appears where the left thumb lands, recentres on release
+  const zone = root.querySelector('.tzone') as HTMLElement;
+  const stick = root.querySelector('.tstick') as HTMLElement;
+  const knob = root.querySelector('.tknob') as HTMLElement;
   let stickId: number | null = null;
   let cx = 0, cy = 0;
-  const R = 50;
-  stick.addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    touchActive = true;
-    const t = e.changedTouches[0];
-    stickId = t.identifier;
-    const r = stick.getBoundingClientRect();
-    cx = r.left + r.width / 2;
-    cy = r.top + r.height / 2;
-    moveStick(t.clientX, t.clientY);
-  }, { passive: false });
+  const R = 56, DZ = 0.14;
+  const place = (x: number, y: number) => { stick.style.left = `${x}px`; stick.style.top = `${y}px`; };
   const moveStick = (x: number, y: number) => {
     let dx = x - cx, dy = y - cy;
     const l = Math.hypot(dx, dy);
     if (l > R) { dx *= R / l; dy *= R / l; }
     knob.style.transform = `translate(${dx}px, ${dy}px)`;
-    touchState.mx = dx / R;
-    touchState.my = -dy / R;
+    let mx = dx / R, my = -dy / R;
+    const m = Math.hypot(mx, my);
+    if (m < DZ) { mx = 0; my = 0; } else { const k = (m - DZ) / (1 - DZ) / m; mx *= k; my *= k; }
+    touchState.mx = mx;
+    touchState.my = my;
   };
+  zone.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    touchActive = true;
+    if (stickId !== null) return;
+    const t = e.changedTouches[0];
+    stickId = t.identifier;
+    cx = t.clientX; cy = t.clientY;
+    place(cx, cy);
+    stick.classList.remove('rest');
+    moveStick(cx, cy);
+  }, { passive: false });
   window.addEventListener('touchmove', (e) => {
     for (const t of Array.from(e.changedTouches)) if (t.identifier === stickId) { e.preventDefault(); moveStick(t.clientX, t.clientY); }
   }, { passive: false });
@@ -324,38 +351,57 @@ export function installTouch(root: HTMLElement) {
       stickId = null;
       touchState.mx = 0; touchState.my = 0;
       knob.style.transform = '';
+      stick.classList.add('rest');
+      stick.style.left = ''; stick.style.top = '';
     }
   };
   window.addEventListener('touchend', endStick);
   window.addEventListener('touchcancel', endStick);
 
-  // Each button tracks its own touch ids so several can be held while steering.
-  root.querySelectorAll<HTMLButtonElement>('.tb').forEach((b) => {
-    const acts = (b.dataset.a || '').split('+');
-    const ids = new Set<number>();
-    const apply = () => {
-      const on = ids.size > 0;
-      b.classList.toggle('on', on);
-      recomputeTouchButtons();
-    };
-    (b as any)._ids = ids;
-    (b as any)._acts = acts;
-    b.addEventListener('touchstart', (e) => { e.preventDefault(); touchActive = true; for (const t of Array.from(e.changedTouches)) ids.add(t.identifier); apply(); }, { passive: false });
-    const end = (e: TouchEvent) => { for (const t of Array.from(e.changedTouches)) ids.delete(t.identifier); apply(); };
-    b.addEventListener('touchend', end);
-    b.addEventListener('touchcancel', end);
-  });
-  function recomputeTouchButtons() {
+  // ---- buttons: each tracks its own touches so several can be held while steering
+  const q = (c: string) => root.querySelector(c) as HTMLElement;
+  const btns: TouchBtn[] = [];
+  const add = (sel: string, acts: ActionName[], extra: Partial<TouchBtn> = {}) => btns.push({ el: q(sel), ids: new Set(), acts, ...extra });
+  add('.k-attack', ['attack']);
+  add('.k-jump', ['jump']);
+  // SPECIAL = power + attack (hold to charge the charged power). While guarding it adds power only: super block.
+  add('.k-special', [], { dyn: () => (btns.find((b) => b.el.classList.contains('k-guard'))!.ids.size ? ['power'] : ['power', 'attack']) });
+  add('.k-grab', ['grab']);
+  add('.k-guard', ['guard']);
+  add('.k-dash', ['mobility']);
+  add('.k-charge', ['power']);
+  add('.k-rage', ['power']);
+  add('.k-finish', ['power', 'grab']);
+  add('.k-recover', ['mobility', 'power']);
+  add('.tpause', [], { pause: true });
+  const recompute = () => {
     for (const a of ACTIONS) touchState.down[a] = false;
     touchState.pause = false;
-    root.querySelectorAll<HTMLButtonElement>('.tb').forEach((b) => {
-      if ((b as any)._ids.size === 0) return;
-      for (const a of (b as any)._acts as string[]) {
-        if (a === 'pause') touchState.pause = true;
-        else touchState.down[a as ActionName] = true;
-      }
-    });
+    for (const b of btns) {
+      if (!b.ids.size) continue;
+      if (b.pause) touchState.pause = true;
+      for (const a of (b as any)._live ?? b.acts) touchState.down[a as ActionName] = true;
+    }
+  };
+  for (const b of btns) {
+    b.el.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      touchActive = true;
+      if (!b.ids.size && b.dyn) (b as any)._live = b.dyn();
+      for (const t of Array.from(e.changedTouches)) b.ids.add(t.identifier);
+      b.el.classList.add('on');
+      recompute();
+    }, { passive: false });
+    const end = (e: TouchEvent) => {
+      for (const t of Array.from(e.changedTouches)) b.ids.delete(t.identifier);
+      if (!b.ids.size) { b.el.classList.remove('on'); (b as any)._live = undefined; }
+      recompute();
+    };
+    b.el.addEventListener('touchend', end);
+    b.el.addEventListener('touchcancel', end);
+    b.el.addEventListener('contextmenu', (e) => e.preventDefault());
   }
+  root.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
 // ---------------------------------------------------------------- player binding
