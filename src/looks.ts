@@ -821,6 +821,12 @@ const withMouth = (id: string, adorn: Adorn): Adorn => (b, rig) => {
   return mats;
 };
 
+// Talking jaw strength per fighter: big for the brutes, barely moving under masks.
+basaltLook.jaw = { open: 0.55 };
+emberLook.jaw = { open: 0.55 };
+tetherLook.jaw = { open: 0.16 };
+shuntLook.jaw = { open: 0.12 };
+
 export const LOOKS: Record<string, { look: BodyLook; adorn: Adorn }> = {
   basalt: { look: basaltLook, adorn: withMouth('basalt', basaltAdorn) },
   tether: { look: tetherLook, adorn: withMouth('tether', tetherAdorn) },

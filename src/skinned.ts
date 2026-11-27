@@ -102,6 +102,8 @@ export interface BodyLook {
   eyeGlow?: number;
   /** Replace the whole body with the rock golem model (retargeted from the mannequin's animation). */
   golem?: { emissive?: number; emissiveIntensity?: number };
+  /** Talking jaw: max open angle (rad, default 0.45) and mouth line as a fraction of head height from the chin (default 0.3). */
+  jaw?: { open?: number; mouth?: number; hinge?: number };
 }
 
 /** Region colours for vertex painting (hex). Unset regions fall back as noted. */
@@ -312,6 +314,55 @@ float cellEdge(vec3 p){ vec3 i = floor(p), f = fract(p); float d1 = 8.0, d2 = 8.
 }
 
 /** Drop the mannequin's head triangles (a grafted head replaces them). */
+
+// ------------------------------------------------------------------ talking jaw (vertex shader)
+/** Shader patch: rotate jaw-weighted vertices (attribute aJaw) about a hinge, in mesh space, before skinning. */
+export interface JawUniforms { uJaw: { value: number }; uJawHinge: { value: THREE.Vector3 }; uJawAxis: { value: THREE.Vector3 } }
+function patchJaw(mat: THREE.Material, u: JawUniforms) {
+  const prev = mat.onBeforeCompile, prevKey = mat.customProgramCacheKey();
+  mat.onBeforeCompile = (sh, r) => {
+    prev.call(mat, sh, r);
+    Object.assign(sh.uniforms, u);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+attribute float aJaw;
+uniform float uJaw;
+uniform vec3 uJawHinge;
+uniform vec3 uJawAxis;
+vec3 jawRot(vec3 v, float a) { float c = cos(a), s = sin(a); return v * c + cross(uJawAxis, v) * s + uJawAxis * dot(uJawAxis, v) * (1.0 - c); }`)
+      .replace('#include <skinnormal_vertex>', `objectNormal = jawRot(objectNormal, uJaw * aJaw);
+#include <skinnormal_vertex>`)
+      .replace('#include <skinning_vertex>', `transformed = uJawHinge + jawRot(transformed - uJawHinge, uJaw * aJaw);
+#include <skinning_vertex>`);
+  };
+  mat.customProgramCacheKey = () => prevKey + '|jaw';
+}
+const ss = (a: number, b: number, x: number) => { const t = THREE.MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+/** Face frame measured from the head's vertices in the current (reference) pose, in world space (+Y up, +Z forward). */
+interface JawFrame { minY: number; maxY: number; minZ: number; maxZ: number; cx: number; w: number; mouthY: number; hinge: THREE.Vector3 }
+function headVerts(m: THREE.SkinnedMesh, headBones: Set<number>, minW: number, each: (i: number, p: THREE.Vector3, hw: number) => void) {
+  const geo = m.geometry, pos = geo.attributes.position, si = geo.attributes.skinIndex, sw = geo.attributes.skinWeight;
+  if (!si || !sw) return;
+  const hb = m.skeleton.bones.find((b, i) => headBones.has(i) && /head/i.test(b.name)) ?? m.skeleton.bones[[...headBones][0]];
+  const hi = m.skeleton.bones.indexOf(hb);
+  const M = new THREE.Matrix4().multiplyMatrices(hb.matrixWorld, m.skeleton.boneInverses[hi]).multiply(m.bindMatrix);
+  const p = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    let hw = 0;
+    for (let c = 0; c < 4; c++) if (headBones.has(si.getComponent(i, c))) hw += sw.getComponent(i, c);
+    if (hw < minW) continue;
+    p.fromBufferAttribute(pos, i).applyMatrix4(M);
+    each(i, p, hw);
+  }
+}
+function headBoneSet(m: THREE.SkinnedMesh, root: string): Set<number> {
+  const set = new Set<number>();
+  const hb = m.skeleton.bones.find((b) => b.name === root);
+  if (!hb) return set;
+  m.skeleton.bones.forEach((b, i) => { let o: THREE.Object3D | null = b; while (o) { if (o === hb) { set.add(i); break; } o = o.parent; } });
+  return set;
+}
+
 function removeHead(m: THREE.SkinnedMesh) {
   const geo = m.geometry, idx = geo.index;
   if (!idx) return;
@@ -445,6 +496,15 @@ export class SkinnedBody {
       for (const m of meshes) { m.visible = false; m.castShadow = false; noOutline.add(m); }
       this.setupGolem(look, decorate, s);
     }
+    // Talking jaw: weights + shader on whatever shows the face (grafted head, painted mannequin head or golem).
+    const faceMeshes: THREE.SkinnedMesh[] = [];
+    this.model.traverse((o) => {
+      const k = o as THREE.SkinnedMesh;
+      if (!k.isSkinnedMesh || k.userData.outline || !k.visible) return;
+      if (this.isGolem ? meshes.includes(k) : this.isModel ? !k.userData.headPart : false) return;
+      faceMeshes.push(k);
+    });
+    this.setupJaw(faceMeshes, look);
     for (const m of meshes) if (!noOutline.has(m)) this.addOutline(m, s);
     if (!this.jointMat) this.jointMat = this.bodyMat;
     this.proportions = this.measure();
@@ -630,6 +690,117 @@ export class SkinnedBody {
     m.material = mat;
   }
 
+
+  // ------------------------------------------------------------------ talking jaw
+  readonly jawU: JawUniforms['uJaw'] = { value: 0 };
+  private jawMax = 0.26;
+  /** Hinge point and left-right axis in the head bone's local frame (for moving lip/jaw pieces with the chin). */
+  private jawBone: THREE.Bone | null = null;
+  private jawHinge = new THREE.Vector3();
+  private jawAxis = new THREE.Vector3(1, 0, 0);
+  private jawGlow: THREE.Mesh | null = null;
+  private setupJaw(meshes: THREE.SkinnedMesh[], look: BodyLook) {
+    const allMeshes = meshes;
+    this.model.updateMatrixWorld(true);
+    const root = this.isGolem ? 'CC_Base_Head' : 'Head';
+    const sets = new Map(allMeshes.map((m) => [m, headBoneSet(m, root)]));
+    // Hair and eyes never take jaw weights (and don't define the face frame).
+    meshes = meshes.filter((m) => !/hair|eye/i.test(`${m.name} ${(m.material as THREE.Material).name ?? ''}`));
+    // Face frame from the mesh with the most head vertices.
+    let best: THREE.SkinnedMesh | null = null, bestN = 0;
+    for (const m of meshes) { let n = 0; headVerts(m, sets.get(m)!, 0.6, () => n++); if (n > bestN) { bestN = n; best = m; } }
+    if (!best || bestN < 50) return;
+    const mn = new THREE.Vector3(1e9, 1e9, 1e9), mx = new THREE.Vector3(-1e9, -1e9, -1e9);
+    const pts: number[] = [];
+    headVerts(best, sets.get(best)!, 0.6, (_i, p) => { mn.min(p); mx.max(p); pts.push(p.x, p.y, p.z); });
+    const cx = (mn.x + mx.x) / 2, W = mx.x - mn.x;
+    // Face profile down the midline: the nose is the most forward point; the chin is the lowest point that is
+    // still part of the face front (below it the front recedes into the neck).
+    let noseY = mx.y, noseZ = -1e9;
+    for (let i = 0; i < pts.length; i += 3) if (Math.abs(pts[i] - cx) < W * 0.12 && pts[i + 2] > noseZ && pts[i + 1] > mn.y + (mx.y - mn.y) * 0.3) { noseZ = pts[i + 2]; noseY = pts[i + 1]; }
+    const D0 = mx.z - mn.z;
+    let chinY = noseY;
+    for (let i = 0; i < pts.length; i += 3) if (Math.abs(pts[i] - cx) < W * 0.15 && pts[i + 1] < noseY && pts[i + 2] > noseZ - D0 * 0.42) chinY = Math.min(chinY, pts[i + 1]);
+    const F = Math.max(0.02, noseY - chinY);
+    let minZ = 1e9;
+    for (let i = 0; i < pts.length; i += 3) if (pts[i + 1] > chinY) minZ = Math.min(minZ, pts[i + 2]);
+    const D = noseZ - minZ;
+    const H = F * 2.2; // used for band widths
+    const mouthY = chinY + F * (look.jaw?.mouth ?? 0.42);
+    mn.y = chinY;
+    const hinge = new THREE.Vector3(cx, chinY + F * 1.05, minZ + D * (look.jaw?.hinge ?? 0.45));
+    this.jawMax = look.jaw?.open ?? 0.45;
+    for (const m of meshes) {
+      const set = sets.get(m)!;
+      const w = new Float32Array(m.geometry.attributes.position.count);
+      let any = 0;
+      headVerts(m, set, 0.2, (i, p, hw) => {
+        // Below the mouth line, in front of the hinge, fading toward the sides (cheeks move partly) and up the neck.
+        const below = ss(mouthY + F * 0.03, mouthY - F * 0.04, p.y);
+        const front = ss(hinge.z - D * 0.15, hinge.z + D * 0.15, p.z);
+        const side = 1 - 0.5 * ss(W * 0.2, W * 0.48, Math.abs(p.x - cx));
+        const neck = ss(chinY - F * 0.45, chinY - F * 0.05, p.y);
+        const v = Math.min(1, hw) * below * front * side * neck;
+        if (v > 0.001) { w[i] = v; any++; }
+      });
+      if (!any) continue;
+      m.geometry = m.geometry.clone();
+      m.geometry.setAttribute('aJaw', new THREE.BufferAttribute(w, 1));
+      // Hinge and axis in this mesh's geometry space (the same for its outline, which shares geometry and bind).
+      const hb = m.skeleton.bones.find((b, i) => set.has(i) && b.name === root)!;
+      const hi = m.skeleton.bones.indexOf(hb);
+      const Mw = new THREE.Matrix4().multiplyMatrices(hb.matrixWorld, m.skeleton.boneInverses[hi]).multiply(m.bindMatrix);
+      const inv = Mw.clone().invert();
+      const uu: JawUniforms = { uJaw: this.jawU, uJawHinge: { value: hinge.clone().applyMatrix4(inv) }, uJawAxis: { value: new THREE.Vector3(1, 0, 0).transformDirection(inv) } };
+      // A mirrored bind flips the rotation direction: flip the axis to keep "chin down".
+      if (new THREE.Matrix3().setFromMatrix4(Mw).determinant() < 0) uu.uJawAxis.value.negate();
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      for (const mt of mats) patchJaw(mt, uu);
+      m.parent?.children.forEach((o) => { const k = o as THREE.SkinnedMesh; if (k.userData.outline && k.geometry === m.userData.preJawGeo) { k.geometry = m.geometry; patchJaw(k.material as THREE.Material, uu); } });
+      m.userData.jaw = uu;
+    }
+    // Hinge/axis in the head bone's frame, for the bone-attached lip and mouth pieces.
+    const bone = this.isGolem ? this.gBones.get('CC_Base_Head')! : this.bones.get('Head')!;
+    this.jawBone = bone;
+    this.jawHinge.copy(bone.worldToLocal(hinge.clone()));
+    this.jawAxis.set(1, 0, 0).applyQuaternion(bone.getWorldQuaternion(new THREE.Quaternion()).invert());
+    if (this.isGolem) {
+      // Magma inside the golem's mouth: glows through the opening as the jaw drops.
+      const fz = (() => { let z = -1e9; headVerts(best!, sets.get(best!)!, 0.6, (_i, p) => { if (Math.abs(p.y - mouthY) < F * 0.1 && Math.abs(p.x - cx) < W * 0.15) z = Math.max(z, p.z); }); return z > -1e8 ? z : mx.z; })();
+      const glow = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), new THREE.MeshBasicMaterial({ color: 0xff7a24, toneMapped: false }));
+      const at = new THREE.Vector3(cx, mouthY - H * 0.02, fz - D * 0.12);
+      bone.add(glow);
+      glow.position.copy(bone.worldToLocal(at.clone()));
+      const sc = new THREE.Vector3(W * 0.2, H * 0.05, D * 0.1);
+      const ws = bone.getWorldScale(new THREE.Vector3());
+      glow.scale.set(sc.x / ws.x, sc.y / ws.y, sc.z / ws.z);
+      glow.visible = false;
+      this.jawGlow = glow;
+    }
+  }
+  private jq = new THREE.Quaternion();
+  /** Move the jaw: shader angle, lower lip/jaw pieces rotated about the hinge, golem mouth glow. */
+  private applyJaw(s: number) {
+    const a = s * this.jawMax;
+    this.jawU.value = a;
+    if (this.jawGlow) { this.jawGlow.visible = s > 0.03; (this.jawGlow.material as THREE.MeshBasicMaterial).color.setRGB(1, 0.42 + 0.3 * s, 0.12); }
+    if (!this.jawBone) return;
+    for (const p of this.talkParts) {
+      if (p.kind !== 'down') continue;
+      const parent = p.o.parent;
+      if (!parent) continue;
+      // Hinge and axis in the piece's parent frame.
+      const hW = this.jawBone.localToWorld(this.tv.copy(this.jawHinge));
+      const hP = parent.worldToLocal(hW.clone());
+      const axW = this.jawAxis.clone().applyQuaternion(this.jawBone.getWorldQuaternion(this.pq));
+      const axP = axW.applyQuaternion(parent.getWorldQuaternion(this.tq).invert()).normalize();
+      this.jq.setFromAxisAngle(axP, a);
+      p.o.position.copy(p.p0).sub(hP).applyQuaternion(this.jq).add(hP);
+      if (!p.q0) p.q0 = p.o.quaternion.clone();
+      p.o.quaternion.copy(this.jq).multiply(p.q0);
+    }
+  }
+
   bone(name: string) {
     return this.bones.get(name);
   }
@@ -661,6 +832,8 @@ export class SkinnedBody {
     };
     mat.customProgramCacheKey = () => `skinOutline${t.toFixed(5)}`;
     const o = new THREE.SkinnedMesh(m.geometry, mat);
+    m.userData.preJawGeo = m.geometry;
+    if (m.userData.jaw) patchJaw(mat, m.userData.jaw);
     o.bind(m.skeleton, m.bindMatrix);
     o.position.copy(m.position);
     o.quaternion.copy(m.quaternion);
@@ -771,7 +944,7 @@ export class SkinnedBody {
 
   // ------------------------------------------------------------------ talking (fight intro lines)
   /** Face pieces that move with speech: lips part, the mouth line opens. Registered by looks.ts. */
-  talkParts: { o: THREE.Object3D; kind: 'up' | 'down' | 'open' | 'mouth'; p0: THREE.Vector3; s0: THREE.Vector3 }[] = [];
+  talkParts: { o: THREE.Object3D; kind: 'up' | 'down' | 'open' | 'mouth'; p0: THREE.Vector3; s0: THREE.Vector3; q0?: THREE.Quaternion }[] = [];
   private talkTarget = 0;
   /** Smoothed mouth openness 0..1 (read by the fighter to pulse glow accents). */
   talkLevel = 0;
@@ -793,7 +966,7 @@ export class SkinnedBody {
     this.talkLevel += (this.talkTarget - this.talkLevel) * Math.min(1, dt * (open ? 28 : 14));
     const s = this.talkLevel;
     if (s < 0.002 && this.talkTarget === 0) {
-      if (this.talkClock !== 0) { this.talkClock = 0; for (const p of this.talkParts) { p.o.position.copy(p.p0); p.o.scale.copy(p.s0); if (p.kind === 'mouth') p.o.visible = false; } }
+      if (this.talkClock !== 0) { this.talkClock = 0; for (const p of this.talkParts) { p.o.position.copy(p.p0); p.o.scale.copy(p.s0); if (p.q0) p.o.quaternion.copy(p.q0); if (p.kind === 'mouth') p.o.visible = false; } this.jawU.value = 0; if (this.jawGlow) this.jawGlow.visible = false; }
       return;
     }
     this.talkClock += dt;
@@ -809,10 +982,10 @@ export class SkinnedBody {
     this.rotWorld('Head', fwd, 0.05 * Math.sin(t * 1.9) * Math.min(1, s * 3));
     for (const p of this.talkParts) {
       if (p.kind === 'up') p.o.position.set(p.p0.x, p.p0.y + 0.0035 * s, p.p0.z);
-      else if (p.kind === 'down') p.o.position.set(p.p0.x, p.p0.y - 0.0075 * s, p.p0.z);
       else if (p.kind === 'mouth') { p.o.visible = s > 0.04; p.o.scale.set(p.s0.x * (0.75 + 0.25 * s), p.s0.y * (0.15 + 1.1 * s), p.s0.z); }
-      else p.o.scale.set(p.s0.x * (1 - 0.15 * s), p.s0.y * (1 + 2.5 * s), p.s0.z);
+      else if (p.kind !== 'down') p.o.scale.set(p.s0.x * (1 - 0.15 * s), p.s0.y * (1 + 2.5 * s), p.s0.z);
     }
+    this.applyJaw(s);
   }
 
   private updateDriver(dt: number) {

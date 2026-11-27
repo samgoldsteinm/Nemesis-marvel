@@ -104,6 +104,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-27 | Controls remapped from GameCube to Xbox: X attack, A jump, Y grab, B/LT guard, LB mobility, RT/RB power; all move lists, tips, HUD prompts, touch buttons (Xbox colours) and README updated |
 | 11-27 | Voiced intro lines: 90 Piper TTS clips (one per line; lines naming the opponent recorded per opponent) with per-fighter persona processing, `public/voices/<id>/<key>.mp3` + `manifest.json` (duration, speech end, 30 fps mouth envelope). Intro plays them on the voice bus, ducks music, stretches shots to fit, types subtitles in sync; talking animation (lips/mouth open, head nods, accent glow pulse). Generator: scratchpad `tts/gen.py` (copy kept in `tools/voices/gen.py`) |
 | 11-27 | Both layouts: Xbox and GameCube (switch on the title screen or in How to Play → Controls; GameCube controllers/adapters auto-switch). Non-standard GameCube adapters (Mayflash etc.) get a raw button map; a "Set up controller" screen records each action's button/trigger per controller (`bl.bind.<pad id>` in localStorage). Menu confirm/back, HUD prompts, move lists, tips and touch labels follow the layout (`layoutText`, `actionLabel` in input.ts) |
+| 11-27 | Real talking jaws: per-vertex `aJaw` weights computed from each face (nose/chin profile) + vertex-shader rotation about a hinge before skinning, on grafted heads, painted mannequin heads and the golem; outlines deform too; lower lip pieces rotate with the chin; golem gets a magma glow inside the mouth. Per-fighter strength in `looks.ts` (`look.jaw`) |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -174,7 +175,9 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 **Voices**
 - Piper model files redirect to `us.aws.cdn.hf.co`; the environment must allow it (plus huggingface.co).
 - Clip keys must match `pickLine()` in intro.ts: `l<i>`, `l<i>_<opponentId>` for lines with `{o}`, `vs_<opponentId>` for VERSUS lines. Regenerate clips whenever LINES/VERSUS text changes.
-- The golem's CC jaw bone has no skin weights in the shipped mesh: rotating it does nothing; Basalt "talks" with head nods and lava-crack glow pulses.
+- The golem's CC jaw bone has no skin weights in the shipped mesh, so jaws are done in the vertex shader instead (`patchJaw` in skinned.ts): weights from the face profile, rotation in mesh space before skinning. Hinge/axis are converted per mesh (same for its outline, which shares geometry). `jawU` is 0 outside intro lines, so fights are unaffected.
+- Kit hair meshes can carry more Head-weighted vertices than the face: exclude hair/eyes when picking the face frame, or the jaw lands in the wrong place.
+- Jaw verification shots: freeze the fighter (`f.animate = () => {}`, `skeleton.pose()`) and place `vcam.cam` by hand (`vcam.update = () => {}`); the cinematic camera orbits and clamps height, which made earlier comparisons useless.
 - Dark mouths vanish on dark faces (Vanta): use a coloured mouth interior.
 - AudioBuffers decode on a throwaway OfflineAudioContext if sound isn't unlocked yet (decode isn't tied to the playing context).
 
