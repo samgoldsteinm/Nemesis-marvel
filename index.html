@@ -287,7 +287,7 @@
       var(--tone); }
   .half.h1 .bg { --gx: 67%; }
   .half:not(.active):not(.locked) .bg { filter: saturate(.6) brightness(.7); }
-  .half .pose { position: absolute; bottom: -3%; height: 104%; max-width: 46%; object-fit: contain; object-position: center bottom; filter: drop-shadow(8px 8px 0 rgba(0,0,0,0.5)); transition: transform .25s; }
+  .half .pose { position: absolute; bottom: 0; height: 96%; max-height: calc(100% - 8px); max-width: 46%; object-fit: contain; object-position: center bottom; filter: drop-shadow(8px 8px 0 rgba(0,0,0,0.5)); transition: transform .25s; }
   .half.h0 .pose { left: 34%; transform: translateX(-50%); }
   .half.h1 .pose { left: 66%; transform: translateX(-50%) scaleX(-1); }
   .half .pose.ini { display: grid; place-items: center; height: 100%; width: 30%; font: 400 120px var(--display); color: var(--c); }
@@ -388,7 +388,7 @@
     .select-screen { height: 100%; }
     .vs { height: 50vh; }
     .half.h0 { clip-path: polygon(0 0, 100% 0, 100% 46%, 0 54%); } .half.h1 { clip-path: polygon(0 54%, 100% 46%, 100% 100%, 0 100%); }
-    .half.h0 .pose { left: 74%; height: 58%; top: 0; bottom: auto; } .half.h1 .pose { left: 26%; height: 56%; top: auto; bottom: -2%; }
+    .half.h0 .pose { left: 74%; height: 52%; top: 4px; bottom: auto; } .half.h1 .pose { left: 26%; height: 52%; top: auto; bottom: 0; }
     .half .info { width: 58%; }
     .half.h0 .info { top: 30px; bottom: auto; max-height: 44%; } .half.h1 .info { top: auto; bottom: 8px; max-height: 42%; }
     .half.h1 .tag { top: auto; bottom: 46%; }
@@ -399,6 +399,26 @@
     .sel-top { grid-template-columns: auto 1fr; } .sel-top .prompts { display: none; }
     .result-screen { grid-template-columns: 1fr; } .result-art { clip-path: none; height: 34vh; }
   }
+  /* ---------------- online */
+  .online-screen { max-width: 900px; margin: 0 auto; }
+  .net-body { padding: 10px 4px; }
+  .net-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 10px 0 14px; }
+  .net-card { padding: 16px; border-radius: 14px; background: linear-gradient(160deg, rgba(216,32,58,0.14), rgba(255,255,255,0.03)); border: 1px solid var(--edge); display: flex; flex-direction: column; gap: 10px; }
+  .net-card h3 { margin: 0; font: 400 24px var(--display); letter-spacing: .04em; text-transform: uppercase; }
+  .net-card p { margin: 0; color: var(--dim); font-size: 13px; }
+  .net-code-in { font: 900 28px ui-monospace, monospace; letter-spacing: .3em; text-transform: uppercase; text-align: center; padding: 10px; border-radius: 10px; border: 1px solid var(--edge); background: rgba(0,0,0,0.4); color: #fff; width: 100%; box-sizing: border-box; }
+  .net-code { font: 900 clamp(44px, 9vw, 84px) ui-monospace, monospace; letter-spacing: .25em; color: #fff; text-shadow: 0 0 24px rgba(255,59,78,0.55); margin: 4px 0 12px; }
+  .net-link { display: flex; gap: 8px; align-items: center; margin: 6px 0 12px; }
+  .net-link input { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--edge); background: rgba(0,0,0,0.4); color: #ddd; font-size: 12px; }
+  .net-status { display: flex; align-items: center; gap: 8px; font-weight: 700; }
+  .net-err { color: #ff8a96; font-weight: 700; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #c9a23a; box-shadow: 0 0 8px currentColor; display: inline-block; animation: pulse .8s infinite alternate; }
+  .dot.ok { background: #3ad66a; animation: none; }
+  .net-sel { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); margin: 0 0 6px; padding: 0 6px; }
+  #netstat { position: fixed; left: 50%; transform: translateX(-50%); bottom: max(8px, env(safe-area-inset-bottom)); z-index: 22; font: 700 11px system-ui; color: #ddd; background: rgba(8,6,12,0.7); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--edge); pointer-events: none; display: none; }
+  #netstat i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: #3ad66a; }
+  #netstat.ok i { background: #e8c040; } #netstat.bad i { background: #ff3b4e; }
+  #netstat b { color: #ffcf6a; }
   /* ---------------- HUD */
   #hud { font-weight: 700; }
   .hud-p { position: absolute; top: max(10px, env(safe-area-inset-top)); display: flex; gap: 6px; align-items: flex-start; width: min(320px, 42vw); }

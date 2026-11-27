@@ -81,6 +81,17 @@ export function duotone(src: HTMLCanvasElement, dark: number, light: number, gam
   return c;
 }
 
+/** True if any opaque pixel sits in the top 2% rows or the outer 1% columns (the subject is cropped). */
+function touchesEdge(c: HTMLCanvasElement) {
+  const g = c.getContext('2d')!;
+  const { width: w, height: h } = c;
+  const d = g.getImageData(0, 0, w, h).data;
+  const top = Math.max(2, Math.round(h * 0.02)), side = Math.max(2, Math.round(w * 0.01));
+  for (let y = 0; y < top; y++) for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] > 24) return true;
+  for (let y = 0; y < h; y++) for (const x of [0, side, w - 1 - side, w - 1]) if (d[(y * w + x) * 4 + 3] > 24) return true;
+  return false;
+}
+
 export function renderPortraits(renderer: THREE.WebGLRenderer) {
   if (!hasBodyModel()) return;
   const scene = new THREE.Scene();
@@ -150,13 +161,28 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
       rig.root.updateMatrixWorld(true);
       const cam = new THREE.PerspectiveCamera(sh.fov ?? 30, sh.w / sh.h, 0.05, 50);
       sh.cam(sk, def, cam);
-      const rt = new THREE.WebGLRenderTarget(sh.w, sh.h, { samples: 4 });
-      rt.texture.colorSpace = THREE.SRGBColorSpace;
-      renderer.setRenderTarget(rt);
-      renderer.clear();
-      renderer.render(scene, cam);
-      const c = readCanvas(renderer, rt, sh.w, sh.h);
-      rt.dispose();
+      const shoot = () => {
+        const rt = new THREE.WebGLRenderTarget(sh.w, sh.h, { samples: 4 });
+        rt.texture.colorSpace = THREE.SRGBColorSpace;
+        renderer.setRenderTarget(rt);
+        renderer.clear();
+        renderer.render(scene, cam);
+        const out = readCanvas(renderer, rt, sh.w, sh.h);
+        rt.dispose();
+        return out;
+      };
+      let c = shoot();
+      // Full-body poses must never be cropped (Basalt's head spike, raised arms, wings): if anything touches the
+      // top or side edges, pull the camera back along its view line and shoot again.
+      if (kind === 'pose') {
+        const target = new THREE.Vector3(0, def.look!.height * 0.52, 0);
+        for (let tries = 0; tries < 4 && touchesEdge(c); tries++) {
+          cam.position.sub(target).multiplyScalar(1.12).add(target);
+          target.y += def.look!.height * 0.025; // headroom grows upward, feet stay grounded in frame
+          cam.lookAt(target);
+          c = shoot();
+        }
+      }
       if (kind === 'pose') {
         portraits.set(def.id, c.toDataURL('image/png'));
         comics.set(def.id, posterize(c).toDataURL('image/png'));
