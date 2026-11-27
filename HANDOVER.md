@@ -102,6 +102,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-27 | Select screen: full trait text (panel scrolls), compact bar on small phones; HUD names can't overlap |
 | 11-27 | Three new arenas: Skyline Site (construction floor, crane/hoist/scaffold, safety-mesh edges, beams/lumber/cement props), Harbor Pier 7 (container ends, pier railings over water with splash, fuel drums, quay cranes, cargo ship), Neon Helipad (circular deck via `SHAPE.circle`, 3 low rims, neon district). Per-arena palettes and fight tempos; select-screen arena picker is ◀ name ▶ (fits 667×375) |
 | 11-27 | Controls remapped from GameCube to Xbox: X attack, A jump, Y grab, B/LT guard, LB mobility, RT/RB power; all move lists, tips, HUD prompts, touch buttons (Xbox colours) and README updated |
+| 11-27 | Both layouts: Xbox and GameCube (switch on the title screen or in How to Play → Controls; GameCube controllers/adapters auto-switch). Non-standard GameCube adapters (Mayflash etc.) get a raw button map; a "Set up controller" screen records each action's button/trigger per controller (`bl.bind.<pad id>` in localStorage). Menu confirm/back, HUD prompts, move lists, tips and touch labels follow the layout (`layoutText`, `actionLabel` in input.ts) |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -164,6 +165,10 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - Don't put collision on edge dressing (bollards etc.): it stops launched fighters at the edge and blocks ring-outs.
 - Watch-less dev servers (`hmr:false`, `watch.ignored`) serve stale modules after edits: restart them with `--force`.
 - `renderer.info` resets every frame; read draw calls from a manual `render()` with `autoReset=false` (`__game.renderInfo()`).
+
+**Controllers**
+- Browsers report GameCube adapters with non-standard button numbers (mapping ''), so a GameCube R press may never reach "power"; that's why Rage "didn't work". Keep `RAW_GC` + the setup screen; analog triggers may be axes that rest at -1 (deflection measured from rest).
+- Authored text uses Xbox names; `layoutText()` rewrites them for GameCube at render time. Don't run it over keyboard keys (WASD's "A").
 
 **Process**
 - Background agents editing files while tests run make Vite hot-reload the page mid-test → failures that say

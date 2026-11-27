@@ -16,7 +16,7 @@ import { Match } from './match';
 import { HUD } from './hud';
 import { CPU, Difficulty } from './ai';
 import { ROSTER, CharacterDef, charById } from './characters';
-import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, keyDown, endInputRead, padActivity, noteInput, lastInputKind } from './input';
+import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, emptyRaw, RawState, DeviceBinding, connectedPads, isTouchActive, refreshTouchLabels, padLayout, setPadLayout, autoLayoutForPads, layoutText, actionLabel, getBinding, saveBinding, bindingFor, PadBinding, PadSrc, ACTIONS, keyDown, endInputRead, padActivity, noteInput, lastInputKind } from './input';
 import { initAudio, sfx, startMusic, stopMusic, setMuted, muted, setIntensity } from './audio';
 import { TUNING } from './fighter';
 import { RIM_COLOR } from './characters';
@@ -282,7 +282,7 @@ let match: Match | null = null;
 let cpus: (CPU | null)[] = [null, null];
 const trackers = [new EdgeTracker(), new EdgeTracker()];
 let paused = false;
-type Screen = 'title' | 'mode' | 'select' | 'result' | 'pause' | 'moves' | 'none';
+type Screen = 'title' | 'mode' | 'select' | 'result' | 'pause' | 'moves' | 'padsetup' | 'none';
 let screen: Screen = 'title' as Screen;
 /** Test/automation override: when set, replaces a player's raw input each tick. */
 const forced: (RawState | null)[] = [null, null];
@@ -337,7 +337,7 @@ function updateControlOverlay() {
   keysHint.style.display = inMatch && lastInputKind === 'keys' ? '' : 'none';
   document.body.classList.toggle('in-match', inMatch);
 }
-window.addEventListener('gamepadconnected', () => { noteInput('pad'); updateControlOverlay(); });
+window.addEventListener('gamepadconnected', () => { noteInput('pad'); autoLayoutForPads(); refreshLayoutLabels(); updateControlOverlay(); });
 window.addEventListener('gamepaddisconnected', () => {
   if (!connectedPads().length) noteInput(('ontouchstart' in window) || navigator.maxTouchPoints > 0 ? 'touch' : 'keys');
   updateControlOverlay();
@@ -425,6 +425,7 @@ function render(s: Screen): string {
         <button class="pill" data-nav data-act="intros">${introsOn ? '🎬 Fight intros on' : '🎬 Fight intros off'}</button>
         <button class="pill" data-nav data-act="voices">${voicesOn ? '🗣 Voices on' : '🗣 Voices off'}</button>
         <span class="pill static">🎮 ${connectedPads().length ? connectedPads().length + ' controller' + (connectedPads().length > 1 ? 's' : '') + ' connected' : 'Keyboard: WASD + J K L I U O'}</span>
+        <button class="pill" data-nav data-act="layoutcycle">${padLayout === 'xbox' ? 'Xbox buttons' : 'GameCube buttons'}</button>
       </div>
     </div>`;
   if (s === 'select') {
@@ -495,38 +496,60 @@ function render(s: Screen): string {
         <button class="btn2 wide" data-nav data-act="title">Quit to menu</button>
       </div>
     </div>`;
+  if (s === 'padsetup') {
+    const steps = PAD_STEPS.map(([a, name], i) => {
+      const src = setupBind[a];
+      const got = src && src.length ? ('b' in src[0] ? `button ${src[0].b}` : `axis ${src[0].a}${src[0].dir > 0 ? '+' : '−'}`) : '';
+      return `<li class="${i === setupStep ? 'cur' : i < setupStep ? 'done' : ''}"><b>${name}</b><span>${i < setupStep ? (got || 'skipped') : i === setupStep ? 'press a button…' : ''}</span></li>`;
+    }).join('');
+    const pad = navigator.getGamepads ? Array.from(navigator.getGamepads()).find((g) => g && g.connected) : null;
+    return `
+    <div class="screen how-screen">
+      <div class="topbar"><button class="pill" data-nav data-act="padsetup-cancel">← Back</button><h2>Set up controller</h2><span></span></div>
+      <div class="how-body">
+        ${pad ? `<p class="note">Controller: <b>${pad.id.replace(/</g, '')}</b></p>` : '<p class="note"><b>Plug in or press a button on your controller.</b></p>'}
+        <p class="note">Press the button you want for each action. Triggers work too.</p>
+        <ol class="padsteps">${steps}</ol>
+        <div class="padopts"><button class="pill" data-nav data-act="padsetup-skip">Skip this one</button><button class="pill" data-nav data-act="padsetup-reset">Reset to default</button></div>
+      </div>
+    </div>`;
+  }
   if (s === 'moves') {
     const tab = (id: typeof howTab, label: string) => `<button class="tab ${howTab === id ? 'on' : ''}" data-nav data-act="tab" data-arg="${id}">${label}</button>`;
     const k = (x: string) => `<kbd>${x}</kbd>`;
+    const kp = (x: string) => `<kbd>${layoutText(x)}</kbd>`; // pad button, named for the active layout
     const ctl: [string, string, string, string][] = [
       ['Move', 'Left stick', k('W') + k('A') + k('S') + k('D'), 'Left pad'],
-      ['Attack', k('X'), k('J'), 'X'],
-      ['Jump', k('A'), k('K'), 'A'],
-      ['Grab / pick up / throw', k('Y'), k('L'), 'Y'],
-      ['Guard (tap as a prop arrives to catch it)', k('B') + '/' + k('LT'), k('I'), 'B'],
-      ['Mobility: sprint, swing, fly, teleport', k('LB'), k('U'), 'LB'],
-      ['Power modifier', k('RT') + '/' + k('RB'), k('O'), 'RT'],
+      ['Attack', kp('X'), k('J'), layoutText('X')],
+      ['Jump', kp('A'), k('K'), layoutText('A')],
+      ['Grab / pick up / throw', kp('Y'), k('L'), layoutText('Y')],
+      ['Guard (tap as a prop arrives to catch it)', padLayout === 'gamecube' ? kp('B') : kp('B') + '/' + kp('LT'), k('I'), layoutText('B')],
+      ['Mobility: sprint, swing, fly, teleport', kp('LB'), k('U'), layoutText('LB')],
+      ['Power modifier', padLayout === 'gamecube' ? kp('RT') : kp('RT') + '/' + kp('RB'), k('O'), layoutText('RT')],
       ['Pause', k('Start'), k('Esc'), '❚❚'],
     ];
     const body = howTab === 'controls' ? `
       <table class="ctl"><thead><tr><th>Action</th><th>Gamepad</th><th>Keyboard</th><th>Touch</th></tr></thead>
       <tbody>${ctl.map(([a, g, kb, t]) => `<tr><td>${a}</td><td>${g}</td><td>${kb}</td><td>${t}</td></tr>`).join('')}</tbody></table>
+      <div class="padopts"><span class="opt-label">Button layout</span><div class="seg">${(['xbox', 'gamecube'] as const).map((l) => `<button class="segbtn ${padLayout === l ? 'on' : ''}" data-nav data-act="layout" data-arg="${l}">${l === 'xbox' ? 'Xbox' : 'GameCube'}</button>`).join('')}</div>
+        <button class="pill" data-nav data-act="padsetup">🎮 Set up controller</button></div>
+      <p class="note">GameCube controllers switch to the GameCube layout automatically. If a button doesn't respond (some adapters report unusual button numbers), use <b>Set up controller</b> and press each button once.</p>
       <p class="note">Player 2 on keyboard: arrows to move, ${k('.')} attack, ${k('/')} jump, ${k(',')} grab, ${k(';')} guard, ${k('Right Shift')} mobility, ${k('Enter')} power.</p>`
       : howTab === 'combat' ? `
       <div class="tips">
-        <div class="tip"><h4>Combos</h4><p>Press ${k('X')} up to three times for a chain. Attack while running, jumping or using mobility for different moves.</p></div>
-        <div class="tip"><h4>Power moves</h4><p>Hold ${k('RT')} and press ${k('X')}. Keep ${k('X')} held to charge a stronger version, or use it while running for a dash attack. Power moves cost energy (the blue pips).</p></div>
-        <div class="tip"><h4>Grabs &amp; throws</h4><p>${k('Y')} grabs the opponent or picks up an object. Press ${k('X')} to pummel, ${k('Y')} to throw. ${k('RT')}+${k('Y')} is your fighter's power grapple.</p></div>
-        <div class="tip"><h4>Defence</h4><p>Hold ${k('B')} to guard, and add a direction to roll away. ${k('RT')}+${k('B')} super-blocks and reflects projectiles.</p></div>
-        <div class="tip"><h4>Energy &amp; Rage</h4><p>Hold ${k('RT')} while standing still to recharge. Landing hits fills Rage: tap ${k('RT')} when it's full for ${TUNING.rageDuration}s of unlimited power.</p></div>
-        <div class="tip"><h4>Winning</h4><p>Empty their health (<b>K.O.</b>), knock them off the edge (<b>Ring out</b>), or press ${k('RT')}+${k('Y')} when they flash <b>DANGER</b> and you have one energy pip (<b>Finisher</b>).</p></div>
-        <div class="tip"><h4>Recovery</h4><p>Knocked into the air? Press ${k('LB')}+${k('RT')} to recover. Each fighter recovers differently, and it costs energy.</p></div>
+        <div class="tip"><h4>Combos</h4><p>Press ${kp('X')} up to three times for a chain. Attack while running, jumping or using mobility for different moves.</p></div>
+        <div class="tip"><h4>Power moves</h4><p>Hold ${kp('RT')} and press ${kp('X')}. Keep ${kp('X')} held to charge a stronger version, or use it while running for a dash attack. Power moves cost energy (the blue pips).</p></div>
+        <div class="tip"><h4>Grabs &amp; throws</h4><p>${kp('Y')} grabs the opponent or picks up an object. Press ${kp('X')} to pummel, ${kp('Y')} to throw. ${kp('RT')}+${kp('Y')} is your fighter's power grapple.</p></div>
+        <div class="tip"><h4>Defence</h4><p>Hold ${kp('B')} to guard, and add a direction to roll away. ${kp('RT')}+${kp('B')} super-blocks and reflects projectiles.</p></div>
+        <div class="tip"><h4>Energy &amp; Rage</h4><p>Hold ${kp('RT')} while standing still to recharge. Landing hits fills Rage: tap ${kp('RT')} when it's full for ${TUNING.rageDuration}s of unlimited power.</p></div>
+        <div class="tip"><h4>Winning</h4><p>Empty their health (<b>K.O.</b>), knock them off the edge (<b>Ring out</b>), or press ${kp('RT')}+${kp('Y')} when they flash <b>DANGER</b> and you have one energy pip (<b>Finisher</b>).</p></div>
+        <div class="tip"><h4>Recovery</h4><p>Knocked into the air? Press ${kp('LB')}+${kp('RT')} to recover. Each fighter recovers differently, and it costs energy.</p></div>
         <div class="tip"><h4>The arena</h4><p>Fences and barriers break. Every broken section is a new way to win by ring out, for either fighter.</p></div>
       </div>`
       : `<div class="fcards">${ROSTER.map((c) => `
         <div class="fcard" style="--c:${c.color}">
           <div class="fhead">${por(c, 'mini')}<div><b>${c.name}</b><span>${c.title}</span></div></div>
-          <table class="mlist">${c.sheet.moves.map(([kk, v]) => `<tr><td>${kk}</td><td>${v}</td></tr>`).join('')}${TRAITS[c.id] ? `<tr><td>Trait</td><td><b>${TRAITS[c.id].name}:</b> ${TRAITS[c.id].desc}</td></tr>` : ''}<tr><td>Finisher</td><td>${c.sheet.finisher}</td></tr><tr><td>Weakness</td><td>${c.sheet.weakness}</td></tr></table>
+          <table class="mlist">${c.sheet.moves.map(([kk, v]) => `<tr><td>${layoutText(kk)}</td><td>${layoutText(v)}</td></tr>`).join('')}${TRAITS[c.id] ? `<tr><td>Trait</td><td><b>${TRAITS[c.id].name}:</b> ${TRAITS[c.id].desc}</td></tr>` : ''}<tr><td>Finisher</td><td>${c.sheet.finisher}</td></tr><tr><td>Weakness</td><td>${c.sheet.weakness}</td></tr></table>
         </div>`).join('')}</div>`;
     return `
     <div class="screen how-screen">
@@ -587,6 +610,12 @@ function act(a: string, arg?: string) {
     case 'moves': movesReturn = screen === 'pause' ? 'pause' : 'title'; howTab = 'controls'; showScreen('moves'); break;
     case 'back': showScreen(movesReturn); break;
     case 'mute': setMuted(!muted); rerender(); break;
+    case 'layout': setPadLayout(arg as 'xbox' | 'gamecube'); refreshLayoutLabels(); rerender(); break;
+    case 'layoutcycle': setPadLayout(padLayout === 'xbox' ? 'gamecube' : 'xbox'); refreshLayoutLabels(); rerender(); break;
+    case 'padsetup': startPadSetup(); break;
+    case 'padsetup-skip': setupStep++; setupArmed = false; if (setupStep >= PAD_STEPS.length) finishPadSetup(); else rerender(); break;
+    case 'padsetup-reset': { const g = firstPad(); if (g) saveBinding(g.id, null); toast('Controller reset to the default layout'); showScreen('moves'); break; }
+    case 'padsetup-cancel': showScreen('moves'); break;
     case 'intros': introsOn = !introsOn; try { localStorage.setItem('bl.intros', introsOn ? '1' : '0'); } catch { /* */ } rerender(); break;
     case 'voices': voicesOn = !voicesOn; try { localStorage.setItem('bl.voices', voicesOn ? '1' : '0'); } catch { /* */ } rerender(); break;
   }
@@ -595,6 +624,52 @@ function act(a: string, arg?: string) {
 // Menu navigation from keyboard / pads.
 const menuTrack = [new EdgeTracker(), new EdgeTracker()];
 let navCooldown = 0; // ms
+// ------------------------------------------------------------ controller setup (press each button)
+const PAD_STEPS: [keyof PadBinding, string][] = [['attack', 'Attack'], ['jump', 'Jump'], ['grab', 'Grab / throw'], ['guard', 'Guard'], ['mobility', 'Mobility'], ['power', 'Power (and Rage)'], ['pause', 'Pause']];
+let setupStep = 0, setupArmed = false, setupRest: number[] = [];
+let setupBind: PadBinding = {};
+function firstPad(): Gamepad | null {
+  const pads = navigator.getGamepads ? Array.from(navigator.getGamepads()) : [];
+  let gp: Gamepad | null = null;
+  for (const g of pads) if (g && g.connected && (!gp || g.timestamp > gp.timestamp)) gp = g;
+  return gp;
+}
+function startPadSetup() { setupStep = 0; setupArmed = false; setupBind = {}; setupRest = []; showScreen('padsetup'); }
+function finishPadSetup() {
+  const g = firstPad();
+  if (g) {
+    // Unset actions keep the default for this pad.
+    const base = bindingFor(g);
+    const merged: PadBinding = {};
+    for (const [a] of PAD_STEPS) merged[a] = setupBind[a]?.length ? setupBind[a] : base[a];
+    saveBinding(g.id, merged);
+    toast('Controller saved');
+  }
+  showScreen('moves');
+}
+function pollPadSetup() {
+  const g = firstPad();
+  if (!g) return;
+  if (!setupRest.length) setupRest = g.axes.map((v) => (Math.abs(v) > 0.5 ? Math.sign(v) : 0));
+  const pressed = g.buttons.findIndex((b) => b && (b.pressed || b.value > 0.5));
+  let axis = -1, dir: 1 | -1 = 1;
+  g.axes.forEach((v, i) => { if (i < 2 || axis >= 0) return; const d = v - (setupRest[i] ?? 0); if (Math.abs(d) > 0.6) { axis = i; dir = d > 0 ? 1 : -1; } });
+  const idle = pressed < 0 && axis < 0;
+  if (!setupArmed) { if (idle) setupArmed = true; return; } // wait for everything to be released between steps
+  if (idle) return;
+  const src: PadSrc = pressed >= 0 ? { b: pressed } : { a: axis, dir };
+  setupBind[PAD_STEPS[setupStep][0]] = [src];
+  setupStep++;
+  setupArmed = false;
+  sfx.menu();
+  if (setupStep >= PAD_STEPS.length) finishPadSetup(); else rerender();
+}
+/** Button names in the HUD and touch controls follow the active layout. */
+function refreshLayoutLabels() {
+  hud.refreshLabels();
+  refreshTouchLabels(touchRoot);
+}
+
 function menuBack() {
   if (screen === 'select') {
     // Back steps out of the last lock-in first, then leaves the screen.
@@ -608,7 +683,8 @@ function menuBack() {
 }
 function menuInput(dtMs: number) {
   // Controllers drive an on-screen arrow cursor; the keyboard keeps step-by-step focus navigation.
-  const padUsed = updatePadCursor(menu, screen, dtMs, () => { if (navCooldown <= 0) { navCooldown = 180; sfx.menu(); menuBack(); } });
+  if (screen === 'padsetup') { hidePadCursor(); pollPadSetup(); }
+  const padUsed = screen === 'padsetup' ? false : updatePadCursor(menu, screen, dtMs, () => { if (navCooldown <= 0) { navCooldown = 180; sfx.menu(); menuBack(); } });
   if (padUsed) initAudio();
   const binds: DeviceBinding[] = [{ keyboard: [0, 1], gamepad: null, touch: false }];
   for (let i = 0; i < binds.length; i++) {

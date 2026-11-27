@@ -1,10 +1,11 @@
+import { menuButtons, padSrcDown } from './input';
 // On-screen arrow cursor for controllers in menus (same feel as Crust Rush's): the left stick moves it
 // (faster the further it's pushed), the D-pad walks it, A presses what's under it, B goes back, and the
-// right stick scrolls. It hides as soon as the mouse, a key or a touch is used, and during a bout.
+// right stick scrolls (A/B follow the active button layout). It hides as soon as the mouse, a key or a touch is used, and during a bout.
 
 const CLICKABLE = '[data-act],button,a[href],input,select,label,[role=button]';
 
-interface PadState { on: boolean; x: number; y: number; prev: boolean[]; last: number; hov: HTMLElement | null; scope: string | null }
+interface PadState { prevConfirm?: boolean; prevBack?: boolean; on: boolean; x: number; y: number; prev: boolean[]; last: number; hov: HTMLElement | null; scope: string | null }
 const S: PadState = { on: false, x: -1, y: -1, prev: [], last: 0, hov: null, scope: null };
 let el: HTMLDivElement | null = null;
 
@@ -58,7 +59,10 @@ export function updatePadCursor(root: HTMLElement, screenKey: string, dtMs: numb
   if (!gp) { hidePadCursor(); return false; }
   const W = innerWidth, H = innerHeight, dt = Math.min(0.05, dtMs / 1000);
   const btn = (i: number) => !!gp!.buttons[i] && (gp!.buttons[i].pressed || gp!.buttons[i].value > 0.5);
-  const edge = (i: number) => btn(i) && !S.prev[i];
+  const mb = menuButtons(gp);
+  const confirmDown = padSrcDown(gp, mb.confirm), backDown = padSrcDown(gp, mb.back);
+  const confirmEdge = confirmDown && !S.prevConfirm, backEdge = backDown && !S.prevBack;
+  S.prevConfirm = confirmDown; S.prevBack = backDown;
   arrow();
   if (S.x < 0) { S.x = W / 2; S.y = H / 2; }
 
@@ -101,12 +105,12 @@ export function updatePadCursor(root: HTMLElement, screenKey: string, dtMs: numb
   if (sc && S.on) { const z = Math.max(36, H * 0.075); if (vy > 0 && S.y > H - z) sc.scrollBy(0, 600 * dt); else if (vy < 0 && S.y < z) sc.scrollBy(0, -600 * dt); }
 
   // A: press what's under the arrow. B: back.
-  if (edge(0)) {
+  if (confirmEdge) {
     if (!S.on) setOn(true);
     if (hit) hit.click();
     used = true;
   }
-  if (edge(1)) { onBack(); used = true; }
+  if (backEdge) { onBack(); used = true; }
   S.prev = gp.buttons.map((b) => !!b && (b.pressed || b.value > 0.5));
   return used || S.on;
 }

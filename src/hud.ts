@@ -1,6 +1,7 @@
 import type { Match } from './match';
 import type { Fighter } from './fighter';
 import { TUNING } from './fighter';
+import { actionLabel } from './input';
 
 // Layered vitality (lasting health behind recoverable stamina), energy with quarter ticks, Rage,
 // Danger and finisher prompts. Panels have opaque backing so they stay legible over explosions.
@@ -26,12 +27,13 @@ export class HUD {
           <div class="pips">${'<b><i></i></b>'.repeat(4)}<span class="nm"></span><span class="lives"></span></div>
           <div class="bar vit"><div class="hp"></div><div class="st"></div></div>
           <div class="bar rg"><div class="fill"></div></div>
-          <div class="flags"><span class="danger">DANGER</span><span class="rage">RAGE</span><span class="fin"><kbd>RT</kbd>+<kbd>Y</kbd> FINISH</span><span class="note"></span></div>
+          <div class="flags"><span class="danger">DANGER</span><span class="rage">RAGE</span><span class="fin"></span><span class="note"></span></div>
           <div class="ctl"></div>
         </div>`;
       this.panels.push(p);
     }
     this.center = root.querySelector('.hud-big') as HTMLElement;
+    this.refreshLabels();
     this.sub = root.querySelector('.hud-sub') as HTMLElement;
   }
 
@@ -48,6 +50,11 @@ export class HUD {
       por.style.backgroundImage = url ? `url(${url})` : '';
       (p.querySelector('.ctl') as HTMLElement).textContent = controllers[i];
     });
+  }
+
+  /** Button names in the prompts follow the active controller layout. */
+  refreshLabels() {
+    for (const p of this.panels) (p.querySelector('.fin') as HTMLElement).innerHTML = `<kbd>${actionLabel('power')}</kbd>+<kbd>${actionLabel('grab')}</kbd> FINISH`;
   }
 
   show(on: boolean) {
@@ -107,7 +114,7 @@ export class HUD {
       const ready = f.rage >= 100;
       rg.parentElement!.classList.toggle('ready', ready);
       rageTag.style.display = ready ? '' : 'none';
-      rageTag.textContent = 'RAGE · TAP RT';
+      rageTag.textContent = `RAGE · TAP ${actionLabel('power')}`;
     }
     (p.querySelector('.danger') as HTMLElement).style.display = f.danger ? '' : 'none';
     (p.querySelector('.danger') as HTMLElement).style.opacity = Math.floor(time * 4) % 2 === 0 ? '1' : '0.45';

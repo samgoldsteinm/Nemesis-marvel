@@ -186,6 +186,11 @@
     .options { flex-wrap: wrap; }
     .fight { width: 100%; margin-left: 0; }
   }
+  .padopts { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 12px 0 4px; }
+  .padsteps { list-style: none; padding: 0; margin: 10px 0; display: grid; gap: 6px; max-width: 520px; }
+  .padsteps li { display: flex; justify-content: space-between; padding: 8px 12px; border-radius: 10px; background: rgba(255,255,255,0.05); color: var(--dim); }
+  .padsteps li b { color: #ddd; } .padsteps li.cur { background: rgba(58,160,255,0.18); outline: 1px solid rgba(58,160,255,0.6); color: #fff; }
+  .padsteps li.done span { color: #7dff9a; }
   /* ---------------- HUD */
   #hud { font-weight: 700; }
   .hud-p { position: absolute; top: max(10px, env(safe-area-inset-top)); display: flex; gap: 6px; align-items: flex-start; width: min(320px, 42vw); }
