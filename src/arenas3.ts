@@ -253,6 +253,9 @@ export function buildMarket(a: Arena) {
   merged(s, shelter, iron);
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2.2), std({ color: 0x9adfd0, transparent: true, opacity: 0.18, roughness: 0.1, metalness: 0.2, depthWrite: false, side: THREE.DoubleSide }));
   glass.position.set(12, 1.4, -HD + 1.4); s.add(glass);
+  // Solid back pane and posts (walking through the glass hid fighters from the camera); the roof stays open below.
+  cover(a, 12, -HD + 1.4, 3.6, 0.2, 2.6, false);
+  for (const [x, z] of [[10.3, -HD + 2.8], [13.7, -HD + 2.8]] as [number, number][]) cover(a, x, z, 0.2, 0.2, 2.6, false);
   // Puddles and grime.
   for (let i = 0; i < 7; i++) a.decal('puddle', (Math.random() - 0.5) * HW * 1.7, (Math.random() - 0.5) * HD * 1.6, 1.5 + Math.random() * 2.5, Math.random() * 3);
   for (let i = 0; i < 8; i++) a.decal('stain', (Math.random() - 0.5) * HW * 1.8, (Math.random() - 0.5) * HD * 1.7, 2 + Math.random() * 2);
@@ -610,6 +613,7 @@ export function buildLab(a: Arena) {
   const pil: THREE.BufferGeometry[] = [], red: THREE.BufferGeometry[] = [];
   for (const [x, z] of [[-HW + 0.8, -HD + 0.8], [HW - 0.8, -HD + 0.8], [-HW + 0.8, HD - 0.8], [HW - 0.8, HD - 0.8]] as [number, number][]) {
     pil.push(boxG(1.6, WH, 1.6, x, WH / 2, z));
+    cover(a, x, z, 1.6, 1.6, WH); // solid: fighters used to walk into the pillars (and hide from the camera)
     for (let y = 4; y < 11; y += 0.9) red.push(boxG(0.9, 0.12, 0.05, x, y, z + (z < 0 ? 0.83 : -0.83)));
   }
   const RZ = -HD + 3.2;
@@ -644,7 +648,7 @@ export function buildLab(a: Arena) {
   merged(s, spots, glow(0xe0e8ff), false);
   // Wall consoles (fixed) along the north wall.
   const wc: THREE.BufferGeometry[] = [];
-  for (const x of [-9, -5, 5, 9]) wc.push(boxG(2.6, 1.1, 0.7, x, 0.55, -HD + 0.35));
+  for (const x of [-9, -5, 5, 9]) { wc.push(boxG(2.6, 1.1, 0.7, x, 0.55, -HD + 0.35)); cover(a, x, -HD + 0.35, 2.6, 0.7, 1.1); }
   merged(s, wc, std({ color: 0x2a2a36, roughness: 0.5, metalness: 0.6 }));
   const wsT = tex(256, 64, (g) => { g.fillStyle = '#041416'; g.fillRect(0, 0, 256, 64); for (let i = 0; i < 18; i++) { g.fillStyle = i % 4 ? '#3affd8' : '#ff4a5a'; g.fillRect(8 + (i % 9) * 27, 10 + Math.floor(i / 9) * 26, 18, 14); } });
   const wsM = std({ map: wsT, emissive: 0xffffff, emissiveMap: wsT, emissiveIntensity: 0.7 });
