@@ -1,8 +1,10 @@
 import { Online } from './online';
+import { playerName, setPlayerName, nameOr, NAME_MAX } from './profile';
+import { Friends, fmtCode, cleanCode } from './friends';
 import { netlog, netDebug, netLogLines } from './net';
 import { CANON, toCanonical, MatchCfg } from './netplay';
 import { FightIntro, VictoryCine, introVoicesReady } from './intro';
-import { updatePadCursor, hidePadCursor } from './padcursor';
+import { updatePadCursor, hidePadCursor, cursorSpeed, setCursorSpeed, padListNav, padCursorActive } from './padcursor';
 import { VFX } from './vfx';
 import { TRAITS } from './traits';
 import * as THREE from 'three';
@@ -397,7 +399,7 @@ let match: Match | null = null;
 let cpus: (CPU | null)[] = [null, null];
 const trackers = [new EdgeTracker(), new EdgeTracker()];
 let paused = false;
-type Screen = 'start' | 'title' | 'mode' | 'select' | 'map' | 'result' | 'pause' | 'moves' | 'padsetup' | 'online' | 'none';
+type Screen = 'start' | 'title' | 'mode' | 'select' | 'map' | 'result' | 'pause' | 'moves' | 'padsetup' | 'online' | 'profile' | 'friends' | 'none';
 let screen: Screen = 'title' as Screen;
 /** Test/automation override: when set, replaces a player's raw input each tick. */
 const forced: (RawState | null)[] = [null, null];
@@ -436,6 +438,15 @@ function zoomCtl(compact = false) {
     <button class="pill zbtn" data-nav data-act="zoom" data-arg="1" aria-label="Wider"${camZoom >= ZOOM_MAX ? ' disabled' : ''}>${compact ? '+' : 'Wider +'}</button>
     <b class="zval">${pct}%</b></div>`;
 }
+/** Controller cursor speed stepper (30 %–160 %). */
+function cursorCtl(compact = false) {
+  const pct = Math.round(cursorSpeed * 100), k = (cursorSpeed - 0.3) / 1.3;
+  return `<div class="zoomctl${compact ? ' compact' : ''}"><span class="opt-label">Cursor</span>
+    <button class="pill zbtn" data-nav data-act="curs" data-arg="-1" aria-label="Slower"${cursorSpeed <= 0.3 ? ' disabled' : ''}>${compact ? '−' : '− Slower'}</button>
+    <span class="zbar" aria-hidden="true"><i style="width:${(k * 100).toFixed(0)}%"></i></span>
+    <button class="pill zbtn" data-nav data-act="curs" data-arg="1" aria-label="Faster"${cursorSpeed >= 1.6 ? ' disabled' : ''}>${compact ? '+' : 'Faster +'}</button>
+    <b class="zval">${pct}%</b></div>`;
+}
 const introEl = document.getElementById('intro')!;
 function endIntro() { if (intro) { intro.finish(); intro = null; } if (victory) { victory.finish(); victory = null; } victoryDone = false; }
 /** Victory cinematic after the final K.O. (presentational only; skipped when intros are off or for test matches). */
@@ -453,7 +464,8 @@ function startMatch(withIntro = true, seed?: number) {
   match.setLives(setup.lives);
   cpus = [null, setup.mode === 'cpu' ? new CPU(match.fighters[1], match, setup.diff) : null];
   trackers.forEach((t) => t.reset());
-  hud.setNames(match, setup.mode === 'cpu' ? ['YOU', `CPU · ${setup.diff}`] : setup.mode === 'online' ? (online.side === 0 ? ['YOU', 'ONLINE'] : ['ONLINE', 'YOU']) : ['PAD 1 / WASD', 'PAD 2 / ARROWS']);
+  const me = nameOr('YOU'), them = online.theirName || 'ONLINE';
+  hud.setNames(match, setup.mode === 'cpu' ? [me, `CPU · ${setup.diff}`] : setup.mode === 'online' ? (online.side === 0 ? [me, them] : [them, me]) : [playerName ? `${playerName} · P1` : 'PAD 1 / WASD', 'PAD 2 / ARROWS']);
   hud.show(true);
   keysHint.innerHTML = 'Move <b>WASD</b> · Attack <b>J</b> · Jump <b>K</b> · Grab <b>L</b> · Guard <b>I</b> · Mobility <b>U</b> · Power <b>O</b> · Pause <b>Esc</b>' + (setup.mode === 'versus' ? '<br>P2: Arrows · Attack <b>.</b> · Jump <b>/</b> · Grab <b>,</b> · Guard <b>;</b> · Mobility <b>R-Shift</b> · Power <b>Enter</b> (or numpad 1 2 3 5 4 6)' : '');
   if (connectedPads().length) noteInput('pad');
@@ -504,11 +516,95 @@ const online = new Online({
     if (!match || (screen !== 'none' && screen !== 'pause')) return emptyRaw();
     if (screen === 'pause') return emptyRaw();
     const raw = readDevices(bindings()[0]);
+    // Pause isn't part of the synced input; it opens this side's menu, which pauses the match for both players.
+    const pz = raw.pause && !onlinePausePrev; onlinePausePrev = raw.pause;
+    if (pz && online.phase === 'fight' && !match.ended) { paused = true; showScreen('pause'); return emptyRaw(); }
     return toCanonical(raw, vcam.fwd, vcam.right);
   },
   onFight: () => { trackers.forEach((t) => t.reset()); paused = false; if (screen !== 'none' && screen !== 'pause') showScreen('none'); },
   leave: () => { endIntro(); sceneWarm = true; if (match) { match.dispose(); match = null; } hud.show(false); touchRoot.classList.add('off'); paused = false; setup.mode = 'cpu'; startMusic('menu'); },
 });
+// ------------------------------------------------------------ friends (see friends.ts)
+const friends = new Friends();
+let friendsReturn: Screen = 'title';
+const STATUS_TXT: Record<string, string> = { menu: 'Online', room: 'In an online room', match: 'In a match', off: 'Offline' };
+function friendRows() {
+  const l = friends.sorted();
+  if (!l.length) return '<p class="note fr-empty">No friends yet. Share your code, or add theirs above.</p>';
+  return l.map((f) => {
+    const on = f.status !== 'off';
+    return `<div class="fr-row ${f.status}">
+      <span class="dot ${on ? 'ok' : ''}"></span>
+      <div class="fr-who"><b>${f.name || 'Unnamed fighter'}</b><small>${fmtCode(f.id)} · ${STATUS_TXT[f.status]}</small></div>
+      ${f.status === 'menu' || f.status === 'room' ? `<button class="btn2 primary fr-inv" data-nav data-act="fr-invite" data-arg="${f.id}">Invite</button>` : ''}
+      <button class="pill fr-rm" data-nav data-act="fr-remove" data-arg="${f.id}" aria-label="Remove">✕</button>
+    </div>`;
+  }).join('');
+}
+function renderFriends() {
+  const link = (() => { const u = new URL(location.href); u.search = ''; u.searchParams.set('friend', friends.id); return u.toString(); })();
+  const on = friends.list.filter((f) => f.status !== 'off').length;
+  return `
+    <div class="screen online-screen friends-screen">
+      <div class="topbar"><button class="pill" data-nav data-act="fr-back">← Back</button><h2>Friends <small>${on} online</small></h2><span></span></div>
+      <div class="net-body fr-body">
+        <div class="fr-me">
+          <div><span class="opt-label">Your friend code</span><div class="fr-code">${fmtCode(friends.id)}</div><small>Playing as <b>${playerName || 'no name yet'}</b> · <button class="linkbtn" data-nav data-act="profile">${playerName ? 'change' : 'set your name'}</button></small></div>
+          <div class="fr-share"><button class="pill" data-nav data-act="fr-copy" data-arg="${link}">Copy invite link</button></div>
+        </div>
+        <div class="fr-add"><input id="frCode" class="net-code-in" maxlength="9" placeholder="FRIEND CODE" autocomplete="off" autocapitalize="characters" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();window.__game.act('fr-add')}"><button class="btn2 primary" data-nav data-act="fr-add">Add</button></div>
+        <div class="fr-list" id="frList">${friendRows()}</div>
+        <p class="note">Friends are saved on this device. Anyone with your code can see when you're online.</p>
+      </div>
+    </div>`;
+}
+/** Presence changed: refresh just the list (a full re-render would wipe a code being typed). */
+friends.onChange = () => {
+  if (screen !== 'friends') return;
+  const el = document.getElementById('frList');
+  if (el) el.innerHTML = friendRows();
+  const h = menu.querySelector('.friends-screen h2 small');
+  if (h) h.textContent = `${friends.list.filter((f) => f.status !== 'off').length} online`;
+};
+// Invite / "added you" banner (works on any screen, also mid-match).
+const frNote = document.createElement('div');
+frNote.id = 'frnote';
+document.body.appendChild(frNote);
+let frNoteT = 0, frNoteAct: (() => void) | null = null;
+function showFrNote(text: string, okLabel: string, ok: () => void) {
+  frNote.innerHTML = `<span>${text}</span><button class="btn2 primary" data-fr="ok">${okLabel}</button><button class="pill" data-fr="no">Not now</button>`;
+  frNote.classList.add('on');
+  frNoteAct = ok;
+  clearTimeout(frNoteT);
+  frNoteT = window.setTimeout(() => frNote.classList.remove('on'), 30000);
+  sfx.menu();
+}
+frNote.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest('button');
+  if (!b) return;
+  frNote.classList.remove('on');
+  if (b.dataset.fr === 'ok') frNoteAct?.();
+  frNoteAct = null;
+});
+friends.onInvite = (inv) => showFrNote(`<b>${inv.name}</b> invited you to fight`, 'Join', () => {
+  if (online.active) online.close();
+  if (match) act('title');
+  online.join(inv.code);
+});
+friends.onAdded = (id, name) => showFrNote(`<b>${name || fmtCode(id)}</b> added you as a friend`, 'Add back', () => { friends.add(id, name); toast(`${name || fmtCode(id)} added`); });
+/** ?friend=CODE link: add that player after Press Start. */
+let pendingFriend = '';
+try { pendingFriend = cleanCode(new URLSearchParams(location.search).get('friend') || ''); } catch { /* */ }
+const presenceOff = navigator.webdriver && new URLSearchParams(location.search).get('net') !== 'local'; // test runs: no relay sockets
+
+let onlinePausePrev = false;
+/** Online select: Back leaves the room only when pressed twice (the first press just warns). */
+let leaveArmedAt = 0;
+function onlineLeaveAsk() {
+  if (performance.now() - leaveArmedAt < 2500) { leaveArmedAt = 0; online.close(); online.error = ''; act('title-raw'); return; }
+  leaveArmedAt = performance.now();
+  toast('Press Back again to leave the room');
+}
 /** A ?room=CODE link joins that room after Press Start. */
 let pendingRoom = '';
 try { pendingRoom = (new URLSearchParams(location.search).get('room') || '').toUpperCase(); } catch { /* */ }
@@ -548,7 +644,8 @@ function onlineAct(a: string, arg?: string): boolean {
     case 'lives': if (s && online.isHost) s.setCfg(s.arena, Number(arg)); return true;
     case 'rematch': online.rematch(); rerender(); return true;
     case 'swap': return true;
-    case 'select': return true;
+    case 'select': case 'netlobby': online.changeFighters(); return true;
+    case 'netleave': onlineLeaveAsk(); return true;
     case 'title': case 'online-leave': online.close(); online.error = ''; act('title-raw'); return true;
     case 'resume': paused = false; showScreen('none'); return true;
   }
@@ -561,13 +658,14 @@ function renderOnline() {
       <div class="topbar"><button class="pill" data-nav data-act="title">← Back</button><h2>Play online</h2><span></span></div>
       <div class="net-body">
         ${err}
+        <div class="net-me"><span>Playing as</span><b>${playerName || 'no name yet'}</b><button class="pill" data-nav data-act="profile">${playerName ? 'Change name' : 'Set your name'}</button><button class="pill" data-nav data-act="friends">👥 Friends</button></div>
         <div class="net-cards">
           <div class="net-card"><h3>Host a match</h3><p>Get a room code and send it (or the link) to a friend.</p><button class="btn2 primary" data-nav data-act="online-host">Host</button></div>
           <div class="net-card"><h3>Join a match</h3><p>Enter the code your friend gave you.</p>
             <input id="roomCode" class="net-code-in" maxlength="6" placeholder="CODE" autocomplete="off" autocapitalize="characters" spellcheck="false">
             <button class="btn2 primary" data-nav data-act="online-join">Join</button></div>
         </div>
-        <p class="note">1v1 over the internet. Players connect directly when possible and through a relay otherwise; no account needed.</p>
+        <p class="note">1v1 over the internet. Players connect directly when possible and through a relay otherwise; no sign-up needed (your name is saved on this device).</p>
       </div>
     </div>`;
   const host = online.isHost;
@@ -777,7 +875,7 @@ function prompts(items: ['confirm' | 'back' | 'tab', string][]) {
   const pad = connectedPads().length > 0 && lastInputKind !== 'touch';
   const touch = lastInputKind === 'touch';
   const key = (k: string) => (pad ? { confirm: 'A', back: 'B', tab: 'LB/RB' } : { confirm: 'Enter', back: 'Esc', tab: '←→' })[k as 'confirm'];
-  if (touch) return `<div class="prompts"><span><i class="pk tap">☝</i>${items.find(([k]) => k === 'confirm')?.[1] ?? 'Tap'}</span></div>`;
+  if (touch) return ''; // touch needs no button prompt (tap what you want)
   return `<div class="prompts">${items.map(([k, t]) => `<span><i class="pk ${pad ? 'pad-' + k : 'key'}">${key(k)}</i>${t}</span>`).join('')}</div>`;
 }
 function pressLabel() {
@@ -793,7 +891,7 @@ function renderStart() {
   return `
     <div class="screen start-screen" data-act="start">
       <div class="band"><i class="smoke s1"></i><i class="smoke s2"></i><i class="smoke s3"></i>${prof ? `<img class="prof" src="${prof}" alt="">` : ''}</div>
-      <div class="logo-wrap"><h1 class="chrome">BREAK<span>LINE</span></h1><div class="chrome-sub">ROOFTOP · OVERPASS · NO WAY DOWN</div></div>
+      <div class="logo-wrap"><h1 class="chrome"><b class="ch-sh" aria-hidden="true">BREAKLINE</b><b class="ch-tx">BREAK<span>LINE</span></b></h1><div class="chrome-sub">ROOFTOP · OVERPASS · NO WAY DOWN</div></div>
       <div class="press">${pressLabel()}</div>
       <div class="copy">© 2026 BREAKLINE</div>
     </div>`;
@@ -802,6 +900,7 @@ const TITLE_ITEMS: [string, string, string, string][] = [
   ['mode', 'cpu', 'Fight the CPU', 'Single player against the computer'],
   ['mode', 'versus', '2 Players', 'Same screen · two pads, or pad + keyboard'],
   ['online', '', 'Play Online', '1v1 with a friend · room code'],
+  ['friends', '', 'Friends', "See who's online · invite to fight"],
   ['moves', '', 'How to Play', 'Controls, combat basics and move lists'],
 ];
 /** Panel order on the title band (alternating facing directions; the first two sit left of the menu). */
@@ -820,16 +919,18 @@ function renderTitle() {
       <div class="home-band">
         <div class="home-panels">${TITLE_ORDER.slice(0, 2).map(panel).join('')}<div class="home-gap"></div>${TITLE_ORDER.slice(2).map((c, i) => panel(c, i + 2)).join('')}</div>
         <nav class="home-menu">
-          <h1 class="chrome small">BREAK<span>LINE</span></h1>
+          <h1 class="chrome small"><b class="ch-sh" aria-hidden="true">BREAKLINE</b><b class="ch-tx">BREAK<span>LINE</span></b></h1>
           <div class="hm-list">${TITLE_ITEMS.map(([a, arg, label, sub]) => `<button class="hm-item" data-nav data-act="${a}"${arg ? ` data-arg="${arg}"` : ''}><span>${label}</span><small>${sub}</small></button>`).join('')}</div>
         </nav>
       </div>
       <div class="home-bot">
         <div class="home-opts">
+          <button class="pill" data-nav data-act="profile"><i class="pi">👤</i> ${playerName || 'Set your name'}</button>
           <button class="pill" data-nav data-act="mute"><i class="pi">${muted ? '🔇' : '🔊'}</i> Sound ${muted ? 'off' : 'on'}</button>
           <button class="pill" data-nav data-act="intros"><i class="pi">🎬</i> Intros ${introsOn ? 'on' : 'off'}</button>
           <button class="pill" data-nav data-act="voices"><i class="pi">🗣</i> Voices ${voicesOn ? 'on' : 'off'}</button>
           <button class="pill" data-nav data-act="zoomcycle"><i class="pi">🎥</i> Camera ${Math.round(camZoom * 100)}%</button>
+          <button class="pill" data-nav data-act="curscycle"><i class="pi">🖱</i> Cursor ${Math.round(cursorSpeed * 100)}%</button>
           <button class="pill" data-nav data-act="layoutcycle"><i class="pi">🎮</i> ${padLayout === 'xbox' ? 'Xbox' : 'GameCube'}<span class="pl-long">&nbsp;buttons</span></button>
           <span class="pill static">${pads ? pads + ' controller' + (pads > 1 ? 's' : '') + ' connected' : 'Keyboard: WASD + J K L I U O'}</span>
         </div>
@@ -848,7 +949,7 @@ const statsOpen: [boolean, boolean] = [false, false];
 function selHalf(side: 0 | 1) {
   const id = side === 0 ? setup.p1 : setup.p2;
   const def = charById(id);
-  const who = setup.mode === 'online' ? (side === online.side ? 'YOU' : 'OPPONENT') : side === 0 ? 'PLAYER 1' : setup.mode === 'cpu' ? 'CPU' : 'PLAYER 2';
+  const who = setup.mode === 'online' ? (side === online.side ? nameOr('YOU') : online.theirName || 'OPPONENT') : side === 0 ? 'PLAYER 1' : setup.mode === 'cpu' ? 'CPU' : 'PLAYER 2';
   const active = selectSide === side && !(locked[0] && locked[1]);
   const art = comicOf(def);
   return `
@@ -869,11 +970,11 @@ function selHalf(side: 0 | 1) {
 function renderSelect() {
   const who = setup.mode === 'online' ? 'you' : selectSide === 0 ? 'Player 1' : setup.mode === 'cpu' ? 'the CPU' : 'Player 2';
   const net = online.active;
-  const netNote = net ? `<div class="net-sel"><span class="dot ok"></span>Online · room ${online.code} · ${online.ping || '…'} ms${online.isHost ? ' · you pick the arena next' : ' · the host picks the arena next'}${locked[online.side] && !locked[1 - online.side] ? ' · waiting for your opponent to lock in…' : ''}</div>` : '';
+  const netNote = net ? `<div class="net-sel"><span class="dot ok"></span>Online · room ${online.code} · ${online.ping || '…'} ms · vs <b>${online.theirName || 'opponent'}</b>${online.isHost ? ' · you pick the arena next' : ' · the host picks the arena next'}${locked[online.side] && !locked[1 - online.side] ? ' · waiting for your opponent to lock in…' : ''}<button class="pill net-ctl" data-nav data-act="moves">? Controls</button></div>` : '';
   return `
     <div class="screen select-screen">
       <div class="sel-top">
-        <button class="btn-back" data-nav data-act="title">◀ Back</button>
+        <button class="btn-back" data-nav data-act="${net ? 'netleave' : 'title'}">◀ ${net ? 'Leave room' : 'Back'}</button>
         <h2 class="sel-h">${locked[0] && locked[1] ? 'Ready to fight' : `Choose a fighter <small>for ${who}</small>`}</h2>
         ${prompts([['confirm', locked[0] && locked[1] ? 'Arena' : 'Preview · again to lock in'], ['back', 'Back']])}
       </div>
@@ -916,7 +1017,7 @@ function renderMap() {
   const nav = host ? 'data-nav ' : '';
   const p1 = charById(setup.p1), p2 = charById(setup.p2);
   const mini = (c: CharacterDef) => faceOf(c) ? `<img src="${faceOf(c)}" alt="${c.name}">` : `<b>${c.name[0]}</b>`;
-  const netNote = net ? `<div class="net-sel"><span class="dot ok"></span>Online · room ${online.code} · ${online.ping || '…'} ms · ${host ? 'you pick the arena — your opponent sees it live' : 'the host is picking the arena…'}</div>` : '';
+  const netNote = net ? `<div class="net-sel"><span class="dot ok"></span>Online · room ${online.code} · ${online.ping || '…'} ms · ${host ? 'you pick the arena — your opponent sees it live' : 'the host is picking the arena…'}<button class="pill net-ctl" data-nav data-act="moves">? Controls</button></div>` : '';
   return `
     <div class="screen map-screen">
       <div class="sel-top">
@@ -957,7 +1058,7 @@ function renderResult() {
   const e = match.ended;
   const how = e.how === 'ko' ? 'K.O.' : e.how === 'ringout' ? 'Ring out' : 'Finisher';
   const wIdx = e.winner.idx;
-  const label = setup.mode === 'cpu' ? (wIdx === 0 ? 'You win!' : 'CPU wins') : setup.mode === 'online' ? (wIdx === online.side ? 'You win!' : 'You lose') : `Player ${wIdx + 1} wins!`;
+  const label = setup.mode === 'cpu' ? (wIdx === 0 ? 'You win!' : 'CPU wins') : setup.mode === 'online' ? (wIdx === online.side ? 'You win!' : `${online.theirName || 'Opponent'} wins`) : `Player ${wIdx + 1} wins!`;
   const stat = (f: typeof e.winner) => `
     <div class="rstat" style="--c:${f.def.color}">${faceOf(f.def) ? `<img class="mini" src="${faceOf(f.def)}" alt="">` : por(f.def, 'mini')}<div><b>${f.def.name}</b>
       <span>${f.stats.hits} hits · ${f.stats.throws} throws · ${f.stats.catches} catches · ${f.stats.recoveries} recoveries</span></div></div>`;
@@ -971,6 +1072,7 @@ function renderResult() {
         <div class="rstats">${stat(match.fighters[0])}${stat(match.fighters[1])}</div>
         <div class="row-btns">${online.active ? `
           <button class="btn2 primary" data-nav data-act="rematch">${online.session?.rematchMine ? 'Waiting for opponent…' : online.session?.rematchTheirs ? '↻ Rematch (opponent is ready)' : '↻ Rematch'}</button>
+          <button class="btn2" data-nav data-act="netlobby">Change fighters</button>
           <button class="btn2" data-nav data-act="title">Leave</button>` : `
           <button class="btn2 primary" data-nav data-act="rematch">↻ Rematch</button>
           <button class="btn2" data-nav data-act="swap">⇄ Swap sides</button>
@@ -985,6 +1087,19 @@ function render(s: Screen): string {
   if (s === 'start') return renderStart();
   if (s === 'title') return renderTitle();
   if (s === 'online') return renderOnline();
+  if (s === 'friends') return renderFriends();
+  if (s === 'profile') return `
+    <div class="screen online-screen profile-screen">
+      <div class="topbar"><button class="pill" data-nav data-act="profile-back">← Back</button><h2>Player name</h2><span></span></div>
+      <div class="net-body">
+        <div class="net-card">
+          <h3>Your name</h3>
+          <p>Saved on this device. It shows on the fight HUD and results, and your online opponent sees it.</p>
+          <input id="nameIn" class="net-code-in name-in" maxlength="${NAME_MAX}" placeholder="NAME" value="${playerName}" autocomplete="nickname" spellcheck="false" enterkeyhint="done" onkeydown="if(event.key==='Enter'){event.preventDefault();window.__game.act('name-save')}">
+          <button class="btn2 primary" data-nav data-act="name-save">Save</button>
+        </div>
+      </div>
+    </div>`;
   if (s === 'select') { if (online.active) syncOnlineSelect(); return renderSelect(); }
   if (s === 'map') { if (online.active) syncOnlineSelect(); return renderMap(); }
   if (s === 'result') return renderResult();
@@ -993,9 +1108,10 @@ function render(s: Screen): string {
       <div class="card">
         <h2 class="paused-h">Paused</h2>
         <button class="btn2 primary wide" data-nav data-act="resume">▶ Resume</button>
-        ${online.active ? '<p class="note">Online: the match keeps running while this menu is open.</p>' : '<button class="btn2 wide" data-nav data-act="rematch">↻ Restart bout</button>'}
+        ${online.active ? `<p class="note">${online.phase === 'fight' ? 'Online: the match is paused for both players.' : 'Online: the intro keeps running.'}</p><button class="btn2 wide" data-nav data-act="netlobby">Change fighters</button>` : '<button class="btn2 wide" data-nav data-act="rematch">↻ Restart bout</button>'}
         <button class="btn2 wide" data-nav data-act="moves">? How to play</button>
         ${zoomCtl(true)}
+        ${cursorCtl(true)}
         <button class="btn2 wide" data-nav data-act="mute"><i class="pi">${muted ? '🔇' : '🔊'}</i> Sound ${muted ? 'off' : 'on'}</button>
         <button class="btn2 wide" data-nav data-act="title">${online.active ? 'Leave match' : 'Quit to menu'}</button>
       </div>
@@ -1038,6 +1154,7 @@ function render(s: Screen): string {
       <div class="padopts"><span class="opt-label">Button layout</span><div class="seg">${(['xbox', 'gamecube'] as const).map((l) => `<button class="segbtn ${padLayout === l ? 'on' : ''}" data-nav data-act="layout" data-arg="${l}">${l === 'xbox' ? 'Xbox' : 'GameCube'}</button>`).join('')}</div>
         <button class="pill" data-nav data-act="padsetup">🎮 Set up controller</button></div>
       <div class="padopts">${zoomCtl()}</div>
+      <div class="padopts">${cursorCtl()}</div>
       <p class="note"><b>On a phone:</b> drag anywhere on the left half to move. <b>GUARD + SPECIAL</b> together = super block. Extra buttons pop up when you can use them: <b>RAGE</b> (meter full), <b>FINISH</b> (opponent in Danger), <b>RECOVER</b> (knocked into the air) and <b>CHARGE</b> (hold to refill energy).</p>
       <p class="note">GameCube controllers switch to the GameCube layout automatically. If a button doesn't respond (some adapters report unusual button numbers), use <b>Set up controller</b> and press each button once.</p>
       <p class="note">Player 2 on keyboard: arrows to move, ${k('.')} attack, ${k('/')} jump, ${k(',')} grab, ${k(';')} guard, ${k('Right Shift')} mobility, ${k('Enter')} power.</p>`
@@ -1068,6 +1185,7 @@ function render(s: Screen): string {
 }
 
 let movesReturn: Screen = 'title';
+let profileReturn: Screen = 'title';
 function rerender(keepFocus = true) {
   const i = focusIdx;
   showScreen(screen);
@@ -1126,8 +1244,8 @@ function act(a: string, arg?: string) {
     case 'rematch': rematch(false); break;
     case 'swap': rematch(true); break;
     case 'resume': paused = false; showScreen('none'); break;
-    case 'moves': movesReturn = screen === 'pause' ? 'pause' : 'title'; howTab = 'controls'; showScreen('moves'); break;
-    case 'back': showScreen(movesReturn); break;
+    case 'moves': movesReturn = screen === 'pause' || screen === 'select' || screen === 'map' ? screen : 'title'; howTab = 'controls'; showScreen('moves'); break;
+    case 'back': showScreen(movesReturn); if (online.active && (movesReturn === 'select' || movesReturn === 'map')) onlineRefresh(); break;
     case 'mute': setMuted(!muted); rerender(); break;
     case 'layout': setPadLayout(arg as 'xbox' | 'gamecube'); refreshLayoutLabels(); rerender(); break;
     case 'layoutcycle': setPadLayout(padLayout === 'xbox' ? 'gamecube' : 'xbox'); refreshLayoutLabels(); rerender(); break;
@@ -1136,6 +1254,39 @@ function act(a: string, arg?: string) {
     case 'padsetup-reset': { const g = firstPad(); if (g) saveBinding(g.id, null); toast('Controller reset to the default layout'); showScreen('moves'); break; }
     case 'padsetup-cancel': showScreen('moves'); break;
     case 'zoom': setZoom(camZoom + 0.1 * Number(arg)); rerender(); break;
+    case 'curs': setCursorSpeed(cursorSpeed + 0.1 * Number(arg)); rerender(); break;
+    case 'profile': if (screen !== 'profile') profileReturn = screen; showScreen('profile'); setTimeout(() => { const el = document.getElementById('nameIn') as HTMLInputElement | null; if (el && !padCursorActive()) { el.focus(); el.select(); } }, 50); break;
+    case 'friends': if (screen !== 'friends' && screen !== 'profile') friendsReturn = screen; showScreen('friends'); break;
+    case 'fr-back': showScreen(friendsReturn); break;
+    case 'fr-add': {
+      const el = document.getElementById('frCode') as HTMLInputElement | null;
+      const err = friends.add(el?.value ?? '');
+      if (err) toast(err); else { toast('Friend added'); rerender(); }
+      break;
+    }
+    case 'fr-remove': { const f = friends.list.find((x) => x.id === arg); friends.remove(arg!); toast(`${f?.name || 'Friend'} removed`); rerender(); break; }
+    case 'fr-copy': try { void navigator.clipboard.writeText(arg!); toast('Link copied'); } catch { toast(arg!); } break;
+    case 'fr-invite': {
+      const f = friends.list.find((x) => x.id === arg);
+      if (!f) break;
+      if (online.active && online.connected) { toast("You're already in a room with someone"); break; }
+      if (!online.active) online.host();
+      friends.invite(f.id, online.code);
+      toast(`Invite sent to ${f.name || fmtCode(f.id)}`);
+      break;
+    }
+    case 'profile-back': showScreen(profileReturn); break;
+    case 'name-save': {
+      const el = document.getElementById('nameIn') as HTMLInputElement | null;
+      const n = setPlayerName(el?.value ?? '');
+      online.session?.setName(n);
+    friends.setName(n);
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      toast(n ? `Name saved: ${n}` : 'Name cleared');
+      showScreen(profileReturn);
+      break;
+    }
+    case 'curscycle': setCursorSpeed(cursorSpeed >= 1.55 ? 0.4 : cursorSpeed + 0.1); rerender(); break;
     case 'zoomcycle': setZoom(camZoom >= ZOOM_MAX - 0.01 ? ZOOM_MIN : camZoom + 0.1); rerender(); break;
     case 'intros': introsOn = !introsOn; try { localStorage.setItem('bl.intros', introsOn ? '1' : '0'); } catch { /* */ } rerender(); break;
     case 'voices': voicesOn = !voicesOn; try { localStorage.setItem('bl.voices', voicesOn ? '1' : '0'); } catch { /* */ } rerender(); break;
@@ -1199,6 +1350,8 @@ function startPressed() {
   startMusic('menu');
   sfx.lockIn?.();
   showScreen('title');
+  if (!presenceOff) friends.start(playerName);
+  if (pendingFriend) { const err = friends.add(pendingFriend); toast(err || 'Friend added'); pendingFriend = ''; }
   if (pendingRoom) { const r = pendingRoom; pendingRoom = ''; online.join(r); }
 }
 let startPadPrev = true; // ignore a button already held when the screen appears
@@ -1211,6 +1364,11 @@ function pollStartPads() {
 document.addEventListener('keydown', (e) => { if (screen === 'start' && !e.repeat && !['F3', 'F5', 'F12'].includes(e.code)) { e.preventDefault(); startPressed(); } });
 
 function menuBack() {
+  if (screen === 'select' && online.active) {
+    const s = online.session;
+    if (s?.me.locked) s.setPick(s.me.pick, false); else onlineLeaveAsk();
+    return;
+  }
   if (screen === 'select') {
     // Back steps out of the last lock-in first, then leaves the screen.
     if (locked[1]) { locked[1] = false; selectSide = 1; rerender(); }
@@ -1220,6 +1378,8 @@ function menuBack() {
   }
   else if (screen === 'map') act('mapback');
   else if (screen === 'moves') act('back');
+  else if (screen === 'profile') act('profile-back');
+  else if (screen === 'friends') act('fr-back');
   else if (screen === 'pause') act('resume');
 }
 /** Arena screen: a pad's shoulder buttons (LB / RB) step through the arenas. */
@@ -1235,7 +1395,18 @@ function menuInput(dtMs: number) {
   if (screen === 'start') { hidePadCursor(); pollStartPads(); endInputRead(); return; }
   startPadPrev = true;
   if (screen === 'padsetup') { hidePadCursor(); pollPadSetup(); }
-  const padUsed = screen === 'padsetup' ? false : updatePadCursor(menu, screen, dtMs, () => { if (navCooldown <= 0) { navCooldown = 180; sfx.menu(); menuBack(); } });
+  // The pad cursor is only for screens with things laid out in 2D (fighter select, arena select, settings, online);
+  // list menus (title, pause, results) use highlighted items stepped with the stick / D-pad.
+  const cursorScreen = screen === 'select' || screen === 'map' || screen === 'moves' || screen === 'online' || screen === 'profile' || screen === 'friends';
+  let padUsed = false;
+  if (cursorScreen) padUsed = updatePadCursor(menu, screen, dtMs, () => { if (navCooldown <= 0) { navCooldown = 180; sfx.menu(); menuBack(); } });
+  else if (screen !== 'padsetup') {
+    const nav = padListNav(dtMs);
+    padUsed = nav.used;
+    if (nav.step) { setFocus(focusIdx + nav.step); sfx.menu(); }
+    if (nav.confirm) { const el = focusables()[focusIdx]; if (el) { initAudio(); el.click(); } }
+    if (nav.back && navCooldown <= 0) { navCooldown = 180; menuBack(); }
+  }
   if (padUsed) initAudio();
   pollMapBumpers();
   const binds: DeviceBinding[] = [{ keyboard: [0, 1], gamepad: null, touch: false }];
@@ -1344,6 +1515,7 @@ function frame(now: number) {
   if (frameTimes.length > 600) frameTimes.shift();
   time += rawDt;
 
+  friends.setStatus(match ? 'match' : online.active ? 'room' : 'menu');
   if (previewQueue.length && screen !== 'none' && !match) captureArenaPreview();
   if (screen !== 'none') menuInput(rawDt * 1000);
   else hidePadCursor();
@@ -1357,7 +1529,11 @@ function frame(now: number) {
   if (match) { if (match.introT === 45 && lastIntroT !== 45) sfx.fightStart?.(); lastIntroT = match.introT; }
   if (online.active) {
     // Online: the lockstep decides when ticks run (both players' inputs known); menus never pause the simulation.
-    if (fx.hitstop > 0) fx.hitstop = Math.max(0, fx.hitstop - rawDt);
+    // This side's pause menu (or How to play opened from it) pauses the match for both players.
+    online.setPaused(online.phase === 'fight' && !!match && !match.ended && (screen === 'pause' || (screen === 'moves' && movesReturn === 'pause')));
+    // Paused by the opponent: our own pause button still opens our menu.
+    if (online.paused && screen === 'none' && match) { const r = readDevices(bindings()[0]); if (r.pause && !onlinePausePrev) { paused = true; showScreen('pause'); } onlinePausePrev = r.pause; }
+    if (fx.hitstop > 0 && !online.paused) fx.hitstop = Math.max(0, fx.hitstop - rawDt);
     online.pump(rawDt * 1000);
   } else if (match && !paused && screen === 'none' && !manualStep) {
     if (fx.hitstop > 0) fx.hitstop -= rawDt; // brief impact emphasis: sim holds, rendering continues
@@ -1432,7 +1608,7 @@ function frame(now: number) {
   }
 }
 applyPalette('rooftop');
-menu.innerHTML = '<div class="screen start-screen loading"><div class="band"><i class="smoke s1"></i><i class="smoke s2"></i></div><div class="logo-wrap"><h1 class="chrome">BREAK<span>LINE</span></h1></div><div class="press">Loading fighters…</div></div>';
+menu.innerHTML = '<div class="screen start-screen loading"><div class="band"><i class="smoke s1"></i><i class="smoke s2"></i></div><div class="logo-wrap"><h1 class="chrome"><b class="ch-sh" aria-hidden="true">BREAKLINE</b><b class="ch-tx">BREAK<span>LINE</span></b></h1></div><div class="press">Loading fighters…</div></div>';
 requestAnimationFrame(frame);
 
 // ============================================================ automation / test hooks
@@ -1447,6 +1623,7 @@ const hooks = {
   TUNING,
   forced,
   online,
+  friends,
   cpus: () => cpus,
   start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal', arenaId: LayoutId = 'rooftop') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; setup.arena = layoutOr(arenaId); startMatch(false); },
   setLives(n: number) { setup.lives = n; },

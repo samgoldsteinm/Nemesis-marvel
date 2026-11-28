@@ -99,7 +99,7 @@ class Mqtt {
 }
 
 // ------------------------------------------------------------------ relay bus (topics): MQTT brokers or a BroadcastChannel
-interface Bus { sub(topic: string): void; pub(topic: string, payload: string): void; readonly up: boolean; close(): void }
+export interface Bus { sub(topic: string): void; pub(topic: string, payload: string): void; readonly up: boolean; close(): void }
 
 class MqttBus implements Bus {
   private cl: Mqtt[];
@@ -136,6 +136,13 @@ class LocalBus implements Bus {
   }
   close() { this.bc.close(); }
 }
+
+/** A relay bus for other features (friends' presence): the public brokers, or the tab bus under ?net=local. */
+export function openBus(id: string, onMsg: (topic: string, payload: string) => void): Bus {
+  return qs('net') === 'local' ? new LocalBus(onMsg) : new MqttBus(id, onMsg);
+}
+/** Topic namespace shared by all online features. */
+export const NET_NS = NS;
 
 /** Silence before a link counts as lost (ms). Tests on slow machines can raise it with ?nettimeout=. */
 const LOST_MS = Number(qs('nettimeout')) || 20000;

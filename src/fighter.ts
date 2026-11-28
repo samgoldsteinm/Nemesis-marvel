@@ -29,6 +29,8 @@ export const TUNING = {
   finisherCost: 25,
   rageDuration: 8, // seconds
   recoveryCost: 20,
+  /** Ticks before a light hit in which a grab press still beats it. */
+  grabBeatsWindow: 6,
   superJumpCost: 15,
   superThrowCost: 20,
   staminaRegenDelay: 90, // ticks
@@ -73,6 +75,8 @@ export class Fighter {
   stun = 0;
   lastHit = 999;
   guardPressedAt = -999;
+  /** Tick of the last grab press: a grab pressed just before a light punch lands beats the punch. */
+  grabPressedAt = -999;
   tick = 0;
   rUsed = false;
   anchor: THREE.Vector3 | null = null;
@@ -266,6 +270,7 @@ export class Fighter {
     if (this.hitFlash > 0) this.hitFlash--;
     const inp = this.input;
     if (inp.b.guard.pressed) this.guardPressedAt = this.tick;
+    if (inp.b.grab.pressed) this.grabPressedAt = this.tick;
     if (this.landT > 0) this.landT--;
     if (this.blockT > 0) this.blockT--;
     // Input buffer: presses made during an action come out as soon as the fighter is free (within ~10 frames).
@@ -291,7 +296,7 @@ export class Fighter {
     }
     if (inp.b.power.pressed) this.rUsed = false;
     // Rage tap also works mid-move (attack recovery, dodge, landing), not only when free.
-    if (inp.b.power.released && inp.b.power.lastHeld <= TAP_R && !this.rUsed && this.rage >= 100 && !this.raging && ['attack', 'recover', 'evade'].includes(this.state) && !this.match.inputLocked) this.activateRage();
+    if (inp.b.power.released && inp.b.power.lastHeld <= TAP_R && !this.rUsed && this.rage >= 100 && !this.raging && ['attack', 'recover', 'evade', 'guard', 'lift'].includes(this.state) && !this.match.inputLocked) this.activateRage();
 
     this.updateResources(dt);
 
@@ -388,6 +393,7 @@ export class Fighter {
       this.stamina = Math.min(this.health, this.stamina + TUNING.staminaRegen * this.def.durability * dt);
     }
     if (this.state !== 'charge' && this.state !== 'fly' && this.state !== 'sblock') this.energy = Math.min(100, this.energy + TUNING.energyRegen * dt);
+    if (this.mobAtkCd > 0) this.mobAtkCd--;
     if (this.rageTime > 0) {
       this.energy = 100;
       this.rageTime -= dt;
@@ -591,10 +597,7 @@ export class Fighter {
     }
     // L+A: mobility attack.
     if (b.attack.pressed && b.mobility.down && !this.heldProp) {
-      const m = this.def.moves.mobilityAtk;
-      if (m.energy && !this.hasEnergy(m.energy)) { this.noPower(); return true; }
-      if (m.energy) this.spend(m.energy);
-      this.startMove(m);
+      this.mobilityAttack();
       return true;
     }
     // A: attack chain / air attacks / throw held prop.
@@ -640,7 +643,8 @@ export class Fighter {
     // L: mobility.
     if (this.mobility()) return true;
     // Neutral R tap: Rage.
-    if (b.power.released && b.power.lastHeld <= TAP_R && !this.rUsed && this.rage >= 100 && !this.raging && this.stickMag() < 0.5) {
+    // R tap: Rage — standing, walking or running (it used to need a neutral stick).
+    if (b.power.released && b.power.lastHeld <= TAP_R && !this.rUsed && this.rage >= 100 && !this.raging) {
       this.activateRage();
       return true;
     }
@@ -801,7 +805,7 @@ export class Fighter {
       this.setState('air');
       return;
     }
-    if (b.attack.pressed) { this.startMove(this.def.moves.mobilityAtk); return; }
+    if (b.attack.pressed) { this.mobilityAttack(); return; }
     if (b.jump.pressed) { this.vel.y = Math.max(this.vel.y, 0) + 8; this.setState('air'); return; }
   }
   recoverSwing = false;
@@ -852,7 +856,7 @@ export class Fighter {
       this.vel.copy(this.clingNormal).multiplyScalar(8);
       this.vel.y = 3;
       this.setState('air');
-      this.startMove(this.def.moves.mobilityAtk);
+      this.mobilityAttack();
     }
   }
 
@@ -880,12 +884,27 @@ export class Fighter {
       return;
     }
     if (b.grab.pressed && R) { this.rUsed = true; this.superGrab(); return; }
-    if (b.attack.pressed && b.mobility.down) { this.startMove(this.def.moves.mobilityAtk, true); return; }
+    if (b.attack.pressed && b.mobility.down) { this.mobilityAttack(true); return; }
     if (b.attack.pressed) { this.startMove(this.def.moves.airRise, true); return; }
     if (b.grab.pressed) { this.grabAction(); return; }
     if (this.onGround && this.vel.y <= 0 && vy <= 0 && this.t > 20) { this.setState('ground'); }
   }
   flyAfterMove = false;
+  /** Ticks until the mobility attack (LB+X) can be used again: it can't be chained into itself. */
+  mobAtkCd = 0;
+  /**
+   * LB+X: the mobility attack, gated by its energy cost and a short cooldown. Without these Aerin's flight dash
+   * (and Magna's ram, gravity off while active) could be mashed to stay airborne forever and re-hit a stunned opponent.
+   */
+  mobilityAttack(fromFlight = false): boolean {
+    const m = this.def.moves.mobilityAtk;
+    if (this.mobAtkCd > 0) return false;
+    if (m.energy && !this.hasEnergy(m.energy)) { this.noPower(); return false; }
+    if (m.energy) this.spend(m.energy);
+    this.mobAtkCd = 50;
+    this.startMove(m, fromFlight);
+    return true;
+  }
 
   // ======================================================================== attacks
   startMove(m: MoveDef, fromFlight = false) {
@@ -1228,8 +1247,10 @@ export class Fighter {
     const to = o.pos.clone().sub(this.pos);
     const dO = Math.hypot(to.x, to.z);
     const facingO = dO > 0.01 ? (to.x * fwd.x + to.z * fwd.z) / dO : 1;
-    const reach = this.def.radius + o.def.radius + 0.9;
+    // Generous on purpose: a grab has to be a real answer to someone jabbing in your face.
+    const reach = this.def.radius + o.def.radius + 1.25;
     const oGrabbable = o.alive && !['launched', 'down', 'getup', 'teleport', 'grabbed', 'finished', 'yanked'].includes(o.state) && o.invuln <= 0 && Math.abs(to.y) < 1.6;
+    // Opponent roughly in front wins; a prop you face comes next; then the opponent at a wider angle (not behind).
     if (oGrabbable && dO < reach && facingO > 0.3) return { kind: 'fighter', f: o };
     let best: Prop | null = null;
     let bestScore = Infinity;
@@ -1244,6 +1265,7 @@ export class Fighter {
       if (score < bestScore) { bestScore = score; best = p; }
     }
     if (best) return { kind: 'prop', p: best };
+    if (oGrabbable && dO < reach && facingO > -0.15) return { kind: 'fighter', f: o };
     const rg = this.def.rangedGrab;
     if (rg) {
       if (rg.fighters && oGrabbable && dO > reach && dO < rg.range && facingO > 0.8) return { kind: 'line-fighter', f: o };
@@ -1266,7 +1288,7 @@ export class Fighter {
     if (this.heldProp) { this.startThrow(false); return; }
     const tgt = this.grabTarget();
     sfx.grab();
-    if (!tgt) { this.startMove({ id: 'whiffGrab', wind: P.grab, strike: P.grab, startup: 6, active: 2, recovery: 12 }); return; }
+    if (!tgt) { this.startMove({ id: 'whiffGrab', wind: P.grab, strike: P.grab, startup: 4, active: 2, recovery: 8 }); return; }
     if (tgt.kind === 'fighter') { this.grabFighter(tgt.f, false); return; }
     if (tgt.kind === 'prop') { this.liftProp(tgt.p); return; }
     if (tgt.kind === 'line-fighter') { this.lineTarget = { kind: 'fighter', f: tgt.f, point: this.center }; this.setState('lineGrab'); this.lineTarget = { kind: 'fighter', f: tgt.f, point: this.center }; sfx.line(); return; }
@@ -1875,6 +1897,18 @@ export class Fighter {
 
   receiveHit(att: Fighter, spec: HitSpec, dir: THREE.Vector3, opts: { unblockable?: boolean; source?: string; noLaunchOnBlock?: boolean } = {}): HitResult['result'] {
     if (!this.alive || this.invuln > 0 || this.state === 'teleport' || this.state === 'finisher' || this.state === 'grabbed' && opts.source !== 'throw' && this.grabbedBy !== att) return 'miss';
+    // Grab beats a light punch: pressed within a few frames before a non-launching melee hit lands, from neutral
+    // (or out of a whiffed grab), the punch is caught and the puncher is grabbed instead.
+    if (opts.source === 'melee' && !spec.launch && !spec.heavy && this.tick - this.grabPressedAt <= TUNING.grabBeatsWindow && !this.heldProp && att.alive
+      && (this.state === 'ground' || (this.state === 'attack' && this.move?.id === 'whiffGrab'))
+      && att.pos.distanceTo(this.pos) < this.def.radius + att.def.radius + 1.5) {
+      this.move = null;
+      this.faceOpp(6);
+      this.grabFighter(att, false);
+      this.match.fx.sparksAt(this.center.addScaledVector(dir, -0.4), 8, 0xffffff, 4);
+      this.say('CAUGHT!');
+      return 'miss';
+    }
     const frontal = this.forward.dot(dir) < -0.1;
     if (!opts.unblockable && frontal && (this.state === 'guard' || this.state === 'sblock')) {
       if (this.state === 'sblock') {
@@ -2004,13 +2038,18 @@ export class Fighter {
     this.match.fx.flash(this.center, 1.0, 0xffffff, 0.15);
     this.invuln = 12;
     switch (this.def.recovery) {
-      case 'ground':
-        // A ground fighter can only kill some momentum: it needs a surface to land on.
-        this.vel.x *= 0.45;
-        this.vel.z *= 0.45;
-        this.vel.y = Math.max(this.vel.y, 5);
+      case 'ground': {
+        // A ground fighter can't fly back, but the recovery brakes hard and kicks off the air back toward the
+        // middle of the arena with a real hop: enough to save a short launch, not a long one over the void.
+        this.vel.x *= 0.25;
+        this.vel.z *= 0.25;
+        const home = new THREE.Vector3(-this.pos.x, 0, -this.pos.z);
+        if (home.lengthSq() > 0.01) this.vel.addScaledVector(home.normalize(), 6);
+        this.vel.y = Math.max(this.vel.y, 9);
+        this.match.fx.dust(this.pos, 10, 0.6, 2.4);
         this.setState('air');
         break;
+      }
       case 'swing':
         this.recoverSwing = true;
         if (!this.startSwing(true)) { this.recoverSwing = false; this.setState('air'); }

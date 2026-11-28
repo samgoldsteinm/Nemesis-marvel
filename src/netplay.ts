@@ -23,6 +23,7 @@ import type { Prop } from './arena';
 import { ACTIONS, emptyRaw, RawState } from './input';
 import { simRng } from './rng';
 import { netlog } from './net';
+import { cleanName } from './profile';
 import type { NetLink, NetMsg, Role } from './net';
 
 export const TICK_MS = 1000 / 60;
@@ -218,6 +219,8 @@ export class Lockstep {
   match: Match | null = null;
   running = false;
 
+  /** After a synced pause: don't count the paused time as a stall or as time owed. */
+  resume() { this.stallSince = 0; this.acc = 0; }
   get waiting() { return this.stallSince > 0 && performance.now() - this.stallSince > 500; }
 
   private onMsg(m: NetMsg) {
@@ -322,7 +325,7 @@ export function delayFor(rttMs: number) { return Math.max(2, Math.min(6, Math.ce
 const MAX_DELAY = 10;
 
 // ------------------------------------------------------------------ lobby session
-export interface SideState { pick: string; locked: boolean }
+export interface SideState { pick: string; locked: boolean; name?: string }
 export interface MatchCfg { seed: number; p1: string; p2: string; arena: string; lives: number; delay: number }
 /**
  * Lobby protocol (all reliable + ordered, see NetLink.send): 'pick' {pick, locked} from either side; 'cfg'
@@ -332,7 +335,7 @@ export interface MatchCfg { seed: number; p1: string; p2: string; arena: string;
  * Plus the lockstep's 'in' (fast) and 'ck'/'rs'/'sn'.
  */
 export class OnlineSession {
-  me: SideState = { pick: 'tether', locked: false };
+  me: SideState = { pick: 'tether', locked: false, name: '' };
   them: SideState = { pick: 'basalt', locked: false };
   arena = 'rooftop';
   lives = 1;
@@ -346,6 +349,11 @@ export class OnlineSession {
   onBothLoaded: () => void = () => {};
   rematchMine = false;
   rematchTheirs = false;
+  /** Either side's pause menu is open: neither side simulates (the lockstep simply isn't pumped). */
+  pausedMine = false;
+  pausedTheirs = false;
+  /** Both sides went back to fighter select (connection kept). */
+  onLobby: () => void = () => {};
   onChange: () => void = () => {};
   onStart: (cfg: MatchCfg) => void = () => {};
   onBothReady: () => void = () => {};
@@ -358,24 +366,28 @@ export class OnlineSession {
   get side(): 0 | 1 { return this.isHost ? 0 : 1; }
   private onMsg(m: NetMsg) {
     switch (m.k) {
-      case 'pick': this.them = { pick: String(m.pick), locked: !!m.locked }; this.onChange(); break;
+      case 'pick': this.them = { pick: String(m.pick), locked: !!m.locked, name: cleanName(m.name) }; this.onChange(); break;
       case 'cfg': if (!this.isHost) { this.arena = String(m.arena); this.lives = Number(m.lives); this.onChange(); } break;
       case 'start': {
         if (this.isHost) break;
         const cfg = m.cfg as unknown as MatchCfg;
         if (this.cfg && this.cfg.seed === cfg.seed) { netlog('start repeated (already handled)'); this.resendStage(); break; }
         netlog('start received');
-        this.cfg = cfg; this.resetStage(); this.onStart(cfg);
+        this.cfg = cfg; this.resetStage(); this.pausedMine = this.pausedTheirs = false; this.onStart(cfg);
         break;
       }
       case 'loaded': if (this.cfg && m.seed === this.cfg.seed && !this.loadedTheirs) { netlog('opponent loaded'); this.loadedTheirs = true; this.onChange(); this.checkLoaded(); } break;
       case 'ready': if (this.cfg && m.seed === this.cfg.seed && !this.readyTheirs) { netlog('opponent ready'); this.readyTheirs = true; this.readyTheirsAt = performance.now(); this.onChange(); this.checkReady(); } break;
       case 'rematch': this.rematchTheirs = true; this.onChange(); this.maybeRematch(); break;
+      case 'pause': this.pausedTheirs = !!m.on; this.onChange(); break;
+      case 'lobby': this.resetLobby(); this.onLobby(); this.onChange(); break;
     }
   }
-  sendPick() { this.link.send({ k: 'pick', pick: this.me.pick, locked: this.me.locked }); }
+  sendPick() { this.link.send({ k: 'pick', pick: this.me.pick, locked: this.me.locked, name: this.me.name || '' }); }
   sendCfg() { if (this.isHost) this.link.send({ k: 'cfg', arena: this.arena, lives: this.lives }); }
-  setPick(id: string, locked: boolean) { this.me = { pick: id, locked }; this.sendPick(); this.onChange(); }
+  /** Our player name changed: tell the opponent. */
+  setName(name: string) { this.me = { ...this.me, name }; if (this.link.open) this.sendPick(); this.onChange(); }
+  setPick(id: string, locked: boolean) { this.me = { ...this.me, pick: id, locked }; this.sendPick(); this.onChange(); }
   setCfg(arena: string, lives: number) { this.arena = arena; this.lives = lives; this.sendCfg(); this.onChange(); }
   /** Host only: start the match on the chosen arena (after both sides locked in their fighters). */
   go() {
@@ -387,6 +399,7 @@ export class OnlineSession {
     this.cfg = cfg;
     this.resetStage();
     this.rematchMine = this.rematchTheirs = false;
+    this.pausedMine = this.pausedTheirs = false;
     netlog('start sent');
     this.link.send({ k: 'start', cfg: cfg as unknown as Record<string, unknown> });
     this.onStart(cfg);
@@ -404,6 +417,15 @@ export class OnlineSession {
     if (this.isHost) this.link.send({ k: 'start', cfg: this.cfg as unknown as Record<string, unknown> });
     if (this.loadedMine) this.link.send({ k: 'loaded', seed: this.cfg.seed });
     if (this.readyMine) this.link.send({ k: 'ready', seed: this.cfg.seed });
+  }
+  /** Open / close this side's pause menu (pauses the match for both). */
+  setPaused(on: boolean) { if (this.pausedMine === on) return; this.pausedMine = on; this.link.send({ k: 'pause', on }); this.onChange(); }
+  /** Back to fighter select for both players, keeping the connection (picks kept, locks released). */
+  toLobby() { this.link.send({ k: 'lobby' }); this.resetLobby(); this.onLobby(); this.onChange(); }
+  private resetLobby() {
+    this.cfg = null; this.resetStage();
+    this.me = { ...this.me, locked: false }; this.them = { ...this.them, locked: false };
+    this.rematchMine = this.rematchTheirs = false; this.pausedMine = this.pausedTheirs = false;
   }
   rematch() { this.rematchMine = true; this.link.send({ k: 'rematch' }); this.onChange(); this.maybeRematch(); }
   private maybeRematch() {

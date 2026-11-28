@@ -98,6 +98,8 @@ export function installKeyboard() {
   if (inputListenersInstalled) return;
   inputListenersInstalled = true;
   window.addEventListener('keydown', (e) => {
+    // Typing in a text field (room code, player name) must not drive the menus or the fighter.
+    if (e.target instanceof HTMLInputElement && e.target.type !== 'range') return;
     keys.add(e.code);
     noteInput('keys');
     tapped.add(e.code);

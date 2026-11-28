@@ -5,6 +5,7 @@ import type { RawState } from './input';
 import type { Match } from './match';
 import { NetLink, netlog, newRoomCode } from './net';
 import { Lockstep, OnlineSession, MatchCfg } from './netplay';
+import { playerName } from './profile';
 
 export interface OnlineGame {
   /** Show a menu screen by name ('online' | 'select' | 'title' | 'none' | …). */
@@ -72,11 +73,13 @@ export class Online {
     const link = new NetLink(role, code);
     this.link = link;
     const s = new OnlineSession(link);
+    s.me.name = playerName;
     this.session = s;
     s.onChange = () => this.g.rerender();
     s.onStart = (cfg) => this.beginMatch(cfg);
     s.onBothLoaded = () => this.beginIntro();
     s.onBothReady = () => this.beginFight();
+    s.onLobby = () => this.backToLobby();
     link.onOpen(() => { this.phase = 'lobby'; this.g.show('select'); });
     link.onClose(() => {
       const why = link.why || 'Disconnected.';
@@ -129,9 +132,27 @@ export class Online {
     netlog('fight starts (lockstep running)');
     this.g.onFight();
   }
+  /** Both players back on fighter select, still connected (from the results or pause menu). */
+  private backToLobby() {
+    this.lock?.dispose(); this.lock = null;
+    this.phase = 'lobby';
+    netlog('back to fighter select');
+    this.g.leave();
+    this.g.show('select');
+  }
+  /** Ask both sides to go back to fighter select. */
+  changeFighters() { this.session?.toLobby(); }
+  /** The match is paused because one side has its pause menu open (only during the fight). */
+  get paused() { const s = this.session; return this.phase === 'fight' && !!s && (s.pausedMine || s.pausedTheirs); }
+  get pausedByThem() { return this.phase === 'fight' && !!this.session?.pausedTheirs; }
+  private wasPaused = false;
+  setPaused(on: boolean) { this.session?.setPaused(on); }
   /** Each animation frame while online. */
   pump(dtMs: number) {
     const s = this.session;
+    const p = this.paused;
+    if (p !== this.wasPaused) { this.wasPaused = p; netlog(p ? 'paused' : 'resumed'); if (!p) this.lock?.resume(); }
+    if (p) return;
     // Opponent already through the intro: don't make them sit through the rest of ours.
     if (this.phase === 'intro' && s && !s.readyMine && s.readyTheirsAt && performance.now() - s.readyTheirsAt > INTRO_GRACE_MS) {
       netlog('opponent waiting, cutting intro short');
@@ -153,17 +174,20 @@ export class Online {
       if (!s?.loadedMine) { text = 'Loading arena…'; sub = 'Preparing fighters and effects'; }
       else { text = 'Waiting for opponent…'; sub = 'They are still loading the arena'; }
     } else if (this.phase === 'intro' && s?.readyMine && !s.readyTheirs) { text = 'Waiting for opponent…'; sub = 'They are finishing the intro'; }
-    else if (this.phase === 'fight' && this.lock?.waiting) { text = 'Waiting for opponent…'; sub = this.connected ? 'Their inputs are late (connection hiccup)' : 'Reconnecting…'; }
+    else if (this.pausedByThem && !this.session?.pausedMine) { text = 'Paused'; sub = 'Your opponent opened the pause menu'; }
+    else if (this.phase === 'fight' && !this.paused && this.lock?.waiting) { text = 'Waiting for opponent…'; sub = this.connected ? 'Their inputs are late (connection hiccup)' : 'Reconnecting…'; }
     const key = text && this.phase + text;
     if (key !== this.waitKey) { this.waitKey = key; this.waitSince = key ? performance.now() : 0; }
     if (!text) return null;
     const secs = (performance.now() - this.waitSince) / 1000;
-    return { text, sub, long: secs > 10, secs };
+    return { text, sub, long: secs > 10 && text !== 'Paused', secs };
   }
   /** Retry button: re-send this side's start-up messages and restart the wait timer. */
   retry() { netlog('retry pressed'); this.session?.resendStage(); this.waitSince = performance.now(); }
   /** Opponent is through the intro and waiting on us (prompt to skip). */
   get opponentWaiting() { return this.phase === 'intro' && !!this.session?.readyTheirs && !this.session.readyMine; }
+  /** Opponent's name ('' until they send one). */
+  get theirName() { return this.session?.them.name || ''; }
   rematch() { this.session?.rematch(); }
   /** Leave online play entirely. */
   close(tell = true) {

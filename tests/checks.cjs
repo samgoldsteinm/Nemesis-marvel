@@ -112,6 +112,38 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     return { pass: st === 'grabbing' && vs === 'grabbed' && /POWER/.test(note) && !(m.ended?.how === 'finisher'), info: `att=${st} vic=${vs} note=${note} ended=${m.ended?.how} health=${b.health.toFixed(0)}` };
   });
 
+  await check('Rage activates while running (R tap with the stick held)', () => {
+    const m = T.setup('ember', 'basalt');
+    const [a] = m.fighters;
+    T.place(a, 0, 4, 0);
+    a.rage = 100;
+    T.hold(0, [], 20, [0, 1]); // running
+    const moving = Math.hypot(a.vel.x, a.vel.z) > 2;
+    T.hold(0, ['power'], 3, [0, 1]); // short R tap while still pushing the stick
+    T.hold(0, [], 2, [0, 1]);
+    return { pass: moving && a.raging, info: `moving=${moving} raging=${a.raging} state=${a.state}` };
+  });
+
+  await check('Grab beats a light punch: a grab pressed just before a jab lands catches the puncher', () => {
+    const m = T.setup('basalt', 'tether');
+    const [a, b] = m.fighters;
+    T.faceEachOther(m, 1.7);
+    // Straight grab at jab range connects.
+    T.hold(0, ['grab'], 1);
+    const direct = a.state === 'grabbing' && b.state === 'grabbed';
+    // Second round: the jab is already coming and A's grab press whiffs (turned away) → the jab is caught instead.
+    const m2 = T.setup('basalt', 'tether');
+    const [c, d] = m2.fighters;
+    T.faceEachOther(m2, 1.7);
+    c.yaw += Math.PI;
+    T.hold(1, ['attack'], 1);
+    T.idle(2);
+    T.hold(0, ['grab'], 1);
+    let caught = false;
+    for (let i = 0; i < 12 && !caught; i++) { T.idle(1); if (c.state === 'grabbing' && d.state === 'grabbed') caught = true; }
+    return { pass: direct && caught, info: `direct=${direct} caught=${caught} c=${c.state} d=${d.state}` };
+  });
+
   await check('Finisher also valid during Rage regardless of meter', () => {
     const m = T.setup('tether', 'aerin');
     const [a, b] = m.fighters;
@@ -156,6 +188,44 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     T.hold(0, ['mobility', 'power'], 2);
     T.idle(300);
     return { pass: a.state === 'out' && m.ended?.how === 'ringout' && m.ended.winner === b && a.stats.recoveries === 1, info: `state=${a.state} end=${m.ended?.how} recoveries=${a.stats.recoveries}` };
+  });
+
+  await check('Ground recovery saves a short launch that is otherwise a ring-out (EMBER)', () => {
+    // Same edge as above; find a launch strength where doing nothing falls off but recovering lands on the roof.
+    const run = (kb, recover) => {
+      const m = T.setup('ember', 'tether');
+      const [a, b] = m.fighters;
+      m.arena.walls.find((w) => w.outward.z === 1 && Math.abs(w.center.x) < 0.1).damage(999, m.fx);
+      T.place(a, 0, 10.5, 0); T.place(b, 0, 7.5, 0);
+      a.energy = 60;
+      a.receiveHit(b, { fwd: 0, up: 0, radius: 0, stamina: 5, health: 5, kbF: kb, kbU: 6, stun: 30, launch: true }, new window.THREE.Vector3(0, 0, 1), { unblockable: true });
+      T.idle(10);
+      if (recover) T.hold(0, ['mobility', 'power'], 2);
+      T.idle(260);
+      return a.state === 'out' ? 'out' : 'saved';
+    };
+    const tried = [];
+    for (const kb of [8, 9, 10, 11, 12, 13]) {
+      const plain = run(kb, false), rec = run(kb, true);
+      tried.push(`${kb}:${plain}/${rec}`);
+      if (plain === 'out' && rec === 'saved') return { pass: true, info: `kbF ${kb}: no recovery = out, recovery = saved` };
+    }
+    return { pass: false, info: tried.join(' ') };
+  });
+
+  await check('Aerin flight dash costs energy and cannot be chained', () => {
+    const m = T.setup('aerin', 'basalt');
+    const [a] = m.fighters;
+    a.energy = 100;
+    T.hold(0, ['mobility', 'attack'], 2);
+    const first = a.move?.id, e1 = a.energy;
+    T.idle(3);
+    T.hold(0, ['mobility', 'attack'], 2); // mashed again right away: refused (cooldown)
+    const blocked = a.mobAtkCd > 0;
+    a.energy = 5; a.mobAtkCd = 0; T.idle(40);
+    a.energy = 5;
+    T.hold(0, ['mobility', 'attack'], 2); // not enough energy
+    return { pass: first === 'flightDash' && e1 <= 89 && blocked && a.move?.id !== 'flightDash', info: `first=${first} energyAfter=${e1.toFixed(1)} cooldown=${blocked} lowEnergyMove=${a.move?.id}` };
   });
 
   await check('Ring-out also works for SHUNT with no energy left (teleport needs power)', () => {
