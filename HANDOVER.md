@@ -118,6 +118,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-27 | Phone-first touch controls: floating stick (left half), named ATTACK/JUMP/SPECIAL/GRAB/GUARD/DASH arc, contextual RAGE/FINISH/RECOVER/CHARGE buttons (via `setTouchContext` from main each frame), GUARD+SPECIAL = super block, HUD prompts touch-aware. Portraits auto-cropped to their opaque bounds (bigger select/title/result art), art zone widened to the seam; Basalt's comic art uses a charcoal-stone tone with lava kept (`posterizeStone`), neutral rim for studio renders |
 | 11-28 | Roster close-ups framed like comic panels: per-fighter `FACE` shots in portraits.ts (camera azimuth/elevation/roll, body yaw, head turn via `SkinnedBody.headTurn`), face-level camera with the eyes ~40% down; Basalt pulled back, Tether turned toward us, Magna low angle, Ember tilted, Rift profile, Shunt dutch tilt |
 | 11-28 | Arena select is its own screen after fighter select (`renderMap`, Screen `'map'`): big preview + strip of 5, name, blurb, ring-out danger (`DANGER`), Lives and CPU level moved here; ◀ ▶ keys / LB RB / tap; Back keeps fighters locked. Previews are real renders of each arena through the post stack (`captureArenaPreview`, one per frame while a menu is up, cached JPEG data URLs, original layout restored). Online: both locked → both go to the arena screen, host picks live (guest read-only), host's FIGHT calls `OnlineSession.go()` (no more auto-start on lock). Title menu redesigned: letterboxed band of tall slanted teal-duotone busts (`BUST` shots in portraits.ts, `bustOf`), text menu in a dark gap with gold highlight + red slash, device-aware prompt top-left, settings in the bottom bar; portrait = band on top, menu below. Aerin's roster face lifted (`aimY`) |
+| 11-28 | Sharper image: multisampled composer target (MSAA 4x), light contrast-adaptive sharpen in the grade pass, grain 0.03→0.012, bloom radius ×0.55, adaptive quality drops shadows before resolution and never below native pixels (`minPixelRatio`) |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -233,6 +234,10 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 
 **Portrait framing**
 - `SkinnedBody.headTurn` (portrait-only) turns the head on top of the clip before the golem retarget; head angle in world ≈ body yaw + headTurn.yaw. Check shots on a large contact sheet (`faces` map) — raised arms in the pose can block a 3/4 angle (Magna), so orbit to the other side.
+
+**Image quality**
+- EffectComposer needs its own multisampled render target; the canvas `antialias` flag does nothing once post-processing is on.
+- Never let adaptive quality push pixelRatio below 1 (CSS pixels): that is what made phones look fuzzy.
 
 **Process**
 - Background agents editing files while tests run make Vite hot-reload the page mid-test → failures that say
