@@ -1,6 +1,7 @@
 import { Online } from './online';
+import { netlog, netDebug, netLogLines } from './net';
 import { CANON, toCanonical, MatchCfg } from './netplay';
-import { FightIntro, VictoryCine } from './intro';
+import { FightIntro, VictoryCine, introVoicesReady } from './intro';
 import { updatePadCursor, hidePadCursor } from './padcursor';
 import { VFX } from './vfx';
 import { TRAITS } from './traits';
@@ -184,6 +185,18 @@ function applyPalette(id: LayoutId) {
  * while a menu is up (never during a match), cached as JPEG data URLs. The layout that was showing is restored.
  */
 const arenaPreviews = new Map<LayoutId, string>();
+// Shipped thumbnails (tools/arena-previews.cjs regenerates them). Rendering them live compiled every arena's shaders
+// on the main thread while the arena screen was open (measured 3-17 s per arena with a software GPU, seconds on
+// phones): taps and online 'start' messages waited behind it. Live capture stays as the fallback (?livepreviews,
+// or when a file is missing).
+if (!new URLSearchParams(location.search).has('livepreviews')) for (const l of LAYOUTS) arenaPreviews.set(l.id, `previews/${l.id}.jpg`);
+(window as any).__prevMissing = (img: HTMLImageElement) => {
+  const id = img.dataset.prev as LayoutId;
+  if (!arenaPreviews.get(id)?.startsWith('previews/')) return;
+  arenaPreviews.delete(id);
+  img.classList.add('wait');
+  queueArenaPreviews();
+};
 let previewQueue: LayoutId[] = [];
 let previewRestore: LayoutId | null = null;
 const previewCam = new THREE.PerspectiveCamera(40, 16 / 9, 0.5, 900);
@@ -202,7 +215,25 @@ function queueArenaPreviews() {
   previewQueue = ids;
   previewRestore = arena.layout;
 }
+/**
+ * True while an arena preview's shaders compile asynchronously; the frame loop then doesn't draw the scene (that
+ * draw would compile them synchronously: measured 10-12 s frames on the arena screen with a software GPU, which
+ * also held up the host's FIGHT press and the guest's handling of 'start').
+ */
+let previewBusy = false;
 function captureArenaPreview() {
+  if (previewBusy) return;
+  const id = previewQueue[0];
+  if (arena.layout !== id) arena.setLayout(id);
+  applyPalette(id);
+  previewBusy = true;
+  renderer.compileAsync(scene, previewCam).catch(() => {}).then(() => {
+    previewBusy = false;
+    if (previewQueue[0] !== id || screen === 'none' || match) return; // left the menus meanwhile
+    shootArenaPreview();
+  });
+}
+function shootArenaPreview() {
   const id = previewQueue.shift()!;
   if (arena.layout !== id) arena.setLayout(id);
   applyPalette(id);
@@ -364,16 +395,40 @@ function bindings(): DeviceBinding[] {
   return [{ keyboard: [0], gamepad: 0, touch: true }, { keyboard: [1], gamepad: 1, touch: false }];
 }
 
+/** False while an online match's shaders are compiling (the frame loop then skips drawing the scene). */
+let sceneWarm = true;
+/** Test-only: ?norender skips drawing the 3D scene (protocol/netcode tests on machines without a real GPU). */
+const noRender = new URLSearchParams(location.search).has('norender');
 let intro: FightIntro | null = null;
 let lastIntroT = -1;
 let introsOn = true, voicesOn = true;
 try { introsOn = localStorage.getItem('bl.intros') !== '0'; voicesOn = localStorage.getItem('bl.voices') !== '0'; } catch { /* storage optional */ }
+/** Camera distance setting: 70 % (closer) … 140 % (wider), 10 % steps, saved per device. */
+const ZOOM_MIN = 0.7, ZOOM_MAX = 1.4;
+let camZoom = 1;
+try { const z = Number(localStorage.getItem('bl.zoom')); if (z >= ZOOM_MIN && z <= ZOOM_MAX) camZoom = z; } catch { /* storage optional */ }
+vcam.userZoom = camZoom;
+function setZoom(z: number) {
+  camZoom = Math.round(THREE.MathUtils.clamp(z, ZOOM_MIN, ZOOM_MAX) * 10) / 10;
+  vcam.userZoom = camZoom;
+  try { localStorage.setItem('bl.zoom', String(camZoom)); } catch { /* */ }
+}
+/** −/+ stepper (works with touch, mouse, keys and the pad cursor). */
+function zoomCtl(compact = false) {
+  const pct = Math.round(camZoom * 100), k = (camZoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN);
+  return `<div class="zoomctl${compact ? ' compact' : ''}"><span class="opt-label">Camera</span>
+    <button class="pill zbtn" data-nav data-act="zoom" data-arg="-1" aria-label="Closer"${camZoom <= ZOOM_MIN ? ' disabled' : ''}>${compact ? '−' : '− Closer'}</button>
+    <span class="zbar" aria-hidden="true"><i style="width:${(k * 100).toFixed(0)}%"></i><u style="left:${(((1 - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN)) * 100).toFixed(0)}%"></u></span>
+    <button class="pill zbtn" data-nav data-act="zoom" data-arg="1" aria-label="Wider"${camZoom >= ZOOM_MAX ? ' disabled' : ''}>${compact ? '+' : 'Wider +'}</button>
+    <b class="zval">${pct}%</b></div>`;
+}
 const introEl = document.getElementById('intro')!;
 function endIntro() { if (intro) { intro.finish(); intro = null; } if (victory) { victory.finish(); victory = null; } victoryDone = false; }
 /** Victory cinematic after the final K.O. (presentational only; skipped when intros are off or for test matches). */
 let victory: VictoryCine | null = null, victoryDone = false, matchCine = false;
 function startMatch(withIntro = true, seed?: number) {
   endIntro();
+  sceneWarm = true;
   if (match) match.dispose();
   const d: [CharacterDef, CharacterDef] = [charById(setup.p1), charById(setup.p2)];
   if (arena.layout !== setup.arena) arena.setLayout(setup.arena);
@@ -405,9 +460,30 @@ const online = new Online({
   startMatch: (cfg: MatchCfg) => {
     setup.mode = 'online'; setup.p1 = cfg.p1; setup.p2 = cfg.p2; setup.arena = cfg.arena as LayoutId; setup.lives = cfg.lives;
     goLandscape();
-    startMatch(true, cfg.seed);
-    if (!intro) online.introDone();
+    startMatch(false, cfg.seed);
+    sceneWarm = false; // the frame loop stops drawing the scene until its shaders are compiled
+    if (match) match.introT = 100000; // fighters hold still until the synced intro / fight
   },
+  warmup: async () => {
+    // Measured: building the match takes ~150 ms, but its first frame compiled ~70 new shader programs (new
+    // fighters' body shaders, lights, shadows, post) synchronously: many seconds of frozen screen on a phone, and
+    // the intro clock ran on one side while the other was still frozen. Compile them off the critical path now,
+    // behind the "Loading arena…" overlay, then draw one frame (shadow/post variants) before saying we're loaded.
+    const t = performance.now();
+    await new Promise((r) => requestAnimationFrame(() => r(null))); // let the overlay paint first
+    try { await renderer.compileAsync(scene, vcam.cam); } catch (e) { console.warn('compileAsync failed', e); }
+    netlog(`shaders compiled in ${Math.round(performance.now() - t)} ms (${renderer.info.programs?.length ?? '?'} programs)`);
+    sceneWarm = true;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null))));
+    await Promise.race([introVoicesReady(), new Promise((r) => setTimeout(r, 4000))]); // intro timing uses the voice manifest
+  },
+  playIntro: () => {
+    if (!match || !introsOn) return false;
+    matchCine = true;
+    intro = new FightIntro(match, vcam, introEl, voicesOn, true);
+    return true;
+  },
+  cutIntro: () => { if (intro) { intro.finish(); intro = null; } },
   match: () => match,
   simulate: (pair) => { forced[0] = pair[0]; forced[1] = pair[1]; simTick(); forced[0] = forced[1] = null; },
   sample: () => {
@@ -417,7 +493,7 @@ const online = new Online({
     return toCanonical(raw, vcam.fwd, vcam.right);
   },
   onFight: () => { trackers.forEach((t) => t.reset()); paused = false; if (screen !== 'none' && screen !== 'pause') showScreen('none'); },
-  leave: () => { endIntro(); if (match) { match.dispose(); match = null; } hud.show(false); touchRoot.classList.add('off'); paused = false; setup.mode = 'cpu'; startMusic('menu'); },
+  leave: () => { endIntro(); sceneWarm = true; if (match) { match.dispose(); match = null; } hud.show(false); touchRoot.classList.add('off'); paused = false; setup.mode = 'cpu'; startMusic('menu'); },
 });
 /** A ?room=CODE link joins that room after Press Start. */
 let pendingRoom = '';
@@ -496,13 +572,64 @@ function renderOnline() {
 const netStat = document.createElement('div');
 netStat.id = 'netstat';
 document.body.appendChild(netStat);
+/** Start-up / stall overlay: spinner, what we're waiting for, and Retry / Leave once it drags on. */
+const netWait = document.createElement('div');
+netWait.id = 'netwait';
+netWait.innerHTML = '<div class="nw-box"><span class="nw-spin"></span><div class="nw-txt"><b></b><small></small></div><div class="nw-btns"><button class="pill" data-nw="retry">Retry</button><button class="pill" data-nw="leave">Leave</button></div></div><div class="nw-hint"></div>';
+netWait.addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest('[data-nw]') as HTMLElement | null;
+  if (!b) return;
+  if (b.dataset.nw === 'retry') online.retry(); else act('online-leave');
+});
+document.body.appendChild(netWait);
+const netDbg = document.createElement('pre');
+netDbg.id = 'netdebug';
+if (netDebug) document.body.appendChild(netDbg);
+// ?netdebug: attribute long frames (script vs style/layout/paint) with the Long Animation Frames API where available.
+if (netDebug) try {
+  new PerformanceObserver((list) => {
+    for (const e of list.getEntries() as any[]) {
+      if (e.duration < 200) continue;
+      const scripts = (e.scripts ?? []).slice().sort((a: any, b: any) => b.duration - a.duration).slice(0, 2)
+        .map((x: any) => `${x.invoker || x.name}${x.sourceFunctionName ? " (" + x.sourceFunctionName + " " + String(x.sourceURL || "").split("/").pop() + ")" : ""} ${Math.round(x.duration)}ms`).join(', ');
+      const render = e.renderStart ? Math.round(e.startTime + e.duration - e.renderStart) : 0;
+      const layout = e.styleAndLayoutStart ? Math.round(e.startTime + e.duration - e.styleAndLayoutStart) : 0;
+      netlog(`LoAF ${Math.round(e.duration)} ms: render ${render} (style+layout+paint ${layout}) · scripts ${scripts || '-'}`);
+    }
+  }).observe({ type: 'long-animation-frame', buffered: false });
+} catch { /* not supported */ }
+let netWaitKey = '';
+function updateNetWait() {
+  const w = online.active && match ? online.wait : null;
+  const hint = online.active && online.opponentWaiting ? 'Your opponent is ready · press any button to skip' : '';
+  const key = (w ? `${w.text}|${w.sub}|${w.long}|${Math.floor(w.secs)}` : '') + '|' + hint;
+  if (key === netWaitKey) return;
+  netWaitKey = key;
+  netWait.classList.toggle('on', !!w);
+  netWait.classList.toggle('long', !!w?.long);
+  netWait.classList.toggle('dim', online.phase === 'loading');
+  netWait.classList.toggle('hinted', !!hint);
+  (netWait.querySelector('.nw-hint') as HTMLElement).textContent = hint;
+  if (!w) return;
+  netWait.querySelector('b')!.textContent = w.text;
+  netWait.querySelector('small')!.textContent = w.long ? `${w.sub} · ${Math.floor(w.secs)} s — still trying` : w.sub;
+}
+function updateNetDebug() {
+  if (!netDebug) return;
+  const l = online.link, lk = online.lock, s = online.session;
+  netDbg.textContent = `phase ${online.phase} · ${l ? (l.direct ? 'direct' : 'relay') + (l.relayUp ? '' : ' (relay down)') : '-'} · rtt ${online.ping} · unacked ${l?.pending ?? 0} · rtx ${l?.retransmits ?? 0}\n`
+    + `loaded ${s?.loadedMine ? 1 : 0}/${s?.loadedTheirs ? 1 : 0} ready ${s?.readyMine ? 1 : 0}/${s?.readyTheirs ? 1 : 0} · tick ${lk?.tick ?? '-'} delay ${lk?.delay ?? '-'} desync ${lk?.desyncs ?? 0}\n`
+    + netLogLines.slice(-14).join('\n');
+}
 function updateNetStat() {
+  updateNetWait();
+  updateNetDebug();
   const show = online.active && !!match && (screen === 'none' || screen === 'pause');
   netStat.style.display = show ? '' : 'none';
   if (!show) return;
   const p = online.ping;
   netStat.className = p < 90 ? 'good' : p < 180 ? 'ok' : 'bad';
-  netStat.innerHTML = `<i></i>${p ? p + ' ms' : '…'} · ${online.direct ? 'direct' : 'relay'}${online.waiting ? ' · <b>waiting for opponent…</b>' : online.phase === 'intro' ? ' · <b>getting ready…</b>' : ''}`;
+  netStat.innerHTML = `<i></i>${p ? p + ' ms' : '…'} · ${online.direct ? 'direct' : 'relay'}${online.waiting ? ' · <b>waiting for opponent…</b>' : ''}`;
 }
 
 function rematch(swap = false) {
@@ -685,6 +812,7 @@ function renderTitle() {
           <button class="pill" data-nav data-act="mute"><i class="pi">${muted ? '🔇' : '🔊'}</i> Sound ${muted ? 'off' : 'on'}</button>
           <button class="pill" data-nav data-act="intros"><i class="pi">🎬</i> Intros ${introsOn ? 'on' : 'off'}</button>
           <button class="pill" data-nav data-act="voices"><i class="pi">🗣</i> Voices ${voicesOn ? 'on' : 'off'}</button>
+          <button class="pill" data-nav data-act="zoomcycle"><i class="pi">🎥</i> Camera ${Math.round(camZoom * 100)}%</button>
           <button class="pill" data-nav data-act="layoutcycle"><i class="pi">🎮</i> ${padLayout === 'xbox' ? 'Xbox' : 'GameCube'}<span class="pl-long">&nbsp;buttons</span></button>
           <span class="pill static">${pads ? pads + ' controller' + (pads > 1 ? 's' : '') + ' connected' : 'Keyboard: WASD + J K L I U O'}</span>
         </div>
@@ -755,7 +883,7 @@ const DANGER: Record<LayoutId, [number, string]> = {
 };
 function arenaImg(id: LayoutId, cls: string) {
   const u = arenaPreviews.get(id);
-  return `<img class="${cls}${u ? '' : ' wait'}" data-prev="${id}" src="${u || 'data:image/gif;base64,R0lGODlhAQABAAAAACw='}" alt="">`;
+  return `<img class="${cls}${u ? '' : ' wait'}" data-prev="${id}" src="${u || 'data:image/gif;base64,R0lGODlhAQABAAAAACw='}" onerror="__prevMissing(this)" alt="">`;
 }
 function renderMap() {
   queueArenaPreviews();
@@ -844,6 +972,7 @@ function render(s: Screen): string {
         <button class="btn2 primary wide" data-nav data-act="resume">▶ Resume</button>
         ${online.active ? '<p class="note">Online: the match keeps running while this menu is open.</p>' : '<button class="btn2 wide" data-nav data-act="rematch">↻ Restart bout</button>'}
         <button class="btn2 wide" data-nav data-act="moves">? How to play</button>
+        ${zoomCtl(true)}
         <button class="btn2 wide" data-nav data-act="mute"><i class="pi">${muted ? '🔇' : '🔊'}</i> Sound ${muted ? 'off' : 'on'}</button>
         <button class="btn2 wide" data-nav data-act="title">${online.active ? 'Leave match' : 'Quit to menu'}</button>
       </div>
@@ -885,6 +1014,7 @@ function render(s: Screen): string {
       <tbody>${ctl.map(([a, g, kb, t]) => `<tr><td>${a}</td><td>${g}</td><td>${kb}</td><td>${t}</td></tr>`).join('')}</tbody></table>
       <div class="padopts"><span class="opt-label">Button layout</span><div class="seg">${(['xbox', 'gamecube'] as const).map((l) => `<button class="segbtn ${padLayout === l ? 'on' : ''}" data-nav data-act="layout" data-arg="${l}">${l === 'xbox' ? 'Xbox' : 'GameCube'}</button>`).join('')}</div>
         <button class="pill" data-nav data-act="padsetup">🎮 Set up controller</button></div>
+      <div class="padopts">${zoomCtl()}</div>
       <p class="note"><b>On a phone:</b> drag anywhere on the left half to move. <b>GUARD + SPECIAL</b> together = super block. Extra buttons pop up when you can use them: <b>RAGE</b> (meter full), <b>FINISH</b> (opponent in Danger), <b>RECOVER</b> (knocked into the air) and <b>CHARGE</b> (hold to refill energy).</p>
       <p class="note">GameCube controllers switch to the GameCube layout automatically. If a button doesn't respond (some adapters report unusual button numbers), use <b>Set up controller</b> and press each button once.</p>
       <p class="note">Player 2 on keyboard: arrows to move, ${k('.')} attack, ${k('/')} jump, ${k(',')} grab, ${k(';')} guard, ${k('Right Shift')} mobility, ${k('Enter')} power.</p>`
@@ -982,6 +1112,8 @@ function act(a: string, arg?: string) {
     case 'padsetup-skip': setupStep++; setupArmed = false; if (setupStep >= PAD_STEPS.length) finishPadSetup(); else rerender(); break;
     case 'padsetup-reset': { const g = firstPad(); if (g) saveBinding(g.id, null); toast('Controller reset to the default layout'); showScreen('moves'); break; }
     case 'padsetup-cancel': showScreen('moves'); break;
+    case 'zoom': setZoom(camZoom + 0.1 * Number(arg)); rerender(); break;
+    case 'zoomcycle': setZoom(camZoom >= ZOOM_MAX - 0.01 ? ZOOM_MIN : camZoom + 0.1); rerender(); break;
     case 'intros': introsOn = !introsOn; try { localStorage.setItem('bl.intros', introsOn ? '1' : '0'); } catch { /* */ } rerender(); break;
     case 'voices': voicesOn = !voicesOn; try { localStorage.setItem('bl.voices', voicesOn ? '1' : '0'); } catch { /* */ } rerender(); break;
   }
@@ -1183,6 +1315,7 @@ let time = 0;
 function frame(now: number) {
   requestAnimationFrame(frame);
   const rawDt = Math.min(0.1, (now - last) / 1000);
+  if (online.active && now - last > 200) netlog(`long frame ${Math.round(now - last)} ms (screen ${screen}, phase ${online.phase})`);
   last = now;
   frameTimes.push(rawDt * 1000);
   if (frameTimes.length > 600) frameTimes.shift();
@@ -1191,7 +1324,8 @@ function frame(now: number) {
   if (previewQueue.length && screen !== 'none' && !match) captureArenaPreview();
   if (screen !== 'none') menuInput(rawDt * 1000);
   else hidePadCursor();
-  if (intro && match && !paused && screen === 'none' && !intro.update(rawDt)) { intro = null; if (online.active) online.introDone(); }
+  // Online the intro keeps running behind the pause menu (the opponent is waiting on it).
+  if (intro && match && ((!paused && screen === 'none') || (online.active && screen === 'pause')) && !intro.update(rawDt)) { intro = null; if (online.active) online.introDone(); }
   if (online.active && intro === null && online.phase === 'intro') online.introDone();
   if (victory && match && screen === 'none' && !victory.update(rawDt)) { victory = null; victoryDone = true; }
   (window as any).__introT = intro ? intro.t : 99;
@@ -1267,7 +1401,7 @@ function frame(now: number) {
   blurPass.uniforms['damp'].value = blurAmt;
   grade.uniforms.time.value = time;
   grade.uniforms.flash.value = Math.min(0.85, fx.screenFlash);
-  if (postOn) composer.render(); else renderer.render(scene, vcam.cam);
+  if (sceneWarm && !previewBusy && !noRender) { if (postOn) composer.render(); else renderer.render(scene, vcam.cam); }
   adaptQuality(now);
   if (perfEl.style.display !== 'none') {
     const s = perfStats();

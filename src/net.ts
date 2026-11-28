@@ -16,6 +16,19 @@ const TURN_URL = 'https://crustrush.metered.live/api/v1/turn/credentials?apiKey=
 const STUN: RTCIceServer[] = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }, { urls: 'stun:stun.cloudflare.com:3478' }];
 
 const TE = new TextEncoder(), TD = new TextDecoder();
+const qs = (k: string) => { try { return new URLSearchParams(location.search).get(k); } catch { return null; } };
+
+// ------------------------------------------------------------------ instrumentation (console + ?netdebug overlay)
+const T0 = performance.now();
+export const netDebug = qs('netdebug') !== null;
+export const netLogLines: string[] = [];
+/** Timestamped online event (seconds since page load). Always to the console; kept for the ?netdebug overlay. */
+export function netlog(ev: string) {
+  const line = `+${((performance.now() - T0) / 1000).toFixed(2)}s ${ev}`;
+  netLogLines.push(line);
+  if (netLogLines.length > 60) netLogLines.shift();
+  console.info('[net] ' + line);
+}
 export const randId = (n = 10) => { let s = ''; for (let i = 0; i < n; i++) s += 'abcdefghijkmnpqrstuvwxyz23456789'[(Math.random() * 32) | 0]; return s; };
 /** Room codes: 5 letters/digits without look-alikes. */
 export const newRoomCode = () => { let s = ''; for (let i = 0; i < 5; i++) s += 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[(Math.random() * 31) | 0]; return s; };
@@ -102,21 +115,31 @@ class MqttBus implements Bus {
   close() { clearInterval(this.pingT); for (const c of this.cl) c.close(); }
 }
 
+/**
+ * Test bus: BroadcastChannel between tabs. `?netlag=ms` adds one-way latency (±25% jitter, so messages can
+ * reorder like they do across brokers) and `?netloss=0.1` drops that fraction of messages, both on send.
+ */
 class LocalBus implements Bus {
   private bc = new BroadcastChannel('breakline-net');
   private subs = new Set<string>();
+  private lag = Number(qs('netlag')) || 0;
+  private loss = Number(qs('netloss')) || 0;
   up = true;
   constructor(onMsg: (topic: string, payload: string) => void) {
     this.bc.onmessage = (e) => { const { t, s } = e.data as { t: string; s: string }; if (this.subs.has(t)) onMsg(t, s); };
   }
   sub(t: string) { this.subs.add(t); }
-  pub(t: string, s: string) { this.bc.postMessage({ t, s }); }
+  pub(t: string, s: string) {
+    if (this.loss && Math.random() < this.loss) return;
+    if (!this.lag) { this.bc.postMessage({ t, s }); return; }
+    setTimeout(() => { try { this.bc.postMessage({ t, s }); } catch { /* closed */ } }, this.lag * (0.75 + Math.random() * 0.5));
+  }
   close() { this.bc.close(); }
 }
 
 /** Silence before a link counts as lost (ms). Tests on slow machines can raise it with ?nettimeout=. */
-const LOST_MS = (() => { try { return Number(new URLSearchParams(location.search).get('nettimeout')) || 20000; } catch { return 20000; } })();
-const useLocal = () => { try { return new URLSearchParams(location.search).get('net') === 'local'; } catch { return false; } };
+const LOST_MS = Number(qs('nettimeout')) || 20000;
+const useLocal = () => qs('net') === 'local';
 
 // ------------------------------------------------------------------ TURN credentials (cached)
 let turnCache: RTCIceServer[] | null = null, turnAt = 0;
@@ -161,6 +184,17 @@ export class NetLink {
   private lastIn = performance.now();
   private hbT = 0;
   private helloT = 0;
+  private rtxT = 0;
+  // Reliable, ordered control messages: every `send` gets a sequence number and is retransmitted until the
+  // other side acknowledges it (cumulative acks). The relay is fire-and-forget (MQTT QoS 0), so without this a
+  // single lost 'start' or 'ready' froze the match start forever.
+  private rOut = 0;
+  private rUnacked = new Map<number, { m: NetMsg; at: number; n: number }>();
+  private rIn = 1;
+  private rBuf = new Map<number, NetMsg>();
+  /** Reliable messages sent but not yet acknowledged (debug overlay). */
+  get pending() { return this.rUnacked.size; }
+  retransmits = 0;
 
   constructor(readonly role: Role, readonly code: string) {
     const room = NS + 'r/' + code.toUpperCase() + '/';
@@ -176,6 +210,7 @@ export class NetLink {
       this.helloT = window.setInterval(() => { if (!this.open) knock(); else clearInterval(this.helloT); }, 700);
     }
     this.hbT = window.setInterval(() => this.heartbeat(), 1000);
+    this.rtxT = window.setInterval(() => this.retransmit(), 150);
   }
 
   get relayUp() { return this.bus.up; }
@@ -185,17 +220,39 @@ export class NetLink {
   onOpen(fn: () => void) { this.openHandlers.push(fn); if (this.open) fn(); }
   onClose(fn: () => void) { this.closeHandlers.push(fn); }
 
-  /** Reliable control message. */
+  /** Reliable, ordered control message (retransmitted until acknowledged; delivered once, in order). */
   send(m: NetMsg) {
+    if (this.closed) return;
+    const r = ++this.rOut;
+    this.rUnacked.set(r, { m, at: performance.now(), n: 0 });
+    this.sendRaw({ k: 'R', r, d: m });
+  }
+  /** Best effort over the control channel (or relay). */
+  private sendRaw(m: NetMsg) {
     if (this.closed) return;
     if (this.direct) { try { this.dcC!.send(JSON.stringify(m)); return; } catch { /* fall back */ } }
     this.relay(m);
   }
-  /** Fast, may drop (inputs). */
+  /** Fast, may drop (inputs carry their own redundancy). */
   sendFast(m: NetMsg) {
     if (this.closed) return;
     if (this.dcF && this.dcF.readyState === 'open') { try { this.dcF.send(JSON.stringify(m)); return; } catch { /* */ } }
-    this.send(m);
+    this.sendRaw(m);
+  }
+  private retransmit() {
+    if (this.closed || !this.rUnacked.size) return;
+    const now = performance.now(), wait = Math.max(300, Math.min(2000, this.rtt * 1.5));
+    let n = 0;
+    for (const [r, e] of this.rUnacked) {
+      if (now - e.at < wait) continue;
+      e.at = now; e.n++; this.retransmits++;
+      // Over the relay too: a direct channel that is silently dead shouldn't hold control messages hostage.
+      const pkt = { k: 'R', r, d: e.m };
+      this.relay(pkt);
+      if (this.direct) { try { this.dcC!.send(JSON.stringify(pkt)); } catch { /* */ } }
+      if (e.n === 3) netlog(`resending '${e.m.k}' (#${r}, no ack yet)`);
+      if (++n >= 8) break; // pace big backlogs
+    }
   }
 
   private relay(m: NetMsg) {
@@ -227,21 +284,36 @@ export class NetLink {
   }
   private deliver(m: NetMsg) {
     this.lastIn = performance.now();
+    if (m.k === 'R') {
+      const r = m.r as number;
+      if (r >= this.rIn && !this.rBuf.has(r)) this.rBuf.set(r, m.d as NetMsg);
+      const ready: NetMsg[] = [];
+      while (this.rBuf.has(this.rIn)) { ready.push(this.rBuf.get(this.rIn)!); this.rBuf.delete(this.rIn); this.rIn++; }
+      this.sendRaw({ k: 'A', a: this.rIn - 1 }); // cumulative ack (also re-acks duplicates)
+      for (const d of ready) this.handle(d);
+      return;
+    }
+    if (m.k === 'A') { const a = m.a as number; for (const r of this.rUnacked.keys()) if (r <= a) this.rUnacked.delete(r); return; }
+    this.handle(m);
+  }
+  private handle(m: NetMsg) {
+    if (this.closed) return;
     if (m.k === 'sdp' || m.k === 'ice') { void this.onSignal(m); return; }
-    if (m.k === 'hb') { this.send({ k: 'hbr', t: m.t }); return; }
+    if (m.k === 'hb') { this.sendRaw({ k: 'hbr', t: m.t }); return; }
     if (m.k === 'hbr') { const r = performance.now() - (m.t as number); this.rtt = this.rtt ? this.rtt * 0.7 + r * 0.3 : r; return; }
     if (m.k === 'bye') { this.fail('Opponent left.'); return; }
     for (const h of [...this.handlers]) { try { h(m); } catch (e) { console.error(e); } }
   }
   private markOpen() {
     if (this.open) return;
+    netlog(`link open (${this.role}, room ${this.code})`);
     this.open = true;
     this.lastIn = performance.now();
     for (const h of this.openHandlers) h();
   }
   private heartbeat() {
     if (this.closed || !this.open) return;
-    this.send({ k: 'hb', t: performance.now() });
+    this.sendRaw({ k: 'hb', t: performance.now() });
     if (performance.now() - this.lastIn > LOST_MS) this.fail('Connection lost.');
   }
 
@@ -250,7 +322,7 @@ export class NetLink {
     if (useLocal() && !new URLSearchParams(location.search).has('rtc')) return null;
     if (typeof RTCPeerConnection === 'undefined') return null;
     const pc = new RTCPeerConnection({ iceServers: await iceServers() });
-    pc.onicecandidate = (e) => { if (e.candidate) this.relay({ k: 'ice', c: e.candidate.toJSON() as unknown as Record<string, unknown> }); };
+    pc.onicecandidate = (e) => { if (e.candidate) this.send({ k: 'ice', c: e.candidate.toJSON() as unknown as Record<string, unknown> }); };
     pc.ondatachannel = (e) => this.takeChannel(e.channel);
     pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed') { try { pc.close(); } catch { /* */ } if (this.pc === pc) this.pc = null; } };
     this.pc = pc;
@@ -258,6 +330,8 @@ export class NetLink {
   }
   private takeChannel(ch: RTCDataChannel) {
     if (ch.label === 'c') this.dcC = ch; else this.dcF = ch;
+    ch.addEventListener('open', () => netlog(`direct channel '${ch.label}' open`));
+    ch.addEventListener('close', () => netlog(`direct channel '${ch.label}' closed`));
     ch.onmessage = (e) => { let m: NetMsg; try { m = JSON.parse(e.data as string); } catch { return; } this.deliver(m); };
   }
   private async startRtc() {
@@ -268,7 +342,7 @@ export class NetLink {
       this.takeChannel(pc.createDataChannel('f', { ordered: false, maxRetransmits: 0 }));
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      this.relay({ k: 'sdp', s: pc.localDescription!.toJSON() as unknown as Record<string, unknown> });
+      this.send({ k: 'sdp', s: pc.localDescription!.toJSON() as unknown as Record<string, unknown> });
     } catch (e) { console.warn('direct link unavailable, using relay', e); }
   }
   private pendingIce: RTCIceCandidateInit[] = [];
@@ -282,7 +356,7 @@ export class NetLink {
           await pc.setRemoteDescription(d);
           const ans = await pc.createAnswer();
           await pc.setLocalDescription(ans);
-          this.relay({ k: 'sdp', s: pc.localDescription!.toJSON() as unknown as Record<string, unknown> });
+          this.send({ k: 'sdp', s: pc.localDescription!.toJSON() as unknown as Record<string, unknown> });
         } else if (this.pc) await this.pc.setRemoteDescription(d);
         for (const c of this.pendingIce.splice(0)) await this.pc?.addIceCandidate(c);
       } else if (m.k === 'ice') {
@@ -294,13 +368,14 @@ export class NetLink {
 
   private fail(why: string) {
     if (this.closed) return;
+    netlog('link failed: ' + why);
     this.why = why;
     this.shutdown();
     for (const h of this.closeHandlers) h();
   }
   private shutdown() {
     this.closed = true;
-    clearInterval(this.hbT); clearInterval(this.helloT);
+    clearInterval(this.hbT); clearInterval(this.helloT); clearInterval(this.rtxT);
     try { this.dcC?.close(); this.dcF?.close(); this.pc?.close(); } catch { /* */ }
     setTimeout(() => this.bus.close(), 400);
   }

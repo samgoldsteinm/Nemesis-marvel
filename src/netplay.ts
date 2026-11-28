@@ -22,6 +22,7 @@ import type { Fighter } from './fighter';
 import type { Prop } from './arena';
 import { ACTIONS, emptyRaw, RawState } from './input';
 import { simRng } from './rng';
+import { netlog } from './net';
 import type { NetLink, NetMsg, Role } from './net';
 
 export const TICK_MS = 1000 / 60;
@@ -180,7 +181,16 @@ export class Lockstep {
   /** Next tick to simulate. */
   tick = 0;
   /** Local player's side (0 = P1 / host, 1 = P2 / guest). */
-  constructor(readonly side: 0 | 1, readonly link: NetLink, readonly delay: number, readonly isHost: boolean) {
+  /**
+   * This side's input delay in ticks. It adapts to the measured round trip (see adaptDelay): each side only
+   * ever schedules its own inputs, so growing it just fills more slots ahead and shrinking it just pauses
+   * production until the tick catches up; inputs already sent are never rewritten.
+   */
+  delay: number;
+  private delayCheckAt = 0;
+  private shrinkSince = 0;
+  constructor(readonly side: 0 | 1, readonly link: NetLink, delay: number, readonly isHost: boolean) {
+    this.delay = delay;
     for (let t = 0; t < delay; t++) { this.local.set(t, NEUTRAL); this.remote.set(t, NEUTRAL); }
     this.nextLocal = delay;
     this.off = link.on((m) => this.onMsg(m));
@@ -245,15 +255,31 @@ export class Lockstep {
     console.warn(`[net] resynced from host snapshot @${s.tick}, re-simulated ${this.tick - s.tick} ticks`);
   }
 
+  /** Match the input delay to the latency: one-way trip in ticks plus a margin for jitter, 2-10 ticks. */
+  private adaptDelay(now: number) {
+    if (now - this.delayCheckAt < 500 || !this.link.rtt) return;
+    this.delayCheckAt = now;
+    const target = Math.max(2, Math.min(MAX_DELAY, Math.ceil(this.link.rtt / 2 / TICK_MS) + 2));
+    if (target > this.delay) { netlog(`input delay ${this.delay} → ${target} ticks (rtt ${Math.round(this.link.rtt)} ms)`); this.delay = target; this.shrinkSince = 0; }
+    else if (target < this.delay - 1) {
+      if (!this.shrinkSince) this.shrinkSince = now;
+      else if (now - this.shrinkSince > 3000) { this.delay--; this.shrinkSince = now; netlog(`input delay → ${this.delay} ticks (rtt ${Math.round(this.link.rtt)} ms)`); }
+    } else this.shrinkSince = 0;
+  }
   /** Advance by real time; samples local input and simulates every tick both inputs are known for. */
   pump(dtMs: number, sample: () => RawState) {
     if (!this.running) return;
+    this.adaptDelay(performance.now());
     this.acc = Math.min(this.acc + dtMs, 250);
     while (this.acc >= TICK_MS) {
-      if (this.nextLocal <= this.tick + this.delay) { this.local.set(this.nextLocal, encodeRaw(sample())); this.nextLocal++; }
+      // Keep the local input queue full (tick+delay). Producing only one per loop pass meant a side that had been
+      // stalled could only catch up one tick per animation frame (seconds on a slow phone).
+      if (this.nextLocal <= this.tick + this.delay) { const f = encodeRaw(sample()); while (this.nextLocal <= this.tick + this.delay) { this.local.set(this.nextLocal, f); this.nextLocal++; } }
       const a = this.local.get(this.tick), b = this.remote.get(this.tick);
       if (!a || !b) { if (!this.stallSince) this.stallSince = performance.now(); this.acc = Math.min(this.acc, TICK_MS * 2); break; }
+      if (this.stallSince) { const ms = performance.now() - this.stallSince; if (ms > 300) netlog(`stalled ${Math.round(ms)} ms at tick ${this.tick} waiting for ${a ? 'opponent' : 'local'} input`); }
       this.stallSince = 0;
+      if (this.tick === 0) netlog('first tick simulated');
       const mine = decodeRaw(a), theirs = decodeRaw(b);
       const pair: [RawState, RawState] = this.side === 0 ? [mine, theirs] : [theirs, mine];
       this.history.set(this.tick, pair);
@@ -291,16 +317,19 @@ export class Lockstep {
   }
 }
 
-/** Input delay from round-trip time: ~half the RTT in ticks plus one, between 2 and 6. */
+/** Starting input delay from round-trip time: ~half the RTT in ticks plus one, between 2 and 6 (then adapts, up to MAX_DELAY). */
 export function delayFor(rttMs: number) { return Math.max(2, Math.min(6, Math.ceil(rttMs / 2 / TICK_MS) + 1)); }
+const MAX_DELAY = 10;
 
 // ------------------------------------------------------------------ lobby session
 export interface SideState { pick: string; locked: boolean }
 export interface MatchCfg { seed: number; p1: string; p2: string; arena: string; lives: number; delay: number }
 /**
- * Lobby protocol (reliable messages): 'pick' {pick, locked} from either side; 'cfg' {arena, lives} from the host;
- * 'start' {cfg} from the host when it confirms the arena (both must be locked in); 'ready' when a side's intro is done (the simulation starts when
- * both are ready); 'rematch' to ask for another round with the same fighters; plus the lockstep's 'in'/'ck'/'rs'/'sn'.
+ * Lobby protocol (all reliable + ordered, see NetLink.send): 'pick' {pick, locked} from either side; 'cfg'
+ * {arena, lives} from the host; 'start' {cfg} from the host when it confirms the arena (both locked in);
+ * 'loaded' {seed} once a side has built the match and compiled its shaders (both intros start when both are
+ * loaded); 'ready' {seed} when a side's intro is over (the simulation starts when both are ready); 'rematch'.
+ * Plus the lockstep's 'in' (fast) and 'ck'/'rs'/'sn'.
  */
 export class OnlineSession {
   me: SideState = { pick: 'tether', locked: false };
@@ -310,6 +339,11 @@ export class OnlineSession {
   cfg: MatchCfg | null = null;
   readyMine = false;
   readyTheirs = false;
+  loadedMine = false;
+  loadedTheirs = false;
+  /** performance.now() when the opponent reported ready (0 = not yet). */
+  readyTheirsAt = 0;
+  onBothLoaded: () => void = () => {};
   rematchMine = false;
   rematchTheirs = false;
   onChange: () => void = () => {};
@@ -326,8 +360,16 @@ export class OnlineSession {
     switch (m.k) {
       case 'pick': this.them = { pick: String(m.pick), locked: !!m.locked }; this.onChange(); break;
       case 'cfg': if (!this.isHost) { this.arena = String(m.arena); this.lives = Number(m.lives); this.onChange(); } break;
-      case 'start': if (!this.isHost) { this.cfg = m.cfg as unknown as MatchCfg; this.readyMine = this.readyTheirs = false; this.onStart(this.cfg); } break;
-      case 'ready': this.readyTheirs = true; this.checkReady(); break;
+      case 'start': {
+        if (this.isHost) break;
+        const cfg = m.cfg as unknown as MatchCfg;
+        if (this.cfg && this.cfg.seed === cfg.seed) { netlog('start repeated (already handled)'); this.resendStage(); break; }
+        netlog('start received');
+        this.cfg = cfg; this.resetStage(); this.onStart(cfg);
+        break;
+      }
+      case 'loaded': if (this.cfg && m.seed === this.cfg.seed && !this.loadedTheirs) { netlog('opponent loaded'); this.loadedTheirs = true; this.onChange(); this.checkLoaded(); } break;
+      case 'ready': if (this.cfg && m.seed === this.cfg.seed && !this.readyTheirs) { netlog('opponent ready'); this.readyTheirs = true; this.readyTheirsAt = performance.now(); this.onChange(); this.checkReady(); } break;
       case 'rematch': this.rematchTheirs = true; this.onChange(); this.maybeRematch(); break;
     }
   }
@@ -343,14 +385,26 @@ export class OnlineSession {
   private startMatch(p1: string, p2: string) {
     const cfg: MatchCfg = { seed: (Math.random() * 0xffffffff) >>> 0, p1, p2, arena: this.arena, lives: this.lives, delay: delayFor(this.link.rtt || 80) };
     this.cfg = cfg;
-    this.readyMine = this.readyTheirs = false;
+    this.resetStage();
     this.rematchMine = this.rematchTheirs = false;
+    netlog('start sent');
     this.link.send({ k: 'start', cfg: cfg as unknown as Record<string, unknown> });
     this.onStart(cfg);
   }
+  private resetStage() { this.loadedMine = this.loadedTheirs = this.readyMine = this.readyTheirs = false; this.readyTheirsAt = 0; }
+  /** This side built the match and warmed its shaders: both intros start once both are loaded. */
+  loaded() { if (!this.cfg || this.loadedMine) return; this.loadedMine = true; this.link.send({ k: 'loaded', seed: this.cfg.seed }); this.checkLoaded(); }
+  private checkLoaded() { if (this.loadedMine && this.loadedTheirs) this.onBothLoaded(); }
   /** This side's intro is over: the fight starts when both are. */
-  ready() { this.readyMine = true; this.link.send({ k: 'ready' }); this.checkReady(); }
+  ready() { if (!this.cfg || this.readyMine) return; this.readyMine = true; this.link.send({ k: 'ready', seed: this.cfg.seed }); this.checkReady(); }
   private checkReady() { if (this.readyMine && this.readyTheirs) this.onBothReady(); }
+  /** Retry button / duplicate start: send this side's start-up messages again (all idempotent). */
+  resendStage() {
+    if (!this.cfg) return;
+    if (this.isHost) this.link.send({ k: 'start', cfg: this.cfg as unknown as Record<string, unknown> });
+    if (this.loadedMine) this.link.send({ k: 'loaded', seed: this.cfg.seed });
+    if (this.readyMine) this.link.send({ k: 'ready', seed: this.cfg.seed });
+  }
   rematch() { this.rematchMine = true; this.link.send({ k: 'rematch' }); this.onChange(); this.maybeRematch(); }
   private maybeRematch() {
     if (!this.rematchMine || !this.rematchTheirs) return;

@@ -119,6 +119,8 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-28 | Roster close-ups framed like comic panels: per-fighter `FACE` shots in portraits.ts (camera azimuth/elevation/roll, body yaw, head turn via `SkinnedBody.headTurn`), face-level camera with the eyes ~40% down; Basalt pulled back, Tether turned toward us, Magna low angle, Ember tilted, Rift profile, Shunt dutch tilt |
 | 11-28 | Arena select is its own screen after fighter select (`renderMap`, Screen `'map'`): big preview + strip of 5, name, blurb, ring-out danger (`DANGER`), Lives and CPU level moved here; ◀ ▶ keys / LB RB / tap; Back keeps fighters locked. Previews are real renders of each arena through the post stack (`captureArenaPreview`, one per frame while a menu is up, cached JPEG data URLs, original layout restored). Online: both locked → both go to the arena screen, host picks live (guest read-only), host's FIGHT calls `OnlineSession.go()` (no more auto-start on lock). Title menu redesigned: letterboxed band of tall slanted teal-duotone busts (`BUST` shots in portraits.ts, `bustOf`), text menu in a dark gap with gold highlight + red slash, device-aware prompt top-left, settings in the bottom bar; portrait = band on top, menu below. Aerin's roster face lifted (`aimY`) |
 | 11-28 | Sharper image: multisampled composer target (MSAA 4x), light contrast-adaptive sharpen in the grade pass, grain 0.03→0.012, bloom radius ×0.55, adaptive quality drops shadows before resolution and never below native pixels (`minPixelRatio`) |
+| 11-28 | Online start no longer freezes (root cause measured, see §5/§7): arena-select thumbnails are shipped files (`public/previews/*.jpg`, `tools/arena-previews.cjs`; live capture only as fallback / `?livepreviews`); match start = `start` → build → `compileAsync` warm-up behind a "Loading arena…" overlay → `loaded` → both intros start together → `ready` → fight; control messages reliable + ordered (seq/ack/retransmit in `NetLink`); intro timing identical on both sides (voice manifest, not local voice setting), opponent ready ⇒ our intro is cut after 2 s, intro keeps running behind the online pause menu; adaptive input delay (2–10 ticks from RTT); `#netwait` overlay (spinner, what we wait for, Retry/Leave after 10 s), "press any button to skip" hint; `?netdebug` overlay + `[net]` timestamped console log + long-frame attribution |
+| 11-28 | Camera zoom setting: 70–140 % in 10 % steps (− Closer / Wider +) in the pause menu and How to play → Controls, cycling pill on the title bar; `bl.zoom` in localStorage; `VersusCamera.userZoom` multiplies the fitted distance (with `zoomMul`), capped on zLimit arenas; presentation only (not in the sim, works online) |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -201,6 +203,19 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - The Press Start screen is `screen = 'start'`; test hooks (`__game.start`) bypass it.
 
 **Online / determinism**
+- Online "screen froze on start for a long time" (11-28). Measured with `tools/online-e2e.cjs` + `?netdebug`, not
+  guessed: (1) the arena screen rendered live previews of all 5 arenas; each one's shaders compiled on the main
+  thread (`checkMaterialsReady` 3–17 s per arena on a software GPU, seconds on phones), so the host's FIGHT tap
+  waited ~17 s and the guest handled `start` ~6 s late; (2) the match's first frame compiled ~70 new shader
+  programs (fighters' body shaders, lights, shadows, post) synchronously, while the intro clock was already running
+  on the other machine; (3) intro length differed per side (voices on/off, clip download) and a player who skipped
+  waited for the other's whole intro with no feedback; (4) `start`/`ready` were sent once over QoS-0 MQTT — a lost
+  one froze the start forever. Fixes: shipped previews, `loading` phase with `compileAsync` warm-up and a
+  `loaded` handshake, synced intro timing + 2 s grace cut, reliable ordered control messages, visible overlay with
+  Retry/Leave. Build itself was only ~150–350 ms.
+- Lockstep input delay was fixed at start (≤ 6 ticks = 100 ms); at 300 ms RTT the game ran at ~50 % speed with
+  constant micro-stalls. Delay now adapts per side (2–10) — safe because each side only schedules its own inputs.
+- Don't send heartbeats/inputs through the reliable channel (`send`); they use `sendRaw`/`sendFast`.
 - Gameplay used `Math.random` (AI, hit side, finisher teleports, prop models/debris) and projectile origins used the
   *animated* hand bone, so two machines diverged. Fixed: `srand()` everywhere in sim code, `handSim()` for origins.
 - Online stick input was camera-relative and each side's camera differs → fighters drifted. Fixed: both sides
@@ -267,13 +282,18 @@ de-duplicated by id. Over that relay the peers exchange SDP/ICE and open WebRTC 
 If WebRTC fails the game keeps playing over the relay (slower). `NetLink`: `hello`→`welcome` (a third peer gets
 `full`), `hb`/`hbr` heartbeat every 1 s (RTT for the ping display), link lost after 20 s, `bye` on leave.
 
+**Reliable control channel.** `NetLink.send` wraps every control message as `{k:'R', r:seq, d}`; the receiver
+delivers in order exactly once and replies with a cumulative ack `{k:'A', a}`; unacked messages are re-sent every
+max(300 ms, 1.5×RTT) over the relay (and the direct channel if open). `sendRaw` (heartbeat, acks) and `sendFast`
+(inputs, own redundancy) bypass it.
+
 **Lobby (`OnlineSession`).** Host picks P1 and the arena/lives, guest picks P2. Messages: `pick` {pick, locked},
 `cfg` {arena, lives}, `start` {seed, p1, p2, arena, lives, delay} (host, when it presses FIGHT on the arena screen — `go()`, both must be locked), `ready` (intro done or
 skipped), `rematch`. The fight starts only when both are `ready`: `match.restart(seed)` + `setLives`, then Lockstep.
 
 **Netcode (`Lockstep`).** Deterministic input lockstep at 60 Hz. Input per tick = `[mx*100, my*100, buttons]`
 (quantised the same on both sides, in the canonical stick frame). Local input is scheduled `delay` ticks ahead
-(`delayFor(rtt)` = 2–6); every packet carries the last 30 unacked inputs (redundancy, so loss costs nothing).
+(starts at `delayFor(rtt)` = 2–6, then `adaptDelay` keeps it at one-way RTT + 2 ticks, 2–10); every packet carries the last 30 unacked inputs (redundancy, so loss costs nothing).
 A tick is simulated only when both inputs are known; otherwise the game stalls ("waiting…" after 0.5 s) —
 it never guesses, so it can't desync from missing input. The host sends a checksum (`ck`) every 60 ticks; on a
 mismatch the guest asks (`rs`), the host sends a snapshot (`sn`), the guest applies it and re-simulates from its
@@ -290,8 +310,24 @@ input history (240 ticks).
 - `tests/checks.cjs` "Determinism" runs 5 arenas × 1200 CPU-vs-CPU ticks twice with different animation cadence
   and compares checksums — run it after any gameplay change.
 
+**Match start sequence (11-28).** Host FIGHT → `start` {cfg} → each side `phase='loading'`: builds the match
+without intro, the frame loop stops drawing the scene (`sceneWarm`), `renderer.compileAsync` + one frame behind the
+"Loading arena…" overlay + voice manifest → `loaded` {seed} → when both loaded: `phase='intro'`, both intros start
+(same length on both machines: shot lengths from the voice manifest even with voices off) → `ready` {seed} → both
+ready: `restart(seed)`, Lockstep, `phase='fight'`. If the opponent is ready and we're still in the intro, ours is
+cut after `INTRO_GRACE_MS` (2 s) and a "press any button to skip" hint shows. `Online.wait` drives the `#netwait`
+overlay (loading / waiting for opponent / inputs late) with Retry (re-sends start/loaded/ready, all idempotent and
+seed-tagged) and Leave after 10 s. Typical start on a fast connection: FIGHT → fight ≈ intro length (~9.6 s), or
+~0.5 s plus 2 s grace when someone skips.
+
 **Testing online locally.** `?net=local` swaps MQTT/WebRTC for a BroadcastChannel (two tabs of the same browser),
-`?rtc` re-enables WebRTC on top of it, `?nettimeout=ms` changes the drop timeout, `?room=CODE` auto-joins.
-Two-page Playwright script used: scratchpad `online_e2e.cjs` (host + join, lock picks, fight, compare checksums,
-guest leaves → host sees "Opponent left.").
+`?rtc` re-enables WebRTC on top of it, `?nettimeout=ms` changes the drop timeout, `?room=CODE` auto-joins,
+`?netlag=ms` (one-way, ±25 % jitter) and `?netloss=0.1` impair the local bus, `?norender` skips drawing the scene
+(netcode tests without a GPU), `?netdebug` shows the state/log overlay and attributes long frames (LoAF).
+`tools/online-e2e.cjs` drives two pages through host → join → lock → arena → FIGHT → fight and prints the timeline:
+`--lag 150 --loss 0.1 --throttle 4` (guest CPU ×4 via CDP), `--skip A|B`, `--rtc 1`, `--norender 1`, `--rematch 1`
+(host-only KO forces a desync → snapshot resync → rematch → guest leaves). Measured 11-28 (all 0 desyncs):
+150 ms/10 % loss/guest ×4 CPU: both first ticks within 0.2 s, ~full speed; 30 % loss: `start`/`ready` re-sent, fine;
+host skips: guest's intro cut 2 s later; direct WebRTC: 0 retransmits. Software-GPU caveat: in this sandbox every new
+draw state compiles on first use (warm-up 15–20 s, intro at ~1/5 speed), which real GPUs don't do.
 

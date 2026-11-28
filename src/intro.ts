@@ -176,6 +176,8 @@ function loadClip(file: string): Promise<AudioBuffer | null> {
 }
 /** Start fetching the manifest early (call at load). */
 export function preloadVoices() { void loadManifest(); }
+/** Resolves once the voice manifest (which sets the intro's shot lengths) is in. */
+export function introVoicesReady() { return loadManifest(); }
 if (typeof window !== 'undefined') preloadVoices();
 
 
@@ -196,7 +198,11 @@ export class FightIntro {
   private onKey = () => { this.skip = true; };
   private padPrev = true;
 
-  constructor(private match: Match, private vcam: VersusCamera, private el: HTMLElement, private voice: boolean) {
+  /**
+   * `syncTiming` (online): shot lengths come from the voice manifest even when this player has voices off, so
+   * both machines' intros last the same time (clip download speed only affects the audio, never the timing).
+   */
+  constructor(private match: Match, private vcam: VersusCamera, private el: HTMLElement, private voice: boolean, syncTiming = false) {
     const [a, b] = match.fighters;
     // Line choice is seeded from the match so both players hear the same lines online.
     const lineRng = new Rng((match.seed ^ 0x5bd1e995) >>> 0);
@@ -204,11 +210,13 @@ export class FightIntro {
     this.lines = [la.text, lb.text];
     this.keys = [la.key, lb.key];
     // Fetch both recorded lines now; shots stretch to fit the speech once the manifest is in.
-    if (voice) void loadManifest().then(() => {
+    if (voice || syncTiming) void loadManifest().then(() => {
       match.fighters.forEach((f, i) => {
         const c = manifest?.[f.def.id]?.[this.keys[i]] ?? null;
+        if (c) this.shotLen[i] = Math.max(SHOT, SPEAK_AT + c.s + 0.9);
+        if (!voice) return;
         this.clips[i] = c;
-        if (c) { this.shotLen[i] = Math.max(SHOT, SPEAK_AT + c.s + 0.9); void loadClip(c.f).then((buf) => { this.bufs[i] = buf; }); }
+        if (c) void loadClip(c.f).then((buf) => { this.bufs[i] = buf; });
       });
     });
     match.introT = 100000; // hold inputs while the cinematic runs

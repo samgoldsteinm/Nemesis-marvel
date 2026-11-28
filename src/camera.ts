@@ -19,6 +19,8 @@ export class VersusCamera {
   zLimit = Infinity;
   /** Framing distance multiplier: wide landscape screens can sit closer and still keep both fighters in shot. */
   zoomMul = 1;
+  /** Player's camera-distance setting (Settings → Camera, 0.7-1.4). Presentation only: never touches the sim. */
+  userZoom = 1;
   right = new THREE.Vector3(1, 0, 0);
 
   constructor(aspect: number) {
@@ -79,8 +81,14 @@ export class VersusCamera {
         }
       }
       // Low, close framing near shoulder height; pulls wide only as the fighters separate.
-      wantDist = THREE.MathUtils.clamp(6.5 + spread * 1.25 + vspan * 0.6, 8, 28) * this.zoomMul;
-      wantH = 1.6 + wantDist * 0.2 + vspan * 0.35;
+      // The player's setting scales the same framing (combined with the screen-shape zoomMul), within a range
+      // that keeps both fighters readable; narrow venues (zLimit) cap the far end so the camera doesn't get
+      // pinned against the corridor limit and swing round.
+      const fit = THREE.MathUtils.clamp(6.5 + spread * 1.25 + vspan * 0.6, 8, 28) * this.zoomMul;
+      const maxD = Number.isFinite(this.zLimit) ? Math.max(fit, Math.min(fit * this.userZoom, this.zLimit * 2.2)) : 36;
+      wantDist = THREE.MathUtils.clamp(fit * this.userZoom, 5.5, maxD);
+      // Wider settings also look down a little more, so roof parapets and railings don't fill the foreground.
+      wantH = 1.6 + wantDist * 0.2 * (1 + Math.max(0, wantDist / fit - 1) * 0.9) + vspan * 0.35;
     }
     if (snap) {
       this.yaw = wantYaw;
