@@ -718,7 +718,8 @@
   .tpi { position: absolute; inset: 0; background-repeat: no-repeat; background-size: cover; background-position: 50% 0; animation: tpdrift 16s ease-in-out infinite alternate; animation-delay: calc(var(--i) * -2s); }
   .tpx { position: absolute; inset: 0; display: grid; place-items: center; font: 400 80px var(--display); color: rgba(150,240,228,0.25); }
   .tpn { position: absolute; left: 0; right: var(--slant); bottom: 6px; text-align: center; font: 500 10px var(--cond); letter-spacing: .3em; text-transform: uppercase; color: rgba(200,245,238,0.6); text-shadow: 0 1px 3px #000; white-space: nowrap; overflow: hidden; }
-  .tp:hover .tpi { filter: hue-rotate(178deg) saturate(1.5); }
+  /* The menu busts are decoration only: no hover/tap state, so they don't read as selectable. */
+  .tp { pointer-events: none; -webkit-tap-highlight-color: transparent; }
   @keyframes tpdrift { from { background-position: 46% 0; } to { background-position: 54% 0; } }
   @keyframes tpglow { 0%, 100% { opacity: .22; } 50% { opacity: 0; } }
   .home-gap { flex: 0 0 var(--gapW); background: linear-gradient(180deg, rgba(2,8,8,0.55), rgba(0,0,0,0.86) 60%, rgba(30,2,6,0.9)); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05), inset 0 -40px 60px -30px rgba(255,59,78,0.25); }
