@@ -116,6 +116,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-27 | Basalt's voice reprocessed for clarity (−4.5 st instead of −7, quiet octave-down only on stressed syllables, light gravel, 2–4 kHz presence, short stone room); victory follow-up lines (`FOLLOW`/`VERSUS_FOLLOW` in intro.ts, clips keyed `w_<intro key>`) and a victory cinematic (`VictoryCine`): letterboxed push-in on the winner, power flourish, voiced follow-up with jaw/talk, then results. Presentational only; runs when intros are on and the match was started with its intro |
 | 11-27 | Phone select: stats behind a tap (`stats-tog` button, `statsOpen` in main.ts) |
 | 11-27 | Phone-first touch controls: floating stick (left half), named ATTACK/JUMP/SPECIAL/GRAB/GUARD/DASH arc, contextual RAGE/FINISH/RECOVER/CHARGE buttons (via `setTouchContext` from main each frame), GUARD+SPECIAL = super block, HUD prompts touch-aware. Portraits auto-cropped to their opaque bounds (bigger select/title/result art), art zone widened to the seam; Basalt's comic art uses a charcoal-stone tone with lava kept (`posterizeStone`), neutral rim for studio renders |
+| 11-28 | Roster close-ups framed like comic panels: per-fighter `FACE` shots in portraits.ts (camera azimuth/elevation/roll, body yaw, head turn via `SkinnedBody.headTurn`), face-level camera with the eyes ~40% down; Basalt pulled back, Tether turned toward us, Magna low angle, Ember tilted, Rift profile, Shunt dutch tilt |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -228,6 +229,9 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - Touch buttons send the same actions as a pad (attack/jump/grab/guard/mobility/power); combos are built from those (SPECIAL = power+attack, FINISH = power+grab, RECOVER = mobility+power). Contextual buttons must only appear when the action will work (e.g. RECOVER needs launch t > 6 and energy), or the tap is wasted.
 - Test touch with CDP `Input.dispatchTouchEvent` (multi-touch with ids) in a manual-stepped match; `page.touchscreen.tap` can't hold or multi-touch.
 - Portrait renders: reset `RIM_COLOR` to neutral while rendering (the arena palette's blue rim tinted the golem lavender) and restore it after.
+
+**Portrait framing**
+- `SkinnedBody.headTurn` (portrait-only) turns the head on top of the clip before the golem retarget; head angle in world ≈ body yaw + headTurn.yaw. Check shots on a large contact sheet (`faces` map) — raised arms in the pose can block a 3/4 angle (Magna), so orbit to the other side.
 
 **Process**
 - Background agents editing files while tests run make Vite hot-reload the page mid-test → failures that say

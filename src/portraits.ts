@@ -21,6 +21,25 @@ const POSE: Record<string, [string, number]> = {
   rift: ['Spell_Simple_Shoot', 0.3],
 };
 
+/**
+ * Roster close-ups, framed like comic panels: each fighter gets its own angle.
+ * rotY: body yaw; az: camera azimuth from the body's front (+ = the fighter's left); el: camera elevation
+ * (negative = from below, looking up); dist: metres for a 1.95 m fighter; roll: dutch tilt;
+ * head: extra head turn on top of the pose; fcY: face centre above the Head bone; shiftX: subject off-centre.
+ */
+type FaceShot = { rotY?: number; az: number; el: number; dist: number; roll?: number; head?: { yaw: number; pitch: number; roll: number }; fcY?: number; aimY?: number; shiftX?: number };
+const FACE: Record<string, FaceShot> = {
+  default: { az: 0.3, el: 0, dist: 0.9 },
+  basalt: { az: 0.12, el: -0.16, dist: 1.5, fcY: 0.1, aimY: -0.02, head: { yaw: 0, pitch: -0.1, roll: 0 } },            // head-on from slightly below, glowing eyes
+  tether: { rotY: 1.5, az: -1.2, el: 0.06, dist: 0.95, shiftX: 0.06, head: { yaw: -1.0, pitch: 0.06, roll: 0.1 } },    // looking back over his shoulder
+  aerin: { az: 0.75, el: 0.06, dist: 0.95, roll: 0.1, head: { yaw: 0.45, pitch: -0.05, roll: 0.1 } },       // turning toward us, hair swept
+  shunt: { az: -0.6, el: 0.02, dist: 0.95, roll: -0.28, aimY: -0.03, head: { yaw: -0.25, pitch: 0.04, roll: 0 } },        // visor 3/4, dutch tilt
+  vanta: { az: 0.25, el: -0.06, dist: 0.9, aimY: -0.05, head: { yaw: 0.15, pitch: 0.14, roll: -0.1 } },     // head low, prowling, eyes up
+  magna: { az: -0.5, el: -0.2, dist: 0.95, aimY: -0.02, head: { yaw: -0.2, pitch: 0.14, roll: 0 } },                     // low angle, looking down at you
+  ember: { az: -0.35, el: -0.06, dist: 0.95, roll: 0.26, head: { yaw: -0.2, pitch: -0.12, roll: -0.18 } },  // tilted, fangs out
+  rift: { az: -1.15, el: 0.02, dist: 0.95, head: { yaw: -0.35, pitch: 0.05, roll: 0 } },                    // half-hooded profile
+};
+
 export const portraits = new Map<string, string>();
 export const comics = new Map<string, string>();
 export const faces = new Map<string, string>();
@@ -167,15 +186,22 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
       cam: (_sk, def, cam) => { const h = def.look!.height; cam.position.set(0.3, h * 0.6, h * 2.15); cam.lookAt(0, h * 0.52, 0); },
     },
     face: {
-      w: 256, h: 256, rotY: 0.32, fov: 26,
+      w: 256, h: 256, rotY: 0, fov: 24,
       cam: (sk, def, cam) => {
-        // The Head bone sits at the skull base; the face centre is ~0.1 m above it. Frame head + shoulders
-        // with the eyes a little above centre (≈45% from the top) and the chin well inside the frame.
+        // Comic-panel close-up per fighter (see FACE): camera orbits the face centre at its own angle,
+        // elevation and roll; the eyes land ~40% from the top of the tile.
+        const f = FACE[def.id] ?? FACE.default;
         sk.boneWorld('Head', head);
         const s = def.look!.height / 1.95;
-        const fy = head.y + 0.11 * s;
-        cam.position.set(head.x + 0.18 * s, fy + 0.03 * s, head.z + 1.55 * s);
-        cam.lookAt(head.x, fy - 0.04 * s, head.z);
+        const fc = head.clone().add(new THREE.Vector3(0, (f.fcY ?? 0.11) * s, 0));
+        const d = f.dist * s;
+        const yaw = (f.rotY ?? 0) + f.az;
+        cam.position.set(fc.x + Math.sin(yaw) * Math.cos(f.el) * d, fc.y + Math.sin(f.el) * d, fc.z + Math.cos(yaw) * Math.cos(f.el) * d);
+        const viewH = 2 * d * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
+        const aim = fc.clone().add(new THREE.Vector3(0, -0.1 * viewH + (f.aimY ?? 0) * s, 0));
+        cam.lookAt(aim);
+        if (f.roll) cam.rotateZ(f.roll);
+        if (f.shiftX) cam.translateX(f.shiftX * viewH);
       },
     },
     profile: {
@@ -209,7 +235,8 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
       // Only one profile is needed (the Press Start art); faces and poses for everyone.
       if (kind === 'profile' && def.id !== 'shunt' && def.id !== 'rift') continue;
       const sh = shots[kind];
-      rig.root.rotation.y = sh.rotY;
+      rig.root.rotation.y = kind === 'face' ? (FACE[def.id] ?? FACE.default).rotY ?? 0 : sh.rotY;
+      sk.headTurn = kind === 'face' ? (FACE[def.id] ?? FACE.default).head ?? null : null;
       rig.root.updateMatrixWorld(true);
       sk.update(0);
       rig.root.updateMatrixWorld(true);

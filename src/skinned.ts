@@ -939,8 +939,19 @@ export class SkinnedBody {
   update(dt: number) {
     this.updateDriver(dt);
     this.applyTalk(dt);
+    if (this.headTurn) {
+      // Portrait-only: turn/tilt the head (and a little of the neck) in world space on top of the pose.
+      const { yaw, pitch, roll } = this.headTurn;
+      const up = new THREE.Vector3(0, 1, 0), side = new THREE.Vector3(1, 0, 0), fwd = new THREE.Vector3(0, 0, 1);
+      if (this.model.parent) { const q = this.model.parent.getWorldQuaternion(new THREE.Quaternion()); side.applyQuaternion(q); fwd.applyQuaternion(q); }
+      this.rotWorld('neck_01', up, yaw * 0.4); this.rotWorld('Head', up, yaw * 0.6);
+      this.rotWorld('Head', side, pitch);
+      this.rotWorld('Head', fwd, roll);
+    }
     this.retarget();
   }
+  /** Extra head turn for studio portraits (radians); unset in play. */
+  headTurn: { yaw: number; pitch: number; roll: number } | null = null;
 
   // ------------------------------------------------------------------ talking (fight intro lines)
   /** Face pieces that move with speech: lips part, the mouth line opens. Registered by looks.ts. */
