@@ -803,7 +803,7 @@ function renderTitle() {
   return `
     <div class="screen home">
       <div class="home-top">${prompts([['confirm', 'Select']])}<span class="home-tag">ROOFTOP · OVERPASS · NO WAY DOWN</span></div>
-      <div class="home-band" style="--sky:${skyline(23)}"><span class="hb-fx"><i class="hb-haze"></i><i class="hb-streak"></i></span>
+      <div class="home-band">
         <div class="home-panels">${TITLE_ORDER.slice(0, 2).map(panel).join('')}<div class="home-gap"></div>${TITLE_ORDER.slice(2).map((c, i) => panel(c, i + 2)).join('')}</div>
         <nav class="home-menu">
           <h1 class="chrome small">BREAK<span>LINE</span></h1>

@@ -123,6 +123,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-28 | Online start no longer freezes (root cause measured, see §5/§7): arena-select thumbnails are shipped files (`public/previews/*.jpg`, `tools/arena-previews.cjs`; live capture only as fallback / `?livepreviews`); match start = `start` → build → `compileAsync` warm-up behind a "Loading arena…" overlay → `loaded` → both intros start together → `ready` → fight; control messages reliable + ordered (seq/ack/retransmit in `NetLink`); intro timing identical on both sides (voice manifest, not local voice setting), opponent ready ⇒ our intro is cut after 2 s, intro keeps running behind the online pause menu; adaptive input delay (2–10 ticks from RTT); `#netwait` overlay (spinner, what we wait for, Retry/Leave after 10 s), "press any button to skip" hint; `?netdebug` overlay + `[net]` timestamped console log + long-frame attribution |
 | 11-28 | Camera zoom setting: 70–140 % in 10 % steps (− Closer / Wider +) in the pause menu and How to play → Controls, cycling pill on the title bar; `bl.zoom` in localStorage; `VersusCamera.userZoom` multiplies the fitted distance (with `zoomMul`), capped on zLimit arenas; presentation only (not in the sim, works online) |
 | 11-28 | Title-menu fighter panels are decoration only: removed the hover tint (it stuck on after a tap on phones and looked like a selection) |
+| 11-28 | Title band v3 (user feedback): back to flat dark-teal panels on a plain black background (no band texture, haze, streaks or red edges). Only the menu gap gets a backdrop: a hazy red skyline rendered from the rooftop arena (`public/previews/title-city.jpg`: red duotone + horizon haze + blur, fading to black under the menu text, slow drift); on portrait it sits behind the menu below the band. Kept: clip-path panels + redraw on rotate, 512×1024 busts with headroom, app icon/manifest |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -270,6 +271,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - `.pill > *` is inline-block, so a leading space inside a child span collapses ("Xboxbuttons") — use `&nbsp;`.
 - Title busts once used a `%`-height `<img>` inside skewed/counter-skewed boxes with a translate animation; on iPhone, after opening in portrait or rotating, the art came out huge and offset. Now: unskewed boxes clipped with `clip-path`, art as a cover background, plus a re-render on resize. Don't go back to skew + `<img>` for this band.
 - Bust headroom is measured from the render (`topRow`) and corrected by moving the camera, so new fighters with horns/spikes get the same gap automatically.
+- The user prefers the flat busts on black; keep decoration to the menu gap (hazy red city). Regenerate `title-city.jpg` by rendering a skyline view from an arena and red-toning it (see the change log); don't put textures behind the panels again.
 
 ## 6. Open items / ideas
 - Commit the faces work once its job finishes; re-run the full test suite.
