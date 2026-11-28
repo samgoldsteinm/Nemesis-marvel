@@ -22,7 +22,7 @@ import { EdgeTracker, installKeyboard, installTouch, readDevices, readGamepad, e
 import { initAudio, sfx, startMusic, stopMusic, setMuted, muted, setIntensity } from './audio';
 import { TUNING } from './fighter';
 import { RIM_COLOR } from './characters';
-import { renderPortraits, portraitOf, comicOf, faceOf, profileOf } from './portraits';
+import { renderPortraits, portraitOf, comicOf, faceOf, profileOf, bustOf } from './portraits';
 import { loadBodyModels, loadPropModels } from './skinned';
 import { loadCityKit, hasCityKit } from './citykit';
 import { PROP_MODELS } from './arena';
@@ -31,6 +31,7 @@ import { PROP_MODELS } from './arena';
 const container = document.getElementById('app')!;
 const renderer = new THREE.WebGLRenderer({ antialias: window.devicePixelRatio < 2, powerPreference: 'high-performance' });
 let pixelRatio = Math.min(window.devicePixelRatio, 2);
+const minPixelRatio = Math.min(window.devicePixelRatio, 1);
 renderer.setPixelRatio(pixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
@@ -173,7 +174,64 @@ function applyPalette(id: LayoutId) {
   u.shadowTint.value.set(...p.grade.shadowTint);
   u.highTint.value.set(...p.grade.highTint);
   u.gamma.value = p.grade.gamma;
-  bloom.strength = p.bloom[0]; bloom.radius = p.bloom[1]; bloom.threshold = p.bloom[2];
+  // Tighter glow than the palette's raw radius: keeps highlights from hazing over edges.
+  bloom.strength = p.bloom[0] * 0.9; bloom.radius = p.bloom[1] * 0.55; bloom.threshold = p.bloom[2];
+}
+
+// ------------------------------------------------------------ arena previews (arena select screen)
+/**
+ * Establishing shots of each arena, rendered from the real scene through the full post stack, one per frame
+ * while a menu is up (never during a match), cached as JPEG data URLs. The layout that was showing is restored.
+ */
+const arenaPreviews = new Map<LayoutId, string>();
+let previewQueue: LayoutId[] = [];
+let previewRestore: LayoutId | null = null;
+const previewCam = new THREE.PerspectiveCamera(40, 16 / 9, 0.5, 900);
+const PREVIEW_SHOT: Record<LayoutId, { pos: [number, number, number]; look: [number, number, number]; fov: number }> = {
+  rooftop: { pos: [17, 15, 30], look: [0, 0, 0], fov: 46 },
+  overpass: { pos: [15, 19, 17], look: [-1, 0, 0], fov: 50 },
+  construction: { pos: [17, 14, 27], look: [0, 1, 0], fov: 46 },
+  docks: { pos: [15, 15, 18], look: [0, 0, 0], fov: 50 },
+  helipad: { pos: [13, 11, 21], look: [0, 0, 0], fov: 46 },
+};
+function queueArenaPreviews() {
+  if (previewQueue.length) return;
+  const ids = LAYOUTS.map((l) => l.id).filter((id) => !arenaPreviews.has(id));
+  if (!ids.length) return;
+  ids.sort((a, b) => Number(b === setup.arena) - Number(a === setup.arena)); // the highlighted arena first
+  previewQueue = ids;
+  previewRestore = arena.layout;
+}
+function captureArenaPreview() {
+  const id = previewQueue.shift()!;
+  if (arena.layout !== id) arena.setLayout(id);
+  applyPalette(id);
+  const W = renderer.domElement.width, H = renderer.domElement.height;
+  const cw = Math.min(W, (H * 16) / 9), ch = (cw * 9) / 16;
+  const sh = PREVIEW_SHOT[id];
+  // Full-canvas camera whose centred 16:9 crop has the shot's field of view.
+  previewCam.aspect = W / H;
+  previewCam.fov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(sh.fov / 2)) * (H / ch)));
+  previewCam.position.set(...sh.pos);
+  previewCam.lookAt(...sh.look);
+  previewCam.updateProjectionMatrix();
+  const blurOn = blurPass.enabled, flash = grade.uniforms.flash.value;
+  blurPass.enabled = false; grade.uniforms.flash.value = 0;
+  renderPass.camera = previewCam;
+  if (postOn) composer.render(); else renderer.render(scene, previewCam);
+  renderPass.camera = vcam.cam;
+  blurPass.enabled = blurOn; grade.uniforms.flash.value = flash;
+  const c = document.createElement('canvas');
+  c.width = 640; c.height = 360;
+  c.getContext('2d')!.drawImage(renderer.domElement, (W - cw) / 2, (H - ch) / 2, cw, ch, 0, 0, 640, 360);
+  const url = c.toDataURL('image/jpeg', 0.85);
+  arenaPreviews.set(id, url);
+  if (!previewQueue.length && previewRestore) {
+    if (arena.layout !== previewRestore) arena.setLayout(previewRestore);
+    applyPalette(previewRestore);
+    previewRestore = null;
+  }
+  menu.querySelectorAll<HTMLImageElement>(`img[data-prev="${id}"]`).forEach((img) => { img.src = url; img.classList.remove('wait'); });
 }
 
 const fx = new FX(scene);
@@ -181,8 +239,10 @@ fx.vfx = new VFX(scene, '');
 const arena = new Arena(scene, fx);
 const vcam = new VersusCamera(window.innerWidth / window.innerHeight);
 // Bloom: hazy highlights on lamps, sparks, explosions and power effects. First thing dropped when slow.
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, vcam.cam));
+// Multisampled target so the post stack keeps antialiased edges (the canvas's own MSAA doesn't apply to it).
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(window.innerWidth * pixelRatio, window.innerHeight * pixelRatio, { type: THREE.HalfFloatType, samples: 4 }));
+const renderPass = new RenderPass(scene, vcam.cam);
+composer.addPass(renderPass);
 // Contact shadows (ambient occlusion): grounds props, fighters and buildings. Desktop by default;
 // the adaptive quality step turns it off first when frames run long.
 const isTouch = ('ontouchstart' in window) || navigator.maxTouchPoints > 0;
@@ -199,13 +259,19 @@ const grade = new ShaderPass({
   uniforms: {
     tDiffuse: { value: null }, time: { value: 0 }, sat: { value: 0.7 }, gamma: { value: 0.9 },
     lift: { value: new THREE.Vector3(0.06, 0.08, 0.09) }, shadowTint: { value: new THREE.Vector3(0.85, 1, 1.1) }, highTint: { value: new THREE.Vector3(1, 1, 1) },
-    flash: { value: 0 },
+    flash: { value: 0 }, sharpen: { value: 0.55 }, texel: { value: new THREE.Vector2(1 / (window.innerWidth * pixelRatio), 1 / (window.innerHeight * pixelRatio)) },
   },
   vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: `
-    uniform sampler2D tDiffuse; uniform float time, sat, gamma, flash; uniform vec3 lift, shadowTint, highTint; varying vec2 vUv;
+    uniform sampler2D tDiffuse; uniform float time, sat, gamma, flash, sharpen; uniform vec2 texel; uniform vec3 lift, shadowTint, highTint; varying vec2 vUv;
     void main(){
       vec3 c = texture2D(tDiffuse, vUv).rgb;
+      // Light contrast-adaptive sharpen: counters the softness of bloom/AA without halos on strong edges.
+      vec3 nb = texture2D(tDiffuse, vUv + vec2(texel.x, 0.0)).rgb + texture2D(tDiffuse, vUv - vec2(texel.x, 0.0)).rgb
+              + texture2D(tDiffuse, vUv + vec2(0.0, texel.y)).rgb + texture2D(tDiffuse, vUv - vec2(0.0, texel.y)).rgb;
+      vec3 detail = c - nb * 0.25;
+      float edge = clamp(1.0 - length(detail) * 3.0, 0.0, 1.0);
+      c = max(c + detail * sharpen * edge, 0.0);
       float l = dot(c, vec3(0.299, 0.587, 0.114));
       c = mix(vec3(l), c, sat);
       c *= mix(shadowTint, vec3(1.0), smoothstep(0.0, 0.55, l));
@@ -215,12 +281,13 @@ const grade = new ShaderPass({
       vec2 d = vUv - 0.5;
       c *= 1.0 - dot(d, d) * 0.6;
       float n = fract(sin(dot(vUv * vec2(1731.0, 977.0) + time * 61.0, vec2(12.9898, 78.233))) * 43758.5453);
-      c += (n - 0.5) * 0.03;
+      c += (n - 0.5) * 0.012;
       c = mix(c, vec3(1.0), flash);
       gl_FragColor = vec4(c, 1.0);
     }`,
 });
 composer.addPass(grade);
+function updateTexel() { grade.uniforms.texel.value.set(1 / (window.innerWidth * pixelRatio), 1 / (window.innerHeight * pixelRatio)); }
 let bloomOn = !new URLSearchParams(location.search).has('nobloom');
 let postOn = !new URLSearchParams(location.search).has('nopost');
 // Full-screen Rage wash.
@@ -254,6 +321,7 @@ function fitView() {
   const w = window.innerWidth, h = window.innerHeight, aspect = w / h;
   renderer.setSize(w, h);
   composer.setSize(w, h);
+  updateTexel();
   vcam.cam.aspect = aspect;
   // Wide landscape: the horizontal view is wider, so frame closer (fighters read bigger on phones).
   // Small screens get a little extra zoom; portrait pulls back so both fighters fit.
@@ -284,7 +352,7 @@ let match: Match | null = null;
 let cpus: (CPU | null)[] = [null, null];
 const trackers = [new EdgeTracker(), new EdgeTracker()];
 let paused = false;
-type Screen = 'start' | 'title' | 'mode' | 'select' | 'result' | 'pause' | 'moves' | 'padsetup' | 'online' | 'none';
+type Screen = 'start' | 'title' | 'mode' | 'select' | 'map' | 'result' | 'pause' | 'moves' | 'padsetup' | 'online' | 'none';
 let screen: Screen = 'title' as Screen;
 /** Test/automation override: when set, replaces a player's raw input each tick. */
 const forced: (RawState | null)[] = [null, null];
@@ -332,7 +400,7 @@ function startMatch(withIntro = true, seed?: number) {
 // ------------------------------------------------------------ online play (see online.ts / netplay.ts / net.ts)
 const online = new Online({
   show: (s) => showScreen(s as Screen),
-  rerender: () => { if (screen === 'select' || screen === 'online' || screen === 'result') rerender(); },
+  rerender: () => onlineRefresh(),
   toast: (m) => toast(m),
   startMatch: (cfg: MatchCfg) => {
     setup.mode = 'online'; setup.p1 = cfg.p1; setup.p2 = cfg.p2; setup.arena = cfg.arena as LayoutId; setup.lives = cfg.lives;
@@ -364,6 +432,16 @@ function syncOnlineSelect() {
   selectSide = online.side;
   setup.arena = s.arena as LayoutId; setup.lives = s.lives;
 }
+/** Lobby state changed: both locked in → everyone moves on to the arena screen; an unlock sends both back. */
+function onlineRefresh() {
+  if (screen === 'select' || screen === 'map') {
+    syncOnlineSelect();
+    const both = locked[0] && locked[1];
+    if (screen === 'select' && both) { showScreen('map'); return; }
+    if (screen === 'map' && !both) { showScreen('select'); return; }
+  }
+  if (screen === 'select' || screen === 'map' || screen === 'online' || screen === 'result') rerender();
+}
 /** Online versions of select-screen actions. Returns true when handled. */
 function onlineAct(a: string, arg?: string): boolean {
   const s = online.session;
@@ -372,7 +450,10 @@ function onlineAct(a: string, arg?: string): boolean {
     case 'pick': if (!s) return true; if (s.me.locked) { s.setPick(arg!, false); return true; } s.setPick(arg!, s.me.pick === arg); return true;
     case 'confirm': if (s) s.setPick(s.me.pick, true); return true;
     case 'side': return true;
-    case 'fight': return true;
+    case 'fight': if (s && online.isHost && screen === 'map') s.go(); return true;
+    case 'mapback': if (s) s.setPick(s.me.pick, false); return true;
+    case 'arena': if (s && online.isHost) s.setCfg(arg!, s.lives); return true;
+    case 'diff': return true;
     case 'arenaStep': if (s && online.isHost) { const i = LAYOUTS.findIndex((l) => l.id === s.arena); const n = LAYOUTS[(i + Number(arg) + LAYOUTS.length) % LAYOUTS.length]; s.setCfg(n.id, s.lives); } return true;
     case 'lives': if (s && online.isHost) s.setCfg(s.arena, Number(arg)); return true;
     case 'rematch': online.rematch(); rerender(); return true;
@@ -479,7 +560,10 @@ function showScreen(s: Screen) {
   menu.querySelectorAll<HTMLElement>('[data-act]').forEach((el) => {
     el.addEventListener('click', (e) => { e.stopPropagation(); initAudio(); act(el.dataset.act!, el.dataset.arg); });
   });
+  // Title menu: the pointer moves the highlight, like a pad or the keyboard would.
+  menu.querySelectorAll<HTMLElement>('.hm-item').forEach((el) => el.addEventListener('pointerenter', () => setFocus(focusables().indexOf(el))));
   setFocus(0);
+  if (s === 'map') setFocus(Math.max(0, focusables().findIndex((e) => e.dataset.act === 'fight')));
 }
 
 let selectSide: 0 | 1 = 0; // which player is choosing on the fighter screen
@@ -573,28 +657,39 @@ function renderStart() {
       <div class="copy">© 2026 BREAKLINE</div>
     </div>`;
 }
+const TITLE_ITEMS: [string, string, string, string][] = [
+  ['mode', 'cpu', 'Fight the CPU', 'Single player against the computer'],
+  ['mode', 'versus', '2 Players', 'Same screen · two pads, or pad + keyboard'],
+  ['online', '', 'Play Online', '1v1 with a friend · room code'],
+  ['moves', '', 'How to Play', 'Controls, combat basics and move lists'],
+];
+/** Title menu: a letterboxed band of tall slanted duotone busts, with the menu in a dark gap between them. */
 function renderTitle() {
-  const h = titleHero;
+  const panel = (c: CharacterDef, i: number) => {
+    const b = bustOf(c);
+    return `<div class="tp" style="--i:${i}"><div class="tpi">${b ? `<img src="${b}" alt="">` : `<b class="tpx">${c.name[0]}</b>`}</div><span class="tpn">${c.name}</span></div>`;
+  };
+  const pads = connectedPads().length;
   return `
-    <div class="screen title-screen">
-      <div class="title-art" style="--c:${h.color};--sky:${skyline(7)}"><div class="bg"></div>${comicOf(h) ? `<img class="pose" src="${comicOf(h)}" alt="">` : ''}<div class="hero-name">${h.name}</div></div>
-      <div class="title-menu">
-        <h1 class="chrome small">BREAK<span>LINE</span></h1>
-        <div class="big-btns">
-          <button class="bigbtn primary" data-nav data-act="mode" data-arg="cpu"><span class="ico">▶</span><span><b>Fight the CPU</b><small>Single player</small></span></button>
-          <button class="bigbtn" data-nav data-act="mode" data-arg="versus"><span class="ico">⚔</span><span><b>2 Players</b><small>Same screen · two pads, or pad + keyboard</small></span></button>
-          <button class="bigbtn" data-nav data-act="online"><span class="ico">🌐</span><span><b>Play online</b><small>1v1 with a friend · room code</small></span></button>
-          <button class="bigbtn" data-nav data-act="moves"><span class="ico">?</span><span><b>How to play</b><small>Controls, combat basics and move lists</small></span></button>
-        </div>
-        <div class="foot">
+    <div class="screen home">
+      <div class="home-top">${prompts([['confirm', 'Select']])}<span class="home-tag">ROOFTOP · OVERPASS · NO WAY DOWN</span></div>
+      <div class="home-band">
+        <div class="home-panels">${ROSTER.slice(0, 2).map(panel).join('')}<div class="home-gap"></div>${ROSTER.slice(2).map((c, i) => panel(c, i + 2)).join('')}</div>
+        <nav class="home-menu">
+          <h1 class="chrome small">BREAK<span>LINE</span></h1>
+          <div class="hm-list">${TITLE_ITEMS.map(([a, arg, label, sub]) => `<button class="hm-item" data-nav data-act="${a}"${arg ? ` data-arg="${arg}"` : ''}><span>${label}</span><small>${sub}</small></button>`).join('')}</div>
+        </nav>
+      </div>
+      <div class="home-bot">
+        <div class="home-opts">
           <button class="pill" data-nav data-act="mute"><i class="pi">${muted ? '🔇' : '🔊'}</i> Sound ${muted ? 'off' : 'on'}</button>
           <button class="pill" data-nav data-act="intros"><i class="pi">🎬</i> Intros ${introsOn ? 'on' : 'off'}</button>
           <button class="pill" data-nav data-act="voices"><i class="pi">🗣</i> Voices ${voicesOn ? 'on' : 'off'}</button>
-          <button class="pill" data-nav data-act="layoutcycle"><i class="pi">🎮</i> ${padLayout === 'xbox' ? 'Xbox' : 'GameCube'}<span class="pl-long"> buttons</span></button>
-          <span class="pill static">${connectedPads().length ? connectedPads().length + ' controller' + (connectedPads().length > 1 ? 's' : '') + ' connected' : 'Keyboard: WASD + J K L I U O'}</span>
+          <button class="pill" data-nav data-act="layoutcycle"><i class="pi">🎮</i> ${padLayout === 'xbox' ? 'Xbox' : 'GameCube'}<span class="pl-long">&nbsp;buttons</span></button>
+          <span class="pill static">${pads ? pads + ' controller' + (pads > 1 ? 's' : '') + ' connected' : 'Keyboard: WASD + J K L I U O'}</span>
         </div>
+        <span class="home-copy">© 2026 BREAKLINE</span>
       </div>
-      ${prompts([['confirm', 'Select']])}
     </div>`;
 }
 /** One side of the fighter select: a comic-toned pose over a duotone skyline, with the fighter's info. */
@@ -623,15 +718,14 @@ function selHalf(side: 0 | 1) {
 }
 function renderSelect() {
   const who = setup.mode === 'online' ? 'you' : selectSide === 0 ? 'Player 1' : setup.mode === 'cpu' ? 'the CPU' : 'Player 2';
-  const cur = LAYOUTS.find((l) => l.id === setup.arena)!;
   const net = online.active;
-  const netNote = net ? `<div class="net-sel"><span class="dot ok"></span>Online · room ${online.code} · ${online.ping || '…'} ms${online.isHost ? ' · you pick the arena and lives' : ' · the host picks the arena and lives'}${locked[online.side] && !locked[1 - online.side] ? ' · waiting for your opponent to lock in…' : ''}</div>` : '';
+  const netNote = net ? `<div class="net-sel"><span class="dot ok"></span>Online · room ${online.code} · ${online.ping || '…'} ms${online.isHost ? ' · you pick the arena next' : ' · the host picks the arena next'}${locked[online.side] && !locked[1 - online.side] ? ' · waiting for your opponent to lock in…' : ''}</div>` : '';
   return `
     <div class="screen select-screen">
       <div class="sel-top">
         <button class="btn-back" data-nav data-act="title">◀ Back</button>
         <h2 class="sel-h">${locked[0] && locked[1] ? 'Ready to fight' : `Choose a fighter <small>for ${who}</small>`}</h2>
-        ${prompts([['confirm', locked[0] && locked[1] ? 'Fight' : 'Preview · again to lock in'], ['back', 'Back']])}
+        ${prompts([['confirm', locked[0] && locked[1] ? 'Arena' : 'Preview · again to lock in'], ['back', 'Back']])}
       </div>
       ${netNote}
       <div class="vs">${selHalf(0)}${selHalf(1)}<svg class="seam" viewBox="0 0 100 100" preserveAspectRatio="none">${['glow', 'edge', 'core'].map((k) => `<line class="${k} ls" x1="54" y1="0" x2="46" y2="100"/><line class="${k} pt" x1="0" y1="54" x2="100" y2="46"/>`).join('')}</svg><div class="vsmark">VS</div></div>
@@ -645,13 +739,65 @@ function renderSelect() {
           </button>`;
         }).join('')}
       </div>
-      <div class="options">
-        <div class="opt"><span class="opt-label">Arena</span><div class="seg arena-pick"><button class="segbtn arr" data-nav data-act="arenaStep" data-arg="-1" aria-label="Previous arena">◀</button><button class="segbtn on arena-cur" data-nav data-act="arenaStep" data-arg="1" title="${cur.blurb}"><span class="arena-sw ${setup.arena}"></span><span class="lfull">${cur.name}</span><span class="lshort">${cur.short}</span><small class="anum">${LAYOUTS.findIndex((l) => l.id === setup.arena) + 1}/${LAYOUTS.length}</small></button><button class="segbtn arr" data-nav data-act="arenaStep" data-arg="1" aria-label="Next arena">▶</button></div></div>
-        <div class="opt"><span class="opt-label">Lives</span><div class="seg">${[1, 2, 3, 5].map((n) => `<button class="segbtn ${setup.lives === n ? 'on' : ''}" data-nav data-act="lives" data-arg="${n}">${n} ♥</button>`).join('')}</div></div>
-        ${setup.mode === 'cpu' ? `<div class="opt"><span class="opt-label">CPU level</span><div class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="segbtn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div></div>` : ''}
-        ${net && locked[0] && locked[1] ? '<button class="fight" disabled>Starting…</button>' : locked[0] && locked[1]
-          ? '<button class="fight" data-nav data-act="fight">FIGHT ▶</button>'
+      <div class="options sel-opts">
+        <span class="sel-next">${locked[0] && locked[1] ? 'Fighters locked · next: pick the arena' : `Next: pick the arena${setup.mode === 'cpu' ? ', lives and CPU level' : ' and lives'}`}</span>
+        ${net && locked[0] && locked[1] ? '<button class="fight" disabled>Arena…</button>' : locked[0] && locked[1]
+          ? '<button class="fight" data-nav data-act="fight">ARENA ▶</button>'
           : `<button class="fight confirm" data-nav data-act="confirm">${net && locked[online.side] ? 'Waiting…' : `✓ Lock in<span class="cname"> ${charById(selectSide === 0 ? setup.p1 : setup.p2).name}</span>`}</button>`}
+      </div>
+    </div>`;
+}
+// ------------------------------------------------------------ arena select
+/** How likely a ring-out is (1–5), shown on the arena screen. */
+const DANGER: Record<LayoutId, [number, string]> = {
+  rooftop: [2, 'Fence holds — until it breaks'], overpass: [4, 'Open sides, weak barriers'], construction: [3, 'Mesh edges, swinging crane'],
+  docks: [3, 'Railings over black water'], helipad: [5, 'Almost no rim at all'],
+};
+function arenaImg(id: LayoutId, cls: string) {
+  const u = arenaPreviews.get(id);
+  return `<img class="${cls}${u ? '' : ' wait'}" data-prev="${id}" src="${u || 'data:image/gif;base64,R0lGODlhAQABAAAAACw='}" alt="">`;
+}
+function renderMap() {
+  queueArenaPreviews();
+  const net = online.active, host = !net || online.isHost;
+  const i = LAYOUTS.findIndex((l) => l.id === setup.arena), cur = LAYOUTS[i];
+  const [danger, dangerNote] = DANGER[cur.id];
+  const nav = host ? 'data-nav ' : '';
+  const p1 = charById(setup.p1), p2 = charById(setup.p2);
+  const mini = (c: CharacterDef) => faceOf(c) ? `<img src="${faceOf(c)}" alt="${c.name}">` : `<b>${c.name[0]}</b>`;
+  const netNote = net ? `<div class="net-sel"><span class="dot ok"></span>Online · room ${online.code} · ${online.ping || '…'} ms · ${host ? 'you pick the arena — your opponent sees it live' : 'the host is picking the arena…'}</div>` : '';
+  return `
+    <div class="screen map-screen">
+      <div class="sel-top">
+        <button class="btn-back" data-nav data-act="mapback">◀ Fighters</button>
+        <h2 class="sel-h">Choose an arena <small>${net && !host ? 'host decides' : '◀ ▶ to browse'}</small></h2>
+        ${prompts([['confirm', 'Fight'], ['back', 'Back']])}
+      </div>
+      ${netNote}
+      <div class="map-main">
+        <div class="map-hero ${cur.id}">
+          ${arenaImg(cur.id, 'mh-img')}
+          <div class="mh-shade"></div>
+          ${host ? '<button class="mh-arr l" data-act="arenaStep" data-arg="-1" aria-label="Previous arena">◀</button><button class="mh-arr r" data-act="arenaStep" data-arg="1" aria-label="Next arena">▶</button>' : ''}
+          <div class="mh-vs"><span class="mv" style="--c:${p1.color}">${mini(p1)}</span><i>VS</i><span class="mv" style="--c:${p2.color}">${mini(p2)}</span></div>
+          <div class="mh-info">
+            <div class="mh-num">ARENA ${i + 1} / ${LAYOUTS.length}</div>
+            <div class="mh-name">${cur.name}</div>
+            <p class="mh-blurb">${cur.blurb}</p>
+            <div class="mh-danger"><span>Ring-out danger</span><i>${[1, 2, 3, 4, 5].map((k) => `<b class="${k <= danger ? 'on' : ''}"></b>`).join('')}</i><em>${dangerNote}</em></div>
+          </div>
+        </div>
+        <div class="map-strip">${LAYOUTS.map((l, k) => `
+          <button class="mt ${l.id === cur.id ? 'on' : ''}" ${nav}data-act="arena" data-arg="${l.id}" ${host ? '' : 'disabled'}>
+            <span class="mti ${l.id}">${arenaImg(l.id, 'mt-img')}</span>
+            <span class="mtn"><small>${k + 1}</small>${l.short}</span>
+          </button>`).join('')}
+        </div>
+      </div>
+      <div class="options map-opts">
+        <div class="opt"><span class="opt-label">Lives</span><div class="seg">${[1, 2, 3, 5].map((n) => `<button class="segbtn ${setup.lives === n ? 'on' : ''}" ${nav}data-act="lives" data-arg="${n}" ${host ? '' : 'disabled'}>${n} ♥</button>`).join('')}</div></div>
+        ${setup.mode === 'cpu' ? `<div class="opt"><span class="opt-label">CPU level</span><div class="seg">${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="segbtn ${setup.diff === d ? 'on' : ''}" data-nav data-act="diff" data-arg="${d}">${d[0].toUpperCase() + d.slice(1)}</button>`).join('')}</div></div>` : ''}
+        ${host ? '<button class="fight" data-nav data-act="fight">FIGHT ▶</button>' : '<button class="fight" disabled>Waiting for host…</button>'}
       </div>
     </div>`;
 }
@@ -689,6 +835,7 @@ function render(s: Screen): string {
   if (s === 'title') return renderTitle();
   if (s === 'online') return renderOnline();
   if (s === 'select') { if (online.active) syncOnlineSelect(); return renderSelect(); }
+  if (s === 'map') { if (online.active) syncOnlineSelect(); return renderMap(); }
   if (s === 'result') return renderResult();
   if (s === 'pause') return `
     <div class="screen pause-screen">
@@ -800,13 +947,17 @@ function act(a: string, arg?: string) {
       locked[selectSide] = true;
       if (!locked[1]) selectSide = 1;
       else if (!locked[0]) selectSide = 0;
+      if (locked[0] && locked[1]) { showScreen('map'); break; } // both in: on to the arena
       showScreen('select');
       const f = focusables();
       // Both locked: jump to FIGHT; otherwise to the next confirm button.
       setFocus(f.findIndex((e) => e.dataset.act === 'fight' || e.dataset.act === 'confirm'));
       break;
     }
-    case 'fight': goLandscape(); startMatch(); break;
+    case 'fight':
+      if (screen === 'select') { showScreen('map'); break; }
+      goLandscape(); startMatch(); break;
+    case 'mapback': showScreen('select'); setFocus(focusables().findIndex((e) => e.dataset.act === 'fight')); break; // fighters stay locked
     case 'arena': setup.arena = arg as LayoutId; rerender(); break;
     case 'arenaStep': {
       const i = LAYOUTS.findIndex((l) => l.id === setup.arena);
@@ -912,8 +1063,17 @@ function menuBack() {
     else if (selectSide === 1) { selectSide = 0; rerender(); }
     else act('title');
   }
+  else if (screen === 'map') act('mapback');
   else if (screen === 'moves') act('back');
   else if (screen === 'pause') act('resume');
+}
+/** Arena screen: a pad's shoulder buttons (LB / RB) step through the arenas. */
+let bumperPrev = [true, true];
+function pollMapBumpers() {
+  const g = firstPad();
+  const now = [4, 5].map((i) => !!g?.buttons[i] && (g.buttons[i].pressed || g.buttons[i].value > 0.5));
+  if (screen === 'map') { if (now[0] && !bumperPrev[0]) act('arenaStep', '-1'); if (now[1] && !bumperPrev[1]) act('arenaStep', '1'); }
+  bumperPrev = now;
 }
 function menuInput(dtMs: number) {
   // Controllers drive an on-screen arrow cursor; the keyboard keeps step-by-step focus navigation.
@@ -922,6 +1082,7 @@ function menuInput(dtMs: number) {
   if (screen === 'padsetup') { hidePadCursor(); pollPadSetup(); }
   const padUsed = screen === 'padsetup' ? false : updatePadCursor(menu, screen, dtMs, () => { if (navCooldown <= 0) { navCooldown = 180; sfx.menu(); menuBack(); } });
   if (padUsed) initAudio();
+  pollMapBumpers();
   const binds: DeviceBinding[] = [{ keyboard: [0, 1], gamepad: null, touch: false }];
   for (let i = 0; i < binds.length; i++) {
     const raw = readDevices(binds[i]);
@@ -930,6 +1091,7 @@ function menuInput(dtMs: number) {
     menuTrack[i].update(raw);
     const fr = menuTrack[i].frame;
     if (navCooldown > 0) continue;
+    if (screen === 'map' && Math.abs(fr.mx) > 0.5) { act('arenaStep', fr.mx > 0 ? '1' : '-1'); navCooldown = 200; continue; }
     const step = fr.my > 0.5 || fr.mx < -0.5 ? -1 : fr.my < -0.5 || fr.mx > 0.5 ? 1 : 0;
     if (step) { setFocus(focusIdx + step); navCooldown = 150; sfx.menu(); }
     if (fr.b.attack.pressed) { const el = focusables()[focusIdx]; if (el) { initAudio(); el.click(); } navCooldown = 180; }
@@ -1008,8 +1170,9 @@ function adaptQuality(now: number) {
     if (bloomOn) bloomOn = false;
     else if (fx.blurAllowed) fx.blurAllowed = false;
     else if (fx.quality > 0.5) fx.quality = 0.5;
-    else if (pixelRatio > 0.7) { pixelRatio = Math.max(0.7, pixelRatio - 0.15); renderer.setPixelRatio(pixelRatio); }
     else if (renderer.shadowMap.enabled) { renderer.shadowMap.enabled = false; }
+    // Resolution is the last thing to go, and never below native CSS pixels (below that everything turns soft).
+    else if (pixelRatio > minPixelRatio) { pixelRatio = Math.max(minPixelRatio, pixelRatio - 0.25); renderer.setPixelRatio(pixelRatio); composer.setPixelRatio(pixelRatio); updateTexel(); }
   }
 }
 
@@ -1025,6 +1188,7 @@ function frame(now: number) {
   if (frameTimes.length > 600) frameTimes.shift();
   time += rawDt;
 
+  if (previewQueue.length && screen !== 'none' && !match) captureArenaPreview();
   if (screen !== 'none') menuInput(rawDt * 1000);
   else hidePadCursor();
   if (intro && match && !paused && screen === 'none' && !intro.update(rawDt)) { intro = null; if (online.active) online.introDone(); }

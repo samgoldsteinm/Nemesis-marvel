@@ -32,7 +32,7 @@ const FACE: Record<string, FaceShot> = {
   default: { az: 0.3, el: 0, dist: 0.9 },
   basalt: { az: 0.12, el: -0.16, dist: 1.5, fcY: 0.1, aimY: -0.02, head: { yaw: 0, pitch: -0.1, roll: 0 } },            // head-on from slightly below, glowing eyes
   tether: { rotY: 1.5, az: -1.2, el: 0.06, dist: 0.95, shiftX: 0.06, head: { yaw: -1.0, pitch: 0.06, roll: 0.1 } },    // looking back over his shoulder
-  aerin: { az: 0.75, el: 0.06, dist: 0.95, roll: 0.1, head: { yaw: 0.45, pitch: -0.05, roll: 0.1 } },       // turning toward us, hair swept
+  aerin: { az: 0.75, el: 0.06, dist: 0.95, roll: 0.1, aimY: -0.06, head: { yaw: 0.45, pitch: -0.05, roll: 0.1 } },       // turning toward us, hair swept
   shunt: { az: -0.6, el: 0.02, dist: 0.95, roll: -0.28, aimY: -0.03, head: { yaw: -0.25, pitch: 0.04, roll: 0 } },        // visor 3/4, dutch tilt
   vanta: { az: 0.25, el: -0.06, dist: 0.9, aimY: -0.05, head: { yaw: 0.15, pitch: 0.14, roll: -0.1 } },     // head low, prowling, eyes up
   magna: { az: -0.5, el: -0.2, dist: 0.95, aimY: -0.02, head: { yaw: -0.2, pitch: 0.14, roll: 0 } },                     // low angle, looking down at you
@@ -40,7 +40,21 @@ const FACE: Record<string, FaceShot> = {
   rift: { az: -1.15, el: 0.02, dist: 0.95, head: { yaw: -0.35, pitch: 0.05, roll: 0 } },                    // half-hooded profile
 };
 
+/** Title-menu busts (tall slanted panels): head and shoulders, each fighter facing its own way. Same fields as FACE. */
+const BUST: Record<string, FaceShot> = {
+  default: { az: 0.3, el: 0, dist: 2.1 },
+  basalt: { az: 0.15, el: -0.05, dist: 2.6, fcY: 0.1, aimY: 0.06, head: { yaw: 0.1, pitch: -0.14, roll: 0 } },
+  tether: { rotY: 1.5, az: -1.25, el: 0.04, dist: 2.1, head: { yaw: -0.95, pitch: 0.04, roll: 0.08 } },
+  aerin: { az: 0.85, el: 0.04, dist: 2.1, roll: 0.06, head: { yaw: 0.5, pitch: -0.04, roll: 0.08 } },
+  shunt: { az: -0.55, el: 0.02, dist: 2.1, roll: -0.1, head: { yaw: -0.3, pitch: 0.04, roll: 0 } },
+  vanta: { az: 0.2, el: -0.1, dist: 2.0, head: { yaw: 0.2, pitch: 0.16, roll: -0.08 } },
+  magna: { az: -0.75, el: -0.22, dist: 2.1, head: { yaw: -0.3, pitch: 0.12, roll: 0 } },
+  ember: { az: 0.55, el: -0.04, dist: 2.1, roll: 0.08, head: { yaw: 0.35, pitch: -0.08, roll: -0.1 } },
+  rift: { az: -1.3, el: 0.02, dist: 2.1, head: { yaw: -0.4, pitch: 0.05, roll: 0 } },
+};
+
 export const portraits = new Map<string, string>();
+export const busts = new Map<string, string>();
 export const comics = new Map<string, string>();
 export const faces = new Map<string, string>();
 export const profiles = new Map<string, string>();
@@ -180,7 +194,7 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
   RIM_COLOR.value.setRGB(0.55, 0.55, 0.58);
   const head = new THREE.Vector3();
 
-  const shots: Record<'pose' | 'face' | 'profile', Shot> = {
+  const shots: Record<'pose' | 'face' | 'profile' | 'bust', Shot> = {
     pose: {
       w: 448, h: 600, rotY: 0.45,
       cam: (_sk, def, cam) => { const h = def.look!.height; cam.position.set(0.3, h * 0.6, h * 2.15); cam.lookAt(0, h * 0.52, 0); },
@@ -202,6 +216,22 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
         cam.lookAt(aim);
         if (f.roll) cam.rotateZ(f.roll);
         if (f.shiftX) cam.translateX(f.shiftX * viewH);
+      },
+    },
+    bust: {
+      w: 300, h: 600, rotY: 0, fov: 26,
+      cam: (sk, def, cam) => {
+        // Tall title-menu panel: head in the upper quarter, down to about the waist.
+        const f = BUST[def.id] ?? BUST.default;
+        sk.boneWorld('Head', head);
+        const s = def.look!.height / 1.95;
+        const fc = head.clone().add(new THREE.Vector3(0, (f.fcY ?? 0.08) * s, 0));
+        const d = f.dist * s;
+        const yaw = (f.rotY ?? 0) + f.az;
+        cam.position.set(fc.x + Math.sin(yaw) * Math.cos(f.el) * d, fc.y + Math.sin(f.el) * d, fc.z + Math.cos(yaw) * Math.cos(f.el) * d);
+        const viewH = 2 * d * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
+        cam.lookAt(fc.clone().add(new THREE.Vector3(0, -0.24 * viewH + (f.aimY ?? 0) * s, 0)));
+        if (f.roll) cam.rotateZ(f.roll);
       },
     },
     profile: {
@@ -231,12 +261,13 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
     const wings = (rig as any).wings as THREE.Mesh[] | undefined;
     if (wings) { wings[0].rotation.y = -1.0; wings[1].rotation.y = 1.0; }
     scene.add(rig.root);
-    for (const kind of ['pose', 'face', 'profile'] as const) {
+    for (const kind of ['pose', 'face', 'bust', 'profile'] as const) {
       // Only one profile is needed (the Press Start art); faces and poses for everyone.
       if (kind === 'profile' && def.id !== 'shunt' && def.id !== 'rift') continue;
       const sh = shots[kind];
-      rig.root.rotation.y = kind === 'face' ? (FACE[def.id] ?? FACE.default).rotY ?? 0 : sh.rotY;
-      sk.headTurn = kind === 'face' ? (FACE[def.id] ?? FACE.default).head ?? null : null;
+      const framing = kind === 'face' ? FACE[def.id] ?? FACE.default : kind === 'bust' ? BUST[def.id] ?? BUST.default : null;
+      rig.root.rotation.y = framing ? framing.rotY ?? 0 : sh.rotY;
+      sk.headTurn = framing?.head ?? null;
       rig.root.updateMatrixWorld(true);
       sk.update(0);
       rig.root.updateMatrixWorld(true);
@@ -268,6 +299,8 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
         const cropped = autocrop(c);
         portraits.set(def.id, cropped.toDataURL('image/png'));
         comics.set(def.id, (def.look!.golem ? posterizeStone(cropped) : posterize(cropped)).toDataURL('image/png'));
+      } else if (kind === 'bust') {
+        busts.set(def.id, duotone(c, 0x021312, 0x9cefe2, 0.7).toDataURL('image/png'));
       } else if (kind === 'face') {
         faces.set(def.id, duotone(c, 0x0a2436, 0xd6f3ff, 0.62).toDataURL('image/png'));
       } else {
@@ -287,4 +320,5 @@ export function portraitOf(def: CharacterDef) {
 }
 export function comicOf(def: CharacterDef) { return comics.get(def.id) ?? portraits.get(def.id) ?? ''; }
 export function faceOf(def: CharacterDef) { return faces.get(def.id) ?? ''; }
+export function bustOf(def: CharacterDef) { return busts.get(def.id) ?? ''; }
 export function profileOf(id: string) { return profiles.get(id) ?? ''; }

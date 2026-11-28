@@ -117,6 +117,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-27 | Phone select: stats behind a tap (`stats-tog` button, `statsOpen` in main.ts) |
 | 11-27 | Phone-first touch controls: floating stick (left half), named ATTACK/JUMP/SPECIAL/GRAB/GUARD/DASH arc, contextual RAGE/FINISH/RECOVER/CHARGE buttons (via `setTouchContext` from main each frame), GUARD+SPECIAL = super block, HUD prompts touch-aware. Portraits auto-cropped to their opaque bounds (bigger select/title/result art), art zone widened to the seam; Basalt's comic art uses a charcoal-stone tone with lava kept (`posterizeStone`), neutral rim for studio renders |
 | 11-28 | Roster close-ups framed like comic panels: per-fighter `FACE` shots in portraits.ts (camera azimuth/elevation/roll, body yaw, head turn via `SkinnedBody.headTurn`), face-level camera with the eyes ~40% down; Basalt pulled back, Tether turned toward us, Magna low angle, Ember tilted, Rift profile, Shunt dutch tilt |
+| 11-28 | Arena select is its own screen after fighter select (`renderMap`, Screen `'map'`): big preview + strip of 5, name, blurb, ring-out danger (`DANGER`), Lives and CPU level moved here; ◀ ▶ keys / LB RB / tap; Back keeps fighters locked. Previews are real renders of each arena through the post stack (`captureArenaPreview`, one per frame while a menu is up, cached JPEG data URLs, original layout restored). Online: both locked → both go to the arena screen, host picks live (guest read-only), host's FIGHT calls `OnlineSession.go()` (no more auto-start on lock). Title menu redesigned: letterboxed band of tall slanted teal-duotone busts (`BUST` shots in portraits.ts, `bustOf`), text menu in a dark gap with gold highlight + red slash, device-aware prompt top-left, settings in the bottom bar; portrait = band on top, menu below. Aerin's roster face lifted (`aimY`) |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -242,6 +243,10 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - YouTube is blocked by the network policy; the user supplied the video file instead.
 - The user declined an API-key credential prompt once; don't re-ask for that.
 
+**Arena previews / title**
+- Previews are captured with `drawImage(renderer.domElement)` right after `composer.render()` in the same task (no preserveDrawingBuffer needed); do it at the start of `frame()` so the normal render overwrites it. Turn off the motion-blur pass and the flash uniform for the capture, and swap `renderPass.camera` back afterwards.
+- `.pill > *` is inline-block, so a leading space inside a child span collapses ("Xboxbuttons") — use `&nbsp;`.
+
 ## 6. Open items / ideas
 - Commit the faces work once its job finishes; re-run the full test suite.
 - Tune `CLIP_IMPACT` timings by eye for a few Motifect clips.
@@ -258,7 +263,7 @@ If WebRTC fails the game keeps playing over the relay (slower). `NetLink`: `hell
 `full`), `hb`/`hbr` heartbeat every 1 s (RTT for the ping display), link lost after 20 s, `bye` on leave.
 
 **Lobby (`OnlineSession`).** Host picks P1 and the arena/lives, guest picks P2. Messages: `pick` {pick, locked},
-`cfg` {arena, lives}, `start` {seed, p1, p2, arena, lives, delay} (host, once both locked), `ready` (intro done or
+`cfg` {arena, lives}, `start` {seed, p1, p2, arena, lives, delay} (host, when it presses FIGHT on the arena screen — `go()`, both must be locked), `ready` (intro done or
 skipped), `rematch`. The fight starts only when both are `ready`: `match.restart(seed)` + `setLives`, then Lockstep.
 
 **Netcode (`Lockstep`).** Deterministic input lockstep at 60 Hz. Input per tick = `[mx*100, my*100, buttons]`

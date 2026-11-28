@@ -299,7 +299,7 @@ export interface SideState { pick: string; locked: boolean }
 export interface MatchCfg { seed: number; p1: string; p2: string; arena: string; lives: number; delay: number }
 /**
  * Lobby protocol (reliable messages): 'pick' {pick, locked} from either side; 'cfg' {arena, lives} from the host;
- * 'start' {cfg} from the host once both are locked; 'ready' when a side's intro is done (the simulation starts when
+ * 'start' {cfg} from the host when it confirms the arena (both must be locked in); 'ready' when a side's intro is done (the simulation starts when
  * both are ready); 'rematch' to ask for another round with the same fighters; plus the lockstep's 'in'/'ck'/'rs'/'sn'.
  */
 export class OnlineSession {
@@ -324,7 +324,7 @@ export class OnlineSession {
   get side(): 0 | 1 { return this.isHost ? 0 : 1; }
   private onMsg(m: NetMsg) {
     switch (m.k) {
-      case 'pick': this.them = { pick: String(m.pick), locked: !!m.locked }; this.onChange(); this.maybeStart(); break;
+      case 'pick': this.them = { pick: String(m.pick), locked: !!m.locked }; this.onChange(); break;
       case 'cfg': if (!this.isHost) { this.arena = String(m.arena); this.lives = Number(m.lives); this.onChange(); } break;
       case 'start': if (!this.isHost) { this.cfg = m.cfg as unknown as MatchCfg; this.readyMine = this.readyTheirs = false; this.onStart(this.cfg); } break;
       case 'ready': this.readyTheirs = true; this.checkReady(); break;
@@ -333,9 +333,10 @@ export class OnlineSession {
   }
   sendPick() { this.link.send({ k: 'pick', pick: this.me.pick, locked: this.me.locked }); }
   sendCfg() { if (this.isHost) this.link.send({ k: 'cfg', arena: this.arena, lives: this.lives }); }
-  setPick(id: string, locked: boolean) { this.me = { pick: id, locked }; this.sendPick(); this.onChange(); this.maybeStart(); }
+  setPick(id: string, locked: boolean) { this.me = { pick: id, locked }; this.sendPick(); this.onChange(); }
   setCfg(arena: string, lives: number) { this.arena = arena; this.lives = lives; this.sendCfg(); this.onChange(); }
-  private maybeStart() {
+  /** Host only: start the match on the chosen arena (after both sides locked in their fighters). */
+  go() {
     if (!this.isHost || !this.me.locked || !this.them.locked || !this.link.open) return;
     this.startMatch(this.me.pick, this.them.pick);
   }
