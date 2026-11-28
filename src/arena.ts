@@ -15,22 +15,29 @@ export const PROP_MODELS = [
 ];
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { FX } from './fx';
-import { buildConstruction, buildDocks, buildHelipad, resetExtra } from './arenas2';
+import { buildConstruction, resetExtra } from './arenas2';
+import { buildMarket, buildArchive, buildFoundry, buildLab, resetEnclosed } from './arenas3';
 import { sfx } from './audio';
 
 // The Clarion Building rooftop: an enclosed roof that becomes a ring-out arena as its fence breaks.
 
 /** Playable deck half-extents for the current layout (x = width, z = depth). */
 export const BOUNDS = { hw: 18, hd: 13 };
-export type LayoutId = 'rooftop' | 'overpass' | 'construction' | 'docks' | 'helipad';
-export const LAYOUTS: { id: LayoutId; name: string; short: string; blurb: string }[] = [
+export type LayoutId = 'rooftop' | 'overpass' | 'construction' | 'market' | 'archive' | 'foundry' | 'lab';
+export const LAYOUTS: { id: LayoutId; name: string; short: string; blurb: string; enclosed?: boolean }[] = [
   { id: 'rooftop', name: 'Clarion Rooftop', short: 'Rooftop', blurb: 'Enclosed roof that becomes a ring-out arena as its fence breaks.' },
   { id: 'overpass', name: 'Route 9 Overpass', short: 'Overpass', blurb: 'Narrow elevated roadway: stalled cars to throw, exposed sides, barriers that give way.' },
   { id: 'construction', name: 'Skyline Site', short: 'Site', blurb: 'Unfinished tower floor: steel beams to throw, a crane to swing from, only safety mesh at the edges.' },
-  { id: 'docks', name: 'Harbor Pier 7', short: 'Docks', blurb: 'Night pier between container stacks: fuel drums, cranes overhead, railings over the black water.' },
-  { id: 'helipad', name: 'Neon Helipad', short: 'Helipad', blurb: 'A tiny circular pad above the neon district. Barely any rim — every hit is a ring-out threat.' },
+  { id: 'market', name: 'Market Square', short: 'Market', blurb: 'A night plaza boxed in by shop fronts: taxis and a van to throw, steam rising from the grates. No way out.', enclosed: true },
+  { id: 'archive', name: 'The Archive', short: 'Archive', blurb: 'A gothic reading hall: towering bookcases, chandeliers to swing from, armour and armchairs to hurl.', enclosed: true },
+  { id: 'foundry', name: 'Foundry Roof', short: 'Foundry', blurb: 'A walled factory roof in the smog: tanks for cover, truss towers, gas canisters that go up.', enclosed: true },
+  { id: 'lab', name: 'Core Lab', short: 'Lab', blurb: 'A sealed reactor chamber: humming core, tesla coil, consoles and volatile canisters.', enclosed: true },
 ];
-/** Circular decks (helipad): `inside()` uses this radius instead of the rectangle. */
+/** A known arena id, or the rooftop (for old saved settings / messages naming removed arenas). */
+export function layoutOr(id: unknown): LayoutId {
+  return LAYOUTS.some((l) => l.id === id) ? (id as LayoutId) : 'rooftop';
+}
+/** Circular decks: `inside()` uses this radius instead of the rectangle (no current arena is circular; the camera collider reads it). */
 export const SHAPE = { circle: 0 };
 export const WALL_H = 3.0;
 export const WALL_T = 0.5;
@@ -44,7 +51,7 @@ export interface Solid {
   clingable: boolean;
 }
 
-export type WallStyle = 'fence' | 'noise' | 'safety' | 'rail' | 'rim';
+export type WallStyle = 'fence' | 'noise' | 'safety';
 export class WallSeg {
   hp = 100;
   broken = false;
@@ -78,8 +85,8 @@ export class WallSeg {
       fence.add(panel);
       fence.add(bx(len, 0.08, 0.08, mats.steel, 3.0));
       for (const sgn of [-1, 1]) fence.add(bx(0.12, 2.1, 0.12, mats.steel, 2.0, (sgn * len) / 2));
-    } else if (style === 'safety') {
-      // Construction-site edge: steel kerb, orange safety mesh and a striped hand rail.
+    } else {
+      // Construction-site edge (safety): steel kerb, orange safety mesh and a striped hand rail.
       this.base = new THREE.Mesh(new THREE.BoxGeometry(size.x, 0.25, size.z), mats.steel);
       this.base.position.y = 0.125;
       const panel = new THREE.Mesh(new THREE.PlaneGeometry(len - 0.1, 1.15), mats.safety);
@@ -89,16 +96,6 @@ export class WallSeg {
       fence.add(bx(len, 0.1, 0.1, mats.stripe, height - 0.05));
       fence.add(bx(len, 0.06, 0.06, mats.stripe, 1.45));
       for (const sgn of [-1, 0, 1]) fence.add(bx(0.09, height, 0.09, mats.steel, height / 2, (sgn * len) / 2.05));
-    } else if (style === 'rail') {
-      // Pier railing: timber kerb, steel posts, two rails.
-      this.base = new THREE.Mesh(new THREE.BoxGeometry(size.x, 0.3, size.z), mats.timber);
-      this.base.position.y = 0.15;
-      for (const y of [0.75, height - 0.1]) fence.add(bx(len, 0.09, 0.09, mats.rail, y));
-      for (const sgn of [-1, 0, 1]) fence.add(bx(0.1, height, 0.1, mats.rail, height / 2, (sgn * len) / 2.05));
-    } else {
-      // Helipad rim: a low raised lip in yellow/black hazard stripes.
-      this.base = new THREE.Mesh(new THREE.BoxGeometry(size.x, height, size.z), mats.hazard);
-      this.base.position.y = height / 2;
     }
     this.base.castShadow = this.base.receiveShadow = true;
     addOutline(this.base, 1.02);
@@ -134,7 +131,7 @@ export class WallSeg {
   }
 }
 
-export type PropKind = 'panel' | 'crate' | 'letter' | 'ac' | 'tank' | 'rubble' | 'car' | 'barrel' | 'barrier' | 'wreck' | 'cone' | 'bin' | 'pallet' | 'wheelie' | 'barricade' | 'mailbox' | 'beams' | 'lumber' | 'cement' | 'drum';
+export type PropKind = 'panel' | 'crate' | 'letter' | 'ac' | 'tank' | 'rubble' | 'car' | 'barrel' | 'barrier' | 'wreck' | 'cone' | 'bin' | 'pallet' | 'wheelie' | 'barricade' | 'mailbox' | 'beams' | 'lumber' | 'cement' | 'van' | 'bench' | 'hydrant' | 'armchair' | 'armour' | 'cabinet' | 'table' | 'console' | 'canister';
 export type PropState = 'rest' | 'held' | 'thrown' | 'falling' | 'gone';
 
 export class Prop {
@@ -164,7 +161,7 @@ export class Prop {
     return [8, 14, 22][this.cls] * this.power;
   }
   get label() {
-    return { panel: 'Sign panel', crate: 'Crate', letter: 'Sign letter', ac: 'A/C unit', tank: 'Fuel tank', rubble: 'Rubble', car: 'Car', barrel: 'Barrel', barrier: 'Barrier block', wreck: 'Burnt wreck', cone: 'Traffic cone', bin: 'Trash can', pallet: 'Pallet', wheelie: 'Wheelie bin', barricade: 'Road barricade', mailbox: 'Mailbox', beams: 'Steel beams', lumber: 'Lumber', cement: 'Cement bags', drum: 'Fuel drum' }[this.kind];
+    return { panel: 'Sign panel', crate: 'Crate', letter: 'Sign letter', ac: 'A/C unit', tank: 'Fuel tank', rubble: 'Rubble', car: 'Car', barrel: 'Barrel', barrier: 'Barrier block', wreck: 'Burnt wreck', cone: 'Traffic cone', bin: 'Trash can', pallet: 'Pallet', wheelie: 'Wheelie bin', barricade: 'Road barricade', mailbox: 'Mailbox', beams: 'Steel beams', lumber: 'Lumber', cement: 'Cement bags', van: 'Van', bench: 'Bench', hydrant: 'Hydrant', armchair: 'Armchair', armour: 'Suit of armour', cabinet: 'Display cabinet', table: 'Side table', console: 'Console', canister: 'Gas canister' }[this.kind];
   }
 }
 
@@ -187,9 +184,6 @@ interface ArenaMats {
   glass: THREE.MeshStandardMaterial;
   tire: THREE.MeshStandardMaterial;
   safety: THREE.MeshStandardMaterial;
-  timber: THREE.MeshStandardMaterial;
-  rail: THREE.MeshStandardMaterial;
-  hazard: THREE.MeshStandardMaterial;
 }
 
 function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void, repeat?: [number, number]) {
@@ -268,19 +262,6 @@ export class Arena {
         g.strokeStyle = 'rgba(255,120,30,0.95)'; g.lineWidth = 3;
         for (let i = 0; i <= 64; i += 8) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i, 64); g.stroke(); g.beginPath(); g.moveTo(0, i); g.lineTo(64, i); g.stroke(); }
       }, [6, 1.5]), transparent: true, alphaTest: 0.3, side: THREE.DoubleSide, roughness: 0.7, emissive: 0x401400, emissiveIntensity: 0.5 }),
-      timber: new THREE.MeshStandardMaterial({ map: canvasTex(128, 128, (g) => {
-        g.fillStyle = '#4a3a2c'; g.fillRect(0, 0, 128, 128);
-        for (let y = 0; y < 128; y += 16) { g.fillStyle = `rgb(${60 + Math.random() * 25},${46 + Math.random() * 18},${34 + Math.random() * 12})`; g.fillRect(0, y + 1, 128, 14); }
-        g.strokeStyle = 'rgba(20,14,10,0.8)'; g.lineWidth = 2;
-        for (let y = 0; y <= 128; y += 16) { g.beginPath(); g.moveTo(0, y); g.lineTo(128, y); g.stroke(); }
-        for (let i = 0; i < 300; i++) { g.fillStyle = 'rgba(20,14,10,0.25)'; g.fillRect(Math.random() * 128, Math.random() * 128, 6 + Math.random() * 14, 1); }
-      }, [10, 4]), roughness: 0.85 }),
-      rail: new THREE.MeshStandardMaterial({ color: 0x9aa4a8, roughness: 0.5, metalness: 0.6 }),
-      hazard: new THREE.MeshStandardMaterial({ map: canvasTex(128, 32, (g) => {
-        g.fillStyle = '#18161a'; g.fillRect(0, 0, 128, 32);
-        g.fillStyle = '#f0c020';
-        for (let x = -32; x < 160; x += 24) { g.beginPath(); g.moveTo(x, 32); g.lineTo(x + 12, 32); g.lineTo(x + 28, 0); g.lineTo(x + 16, 0); g.fill(); }
-      }, [3, 1]), roughness: 0.6, emissive: 0x201800, emissiveIntensity: 0.4 }),
     };
     for (const ch of new Set(LETTERS)) {
       this.letterTex.set(ch, canvasTex(128, 128, (g) => {
@@ -303,11 +284,18 @@ export class Arena {
   }
 
   layout: LayoutId = 'rooftop';
+  /** Walled arena: no ring-outs (bodies are clamped inside BOUNDS; the AI and UI know). */
+  enclosed = false;
+  /** Per-layout ambient effects (steam, fire, arcs), called from update(); visual only. */
+  ambient: ((dt: number) => void) | null = null;
   /** Height limit for fliers (below overhead structure). */
   ceiling = 14;
   /** Swap venues: rebuild static scenery, solids and anchors, then reset dynamic pieces. */
   setLayout(id: LayoutId) {
+    id = layoutOr(id);
     this.layout = id;
+    this.enclosed = !!LAYOUTS.find((l) => l.id === id)!.enclosed;
+    this.ambient = null;
     this.name = LAYOUTS.find((l) => l.id === id)!.name;
     for (const c of [...this.static.children]) this.static.remove(c);
     this.fixedSolids = [];
@@ -324,12 +312,18 @@ export class Arena {
     } else if (id === 'construction') {
       BOUNDS.hw = 17; BOUNDS.hd = 11;
       buildConstruction(this);
-    } else if (id === 'docks') {
-      BOUNDS.hw = 22; BOUNDS.hd = 7.5;
-      buildDocks(this);
+    } else if (id === 'market') {
+      BOUNDS.hw = 17; BOUNDS.hd = 12;
+      buildMarket(this);
+    } else if (id === 'archive') {
+      BOUNDS.hw = 16; BOUNDS.hd = 11;
+      buildArchive(this);
+    } else if (id === 'foundry') {
+      BOUNDS.hw = 17; BOUNDS.hd = 12;
+      buildFoundry(this);
     } else {
-      BOUNDS.hw = 11; BOUNDS.hd = 11; SHAPE.circle = 11;
-      buildHelipad(this);
+      BOUNDS.hw = 15; BOUNDS.hd = 11;
+      buildLab(this);
     }
     this.reset();
   }
@@ -871,7 +865,8 @@ export class Arena {
     this.letters = [];
     const m = this.mats;
     const HW = BOUNDS.hw, HD = BOUNDS.hd;
-    if (this.layout === 'construction' || this.layout === 'docks' || this.layout === 'helipad') { resetExtra(this); return; }
+    if (this.layout === 'construction') { resetExtra(this); return; }
+    if (this.enclosed) { resetEnclosed(this); return; }
     if (this.layout === 'overpass') {
       // Noise-barrier segments along both long edges; the ends are closed by wreckage.
       for (const zs of [-1, 1]) for (let i = 0; i < 13; i++) {
@@ -1098,6 +1093,12 @@ export class Arena {
       }
       contacts.push({ s, n });
     }
+    if (this.enclosed) {
+      // Backstop for walled arenas: nothing (fast launches, teleports, Displace) ends up outside the floor.
+      const mx = BOUNDS.hw - r, mz = BOUNDS.hd - r;
+      pos.x = Math.min(mx, Math.max(-mx, pos.x));
+      pos.z = Math.min(mz, Math.max(-mz, pos.z));
+    }
     return contacts;
   }
 
@@ -1152,6 +1153,7 @@ export class Arena {
 
   // ------------------------------------------------------------------ prop simulation (non-combat parts)
   update(dt: number, onLand: (p: Prop, speed: number) => void) {
+    this.ambient?.(dt);
     for (const p of this.props) {
       if (p.state === 'gone' || p.state === 'held') continue;
       if (p.state === 'rest') {
@@ -1163,6 +1165,11 @@ export class Arena {
       p.life += dt;
       p.vel.y -= 26 * dt;
       p.pos.addScaledVector(p.vel, dt);
+      if (this.enclosed) {
+        const mx = BOUNDS.hw - p.half.x, mz = BOUNDS.hd - p.half.z;
+        if (Math.abs(p.pos.x) > mx) { p.pos.x = Math.sign(p.pos.x) * mx; p.vel.x *= -0.3; }
+        if (Math.abs(p.pos.z) > mz) { p.pos.z = Math.sign(p.pos.z) * mz; p.vel.z *= -0.3; }
+      }
       p.mesh.rotation.x += p.spin.x * dt;
       p.mesh.rotation.y += p.spin.y * dt;
       p.mesh.rotation.z += p.spin.z * dt;

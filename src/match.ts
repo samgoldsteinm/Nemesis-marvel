@@ -6,7 +6,6 @@ import { FX } from './fx';
 import { VersusCamera } from './camera';
 import { CharacterDef, MoveDef, HitSpec } from './characters';
 import { sfx } from './audio';
-import { WATER_Y } from './arenas2';
 import type { ProjectileHandle } from './vfx';
 
 const PROJ: Record<ProjKind, { speed: number; color: number; scale: number; trail: number; light: number }> = {
@@ -344,7 +343,7 @@ export class Match {
   shatterProp(p: Prop, vel?: THREE.Vector3) {
     if (p.state === 'gone') return;
     if (p.explosive) { this.explode(p); return; }
-    const colors: Record<string, number> = { panel: 0xd8d2c2, crate: 0x8a6a42, letter: 0xff7060, ac: 0xa7adb5, rubble: 0x7d7f86, tank: 0xc8401c, car: 0x8a8a90, barrel: 0x2f6a9a, barrier: 0x8b8a90, wreck: 0x2a2624, cone: 0xff7a20, bin: 0x5a6a5a, pallet: 0x9a7a52, wheelie: 0x3a6a3a, barricade: 0xff8a30, mailbox: 0x2a6a3a, beams: 0x7a4a2a, lumber: 0xc89a5a, cement: 0xc8c0b0, drum: 0xb02a1a };
+    const colors: Record<string, number> = { panel: 0xd8d2c2, crate: 0x8a6a42, letter: 0xff7060, ac: 0xa7adb5, rubble: 0x7d7f86, tank: 0xc8401c, car: 0x8a8a90, barrel: 0x2f6a9a, barrier: 0x8b8a90, wreck: 0x2a2624, cone: 0xff7a20, bin: 0x5a6a5a, pallet: 0x9a7a52, wheelie: 0x3a6a3a, barricade: 0xff8a30, mailbox: 0x2a6a3a, beams: 0x7a4a2a, lumber: 0xc89a5a, cement: 0xc8c0b0, van: 0x3a6a7a, bench: 0x5a3e28, hydrant: 0xb8241c, armchair: 0x5a3a5a, armour: 0x8a909a, cabinet: 0x4a3418, table: 0x3a2414, console: 0x2a2a36, canister: 0x5a6a5a };
     this.fx.burstDebris(p.pos.clone().setY(p.pos.y + 0.4), p.cls >= 1 ? 22 : 10, colors[p.kind], 6, p.cls >= 1 ? 0.3 : 0.18, vel ? vel.clone().normalize() : undefined);
     if (p.holder) { p.holder.heldProp = null; p.holder = null; }
     this.arena.removeProp(p);
@@ -462,13 +461,7 @@ export class Match {
   update(dt: number) {
     this.tick++;
     if (this.introT > 0) this.introT--;
-    const prevY = this.fighters.map((f) => f.pos.y);
     for (const f of this.fighters) f.update(dt);
-    // Harbor: anything that drops past the waterline throws up a splash.
-    if (this.arena.layout === 'docks') {
-      this.fighters.forEach((f, i) => { if (prevY[i] > WATER_Y && f.pos.y <= WATER_Y) this.splash(f.pos, 1.4); });
-      for (const p of this.arena.props) if (p.state !== 'gone' && p.state !== 'rest' && p.pos.y <= WATER_Y && !this.splashed.has(p)) { this.splashed.add(p); this.splash(p.pos, 0.6 + p.cls * 0.4); }
-    }
     // Body separation.
     const [a, b] = this.fighters;
     const solidA = a.alive && !['grabbed', 'yanked', 'finished', 'teleport', 'out'].includes(a.state);
@@ -541,24 +534,6 @@ export class Match {
   grabHint(f: Fighter) {
     if (!['ground', 'air', 'fly', 'guard'].includes(f.state) || f.heldProp) return null;
     return f.grabTarget();
-  }
-
-  private splashed = new WeakSet<Prop>();
-  /** A tall white splash and spreading ring on the harbour water. */
-  splash(at: THREE.Vector3, size: number) {
-    const c = new THREE.Vector3(at.x, WATER_Y + 0.05, at.z);
-    // A white column of spray: droplets shot upward with water-like gravity, plus foam puffs and rings.
-    const up = new THREE.Vector3(0, 1, 0);
-    for (let i = 0; i < 34 * size; i++) {
-      const p = c.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.8 * size, 0.1, (Math.random() - 0.5) * 0.8 * size));
-      if (this.fx.vfx) this.fx.vfx.spark(p, up, 0xe8f8ff, 6 + Math.random() * 7 * size, 0.35, 0.16 + Math.random() * 0.12);
-      else this.fx.sparksAt(p, 1, 0xe8f8ff, 5 * size, 0.16, 18);
-    }
-    this.fx.dust(c.clone().setY(c.y + 0.3), Math.round(10 * size), 0.9 * size, 1.2 * size);
-    this.fx.ring(c, 2.4 * size, 0xc8eaff, 0.7);
-    this.fx.ring(c, 1.2 * size, 0xffffff, 0.4);
-    this.fx.flash(c.clone().setY(c.y + 0.6), 0.5 * size, 0xc8eaff, 0.15);
-    sfx.land(); sfx.crack();
   }
 
   inBounds(p: THREE.Vector3) {

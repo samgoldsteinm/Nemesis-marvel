@@ -43,7 +43,8 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | `src/padcursor.ts` | Controller arrow cursor in menus |
 | `src/audio.ts` | Synth SFX + music (Web Audio, no files) |
 | `src/arena.ts`, `src/city.ts`, `src/citykit.ts`, `src/props.ts` | Arenas (rooftop, overpass), procedural city, MegaKit buildings, props |
-| `src/arenas2.ts` | Skyline Site, Harbor Pier 7, Neon Helipad builders + their dynamic pieces (`resetExtra`), water splash height `WATER_Y` |
+| `src/arenas2.ts` | Skyline Site builder + its dynamic pieces (`resetExtra`); small shared builders (`tex`, `std`, `glow`, `merged`, `boxG`, `cylG`, `neonSign`) |
+| `src/arenas3.ts` | The walled, no-ring-out arenas: Market Square, The Archive, Foundry Roof, Core Lab (`enclose`, `cover`, builders, `resetEnclosed`, per-arena `ambient` effects) |
 | `src/camera.ts` | Versus camera (`zoomMul`, `zLimit`, `cinematic`) |
 | `src/ai.ts` | CPU opponent |
 | `src/hud.ts`, `src/input.ts`, `src/portraits.ts`, `src/rig.ts` | HUD, input devices, select-screen portraits, procedural rig |
@@ -124,6 +125,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-28 | Camera zoom setting: 70–140 % in 10 % steps (− Closer / Wider +) in the pause menu and How to play → Controls, cycling pill on the title bar; `bl.zoom` in localStorage; `VersusCamera.userZoom` multiplies the fitted distance (with `zoomMul`), capped on zLimit arenas; presentation only (not in the sim, works online) |
 | 11-28 | Title-menu fighter panels are decoration only: removed the hover tint (it stuck on after a tap on phones and looked like a selection) |
 | 11-28 | Title band v3 (user feedback): back to flat dark-teal panels on a plain black background (no band texture, haze, streaks or red edges). Only the menu gap gets a backdrop: a hazy red skyline rendered from the rooftop arena (`public/previews/title-city.jpg`: red duotone + horizon haze + blur, fading to black under the menu text, slow drift); on portrait it sits behind the menu below the band. Kept: clip-path panels + redraw on rotate, 512×1024 busts with headroom, app icon/manifest |
+| 11-28 | Four walled arenas with no ring-outs (`arenas3.ts`): Market Square (night plaza, shop fronts, taxis/van, steam), The Archive (gothic hall, bookcases, chandeliers, fireplace, armchairs/armour/cabinets), Foundry Roof (walled factory roof, tanks, truss towers, gas canisters, sepia smog), Core Lab (reactor column, tesla coil, catwalk, consoles/canisters). `LAYOUTS[].enclosed` → `arena.enclosed`: perimeter solids + a clamp in `pushOut` / prop sim, arena screen shows "No ring-outs" (danger 0), CPU skips edge avoidance and recovery there. Removed Harbor Pier 7 and Neon Helipad (smallest open-edge maps) with their code, palettes, previews, music variants and tests; unknown arena ids (old links/messages) fall back to the rooftop via `layoutOr`. 7 arenas: Rooftop, Overpass, Skyline Site + the four walled ones |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -186,6 +188,10 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - Don't put collision on edge dressing (bollards etc.): it stops launched fighters at the edge and blocks ring-outs.
 - Watch-less dev servers (`hmr:false`, `watch.ignored`) serve stale modules after edits: restart them with `--force`.
 - `renderer.info` resets every frame; read draw calls from a manual `render()` with `autoReset=false` (`__game.renderInfo()`).
+
+- Walled arenas: perimeter = clingable `hut` solid up to the visible wall height + a non-clingable `mast` solid up to 80 m (so wall clings top out at the visible wall, and fliers/launches still can't leave), plus a hard clamp to BOUNDS in `pushOut` (catches tunnelling at launch speed, teleports and Displace) and in the prop sim. Don't rely on the solids alone.
+- Indoor roofs/ceilings must not cast shadows (`castShadow` false) or the sun's shadow map darkens the whole floor.
+- Never reuse an arena id after removing it without `layoutOr()`: old online peers/links can still send it.
 
 **Controllers**
 - Browsers report GameCube adapters with non-standard button numbers (mapping ''), so a GameCube R press may never reach "power"; that's why Rage "didn't work". Keep `RAW_GC` + the setup screen; analog triggers may be axes that rest at -1 (deflection measured from rest).
@@ -313,7 +319,7 @@ input history (240 ticks).
 - The intro is cosmetic; anything it does must not change sim state. Only `restart(seed)` starts the fight.
 - New sim state that matters must be covered by `checksum()` and survive `snapshot()` (reflection over fighter
   fields; props only if counts match; walls via damage).
-- `tests/checks.cjs` "Determinism" runs 5 arenas × 1200 CPU-vs-CPU ticks twice with different animation cadence
+- `tests/checks.cjs` "Determinism" runs every arena × 1200 CPU-vs-CPU ticks twice with different animation cadence
   and compares checksums — run it after any gameplay change.
 
 **Match start sequence (11-28).** Host FIGHT → `start` {cfg} → each side `phase='loading'`: builds the match

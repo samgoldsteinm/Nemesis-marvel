@@ -51,6 +51,12 @@ In single-player, P1 can also use the P2 keys. Menus accept a stick or arrows, A
 - **Modes:** Versus CPU (easy, normal or hard) and shared-screen Versus 2P. After a bout you can rematch, switch sides, return to character select or go to the main menu.
 - **Arena select** on the character screen.
 - **Route 9 Overpass:** a narrow elevated roadway at night. It has three stalled cars that are heavy and explode when thrown, concrete barrier blocks (medium), barrels and crates, and 26 breakable noise-barrier panels along exposed sides above a river. Wreck pile-ups close off both ends, and the light poles and sign gantry serve as swing anchors.
+- **Skyline Site:** an unfinished tower floor at sunset. Orange safety mesh at the edges breaks into ring-outs; steel beams, lumber and cement bags to throw; a tower crane, hoist cage and beams to swing from.
+- **Walled arenas (no ring-outs â€” K.O. and finishers only):**
+  - **Market Square:** a night plaza boxed in by shop fronts and a theatre marquee. Two taxis (heavy, explode when thrown) and a van (heavy), benches, hydrants, bins and crates; a newsstand for cover; street lamps and fire escapes to swing from; green steam from the grates.
+  - **The Archive:** a gothic reading hall with two storeys of bookcases, four columns for cover, chandeliers to swing from and a fireplace. Armchairs, suits of armour and display cabinets to throw.
+  - **Foundry Roof:** a factory roof walled in by parapets and a lit factory wall, in sepia smog. Three big tanks for cover, lighting truss towers to swing from, gas canisters that explode, a fuel tank, A/C units and crates.
+  - **Core Lab:** a sealed reactor chamber: glowing floor emblem, a red-lit reactor column and a crackling tesla coil for cover, an overhead catwalk to swing from, consoles and volatile canisters.
 - **Arena: Clarion Rooftop.** The roof is enclosed by 28 breakable fence segments. It has seven sign letters that can be knocked loose into throwable debris, three A/C units (medium), an explosive fuel tank (heavy), crates and panels (light), an access hut that serves as cover and a cling wall, corner masts that act as swing anchors, and a visible city drop. Broken fence opens ring-outs. Broken props leave rubble. A rematch restores the pristine arena.
 - **Fighters** (each has a move sheet on the *Controls & Move Sheets* screen):
   - **BASALT**: heavy lift class, ground recovery. Sprint, shoulder charge, a planted heavy throw, Thunderclap (a shockwave cone) and Ground Pound. He is the only fighter who can lift the A/C units and the fuel tank.
@@ -162,7 +168,7 @@ Also checked by hand in headless Chromium: the full keyboard menu flow (title â†
 
 1. Measure frame times on a real PC and phone (`?perf`), then tune bloom, `fx.quality` and the shadow map size. `?nobloom` turns off bloom, and `?nopost` turns off the whole post stack.
 2. Human playtest of Basalt vs Tether: compare a fight before and after the fence breaks, then tune `TUNING`, knockback and the Danger thresholds.
-3. More arenas, each needing a distinct layout (the overpass is done): a street with liftable vehicles, a mansion interior with breakable columns, a two-level power plant with a cycling core, a station with columns and barriers, and a headquarters with force walls, mines and a healing chamber.
+3. More arena ideas: breakable columns in the Archive, a cycling reactor core in the Lab, a station with barriers, and a headquarters with force walls and a healing chamber.
 4. More original fighters for each recovery family (more swing, flight and teleport fighters, plus a magnetic object-controller).
 5. Story mode: reusable objectives (clear an area, destroy targets, defend objects, defeat a named opponent), a catch-and-return barrier mission, a two-dish defense mission, and an underdog duel. Add unlocks saved across reloads.
 6. A follow camera with player control for Story mode.

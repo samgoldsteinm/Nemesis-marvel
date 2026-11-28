@@ -477,38 +477,63 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     return { pass: held && Math.abs(dy) < 0.05 && b.stamina < st0, info: `held=${held} dy=${dy} stamina ${st0.toFixed(0)}->${b.stamina.toFixed(0)}` };
   });
 
-  await check('New arenas load with valid spawns, props and breakable edges', () => {
+  await check('Skyline Site loads; a heavy launch through its broken mesh edge is a ring-out', () => {
+    const m = T.setup('basalt', 'tether', 'construction');
+    const A = T.G.arena;
+    const [a, b] = m.fighters;
+    const spawnsOk = m.fighters.every((f) => A.inside(f.pos.x, f.pos.z) && f.onGround);
+    for (const w of A.walls) if (w.outward.z > 0.5) w.damage(999, T.G.fx);
+    T.place(a, 0, 0, 0); T.place(b, 0, 1.6, Math.PI);
+    b.receiveHit(a, { fwd: 0, up: 0, radius: 0, stamina: 1, health: 1, kbF: 30, kbU: 6, stun: 40, launch: true, heavy: true }, new (b.pos.constructor)(0, 0, 1), { unblockable: true, source: 'throw' });
+    let n = 0; while (!m.ended && n < 400) { T.idle(5); n += 5; }
+    return { pass: spawnsOk && A.props.length >= 5 && m.ended && m.ended.how === 'ringout', info: `spawns=${spawnsOk} props=${A.props.length} end=${m.ended && m.ended.how}@${n}` };
+  });
+
+  await check('Walled arenas load: valid spawns, >=5 props, anchors, enclosed flag', () => {
     const out = [];
-    for (const ar of ['construction', 'docks', 'helipad']) {
+    for (const ar of ['market', 'archive', 'foundry', 'lab']) {
       const m = T.setup('basalt', 'tether', ar);
       const A = T.G.arena;
       const spawnsOk = m.fighters.every((f) => A.inside(f.pos.x, f.pos.z) && f.onGround && Math.abs(f.pos.y) < 0.05);
       const propsInside = A.props.filter((p) => A.inside(p.pos.x, p.pos.z)).length;
-      out.push(`${ar}:spawns=${spawnsOk} props=${propsInside}/${A.props.length} walls=${A.walls.length} anchors=${A.anchors.length}`);
-      if (!spawnsOk || propsInside < 5 || A.walls.length < 3 || A.anchors.length < 3) return { pass: false, info: out.join(' ; ') };
+      out.push(`${ar}:spawns=${spawnsOk} props=${propsInside}/${A.props.length} anchors=${A.anchors.length} enclosed=${A.enclosed}`);
+      if (!spawnsOk || propsInside < 5 || A.anchors.length < 3 || !A.enclosed || A.walls.length) return { pass: false, info: out.join(' ; ') };
     }
     return { pass: true, info: out.join(' ; ') };
   });
 
-  await check('New arenas: a heavy launch through a broken/open edge is a ring-out', () => {
+  await check('Walled arenas: no ring-out — hard launches at every wall and Displace keep fighters inside', () => {
     const out = [];
-    for (const ar of ['construction', 'docks', 'helipad']) {
-      const m = T.setup('basalt', 'tether', ar);
+    for (const ar of ['market', 'archive', 'foundry', 'lab']) {
+      const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, -0.7]];
+      let worst = 0, ended = null;
+      for (const [dx, dz] of dirs) {
+        const m = T.setup('basalt', 'tether', ar);
+        const A = T.G.arena;
+        const [a, b] = m.fighters;
+        T.place(a, -dx * 2, -dz * 2, 0); T.place(b, dx * 3, dz * 3, 0);
+        b.receiveHit(a, { fwd: 0, up: 0, radius: 0, stamina: 1, health: 1, kbF: 60, kbU: 14, stun: 40, launch: true, heavy: true }, new (b.pos.constructor)(dx, 0, dz).normalize(), { unblockable: true, source: 'throw' });
+        for (let i = 0; i < 180; i++) { T.idle(1); if (!A.inside(b.pos.x, b.pos.z) || b.pos.y < -0.5) worst++; }
+        if (m.ended) ended = m.ended.how;
+      }
+      // Shunt's Displace toward each wall.
+      const m = T.setup('shunt', 'basalt', ar);
       const A = T.G.arena;
-      const [a, b] = m.fighters;
-      // Break the nearest edge segment in +z (helipad: launch toward the open south edge).
-      for (const w of A.walls) if (w.outward.z > 0.5) w.damage(999, T.G.fx);
-      T.place(a, 0, 0, 0); T.place(b, 0, 1.6, Math.PI);
-      b.receiveHit(a, { fwd: 0, up: 0, radius: 0, stamina: 1, health: 1, kbF: 30, kbU: 6, stun: 40, launch: true, heavy: true }, new (b.pos.constructor)(0, 0, 1), { unblockable: true, source: 'throw' });
-      let n = 0; while (!m.ended && n < 400) { T.idle(5); n += 5; }
-      out.push(`${ar}:${m.ended ? m.ended.how : 'none'}@${n}`);
+      const [s, v] = m.fighters;
+      T.faceEachOther(m, s.def.radius + v.def.radius + 0.6);
+      s.energy = 100;
+      T.hold(0, ['power', 'grab'], 1, [0, 1]);
+      for (let i = 0; i < 160; i++) { T.idle(1); if (!A.inside(v.pos.x, v.pos.z) || v.pos.y < -0.5) worst++; }
+      if (m.ended) ended = m.ended.how;
+      out.push(`${ar}:outsideTicks=${worst} end=${ended}`);
+      if (worst || ended === 'ringout') return { pass: false, info: out.join(' ; ') };
     }
-    return { pass: out.every((o) => o.includes(':ringout@')), info: out.join(' ; ') };
+    return { pass: true, info: out.join(' ; ') };
   });
 
-  await check('New arenas: CPU vs CPU bouts resolve', () => {
+  await check('Walled arenas: CPU vs CPU bouts resolve by K.O. or finisher', () => {
     const outcomes = [];
-    for (const [p, q, ar] of [['vanta', 'basalt', 'construction'], ['rift', 'magna', 'docks'], ['tether', 'ember', 'helipad']]) {
+    for (const [p, q, ar] of [['vanta', 'basalt', 'market'], ['rift', 'magna', 'archive'], ['tether', 'ember', 'foundry'], ['aerin', 'shunt', 'lab']]) {
       const m = T.setup(p, q, ar);
       T.G.forced[0] = null; T.G.forced[1] = null;
       T.G.enableCPUs('hard');
@@ -517,7 +542,7 @@ const URL = process.argv[2] || 'http://localhost:5173/';
       outcomes.push(m.ended ? `${p}v${q}@${ar}:${m.ended.how}:${m.ended.winner.def.id}@${(n / 60).toFixed(0)}s` : `${p}v${q}@${ar}:timeout`);
       T.G.disableCPU();
     }
-    return { pass: outcomes.every((o) => !o.includes('timeout')), info: outcomes.join(' ; ') };
+    return { pass: outcomes.every((o) => !o.includes('timeout') && !o.includes('ringout')), info: outcomes.join(' ; ') };
   });
 
   await check('Determinism: same seed + inputs give identical state on every arena, independent of animation rate', async () => {
@@ -535,7 +560,7 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     };
     const out = [];
     let ok = true;
-    for (const [p1, p2, arena] of [['basalt', 'tether', 'rooftop'], ['ember', 'rift', 'overpass'], ['magna', 'vanta', 'construction'], ['aerin', 'shunt', 'docks'], ['rift', 'ember', 'helipad']]) {
+    for (const [p1, p2, arena] of [['basalt', 'tether', 'rooftop'], ['ember', 'rift', 'overpass'], ['magna', 'vanta', 'construction'], ['aerin', 'shunt', 'market'], ['rift', 'ember', 'archive'], ['tether', 'basalt', 'foundry'], ['vanta', 'magna', 'lab']]) {
       const a = run(p1, p2, arena, 4242, 1), b = run(p1, p2, arena, 4242, 6);
       const d = a.findIndex((h, i) => h !== b[i]);
       if (d >= 0) ok = false;

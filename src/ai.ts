@@ -102,7 +102,8 @@ export class CPU {
     d.normalize();
     // Edge avoidance: never steer into an open drop unless already airborne over the roof.
     const ahead = this.f.pos.clone().addScaledVector(d, 2.2);
-    if (!this.match.arena.inside(ahead.x * 1.02, ahead.z * 1.02)) {
+    // (Walled arenas have no drop: walking into a wall is fine, and cornering an opponent must work.)
+    if (!this.match.arena.enclosed && !this.match.arena.inside(ahead.x * 1.02, ahead.z * 1.02)) {
       const toC = new THREE.Vector3(-this.f.pos.x, 0, -this.f.pos.z).normalize();
       d.lerp(toC, 0.8).normalize();
     }
@@ -119,7 +120,7 @@ export class CPU {
     const f = this.f;
     const o = f.opp;
     // Recovery from a dangerous launch: L+R.
-    if (f.state === 'launched' && f.t > 8 && f.hasEnergy(TUNING.recoveryCost)) {
+    if (f.state === 'launched' && f.t > 8 && !this.match.arena.enclosed && f.hasEnergy(TUNING.recoveryCost)) {
       const future = f.pos.clone().addScaledVector(f.vel, 0.5);
       const offRoof = !this.match.arena.inside(future.x, future.z) || !this.match.arena.inside(f.pos.x, f.pos.z);
       if (offRoof && srand() < 1 - this.p.err) {

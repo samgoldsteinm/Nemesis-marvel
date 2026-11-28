@@ -110,8 +110,10 @@
   .arena-sw.rooftop { background: linear-gradient(180deg, #6a4a70, #ffc890); }
   .arena-sw.overpass { background: linear-gradient(180deg, #8fb4bc, #3a4a4c); }
   .arena-sw.construction { background: linear-gradient(180deg, #6a3a52, #ffc070); }
-  .arena-sw.docks { background: linear-gradient(180deg, #1c3a46, #ffb468); }
-  .arena-sw.helipad { background: linear-gradient(180deg, #4a1a5a, #ff4fd8); }
+  .arena-sw.market { background: linear-gradient(180deg, #0c1e1c, #3ac08a); }
+  .arena-sw.archive { background: linear-gradient(180deg, #0e1424, #9ab8ff); }
+  .arena-sw.foundry { background: linear-gradient(180deg, #8a7050, #d8b880); }
+  .arena-sw.lab { background: linear-gradient(180deg, #0e0a18, #3affd8); }
   .seg .segbtn { white-space: nowrap; }
   @media (max-width: 1180px) and (min-height: 561px) { .options { flex-wrap: wrap; } .fight { margin-left: auto; } }
   .arena-pick { align-items: stretch; }
@@ -777,6 +779,7 @@
   .mh-danger { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font: 500 12px var(--cond); letter-spacing: .14em; text-transform: uppercase; color: #cfc6d2; }
   .mh-danger i { display: inline-flex; gap: 3px; } .mh-danger b { width: 16px; height: 9px; transform: skewX(-20deg); background: rgba(255,255,255,0.15); }
   .mh-danger b.on { background: var(--hot); box-shadow: 0 0 8px var(--hot); }
+  .mh-danger .noro { padding: 3px 8px; background: #1d6a52; color: #d8fff0; box-shadow: 0 0 10px rgba(58,255,180,0.35); transform: skewX(-10deg); }
   .mh-danger em { font-style: normal; letter-spacing: .04em; text-transform: none; color: #a99fb0; font-family: system-ui, sans-serif; }
   .mh-arr { position: absolute; top: 50%; transform: translateY(-50%) skewX(-10deg); width: 44px; height: 64px; border: 0; background: rgba(0,0,0,0.55); font-size: 20px; color: #fff; }
   .mh-arr:hover, .mh-arr.padhover { background: var(--hot); }
@@ -785,15 +788,16 @@
   .mh-vs i { font: 400 18px var(--display); font-style: normal; color: #fff; text-shadow: 2px 2px 0 #000; }
   .mv { width: 46px; height: 46px; overflow: hidden; border: 2px solid var(--c); background: #0a2436; transform: skewX(-8deg); display: grid; place-items: center; }
   .mv img { width: 120%; height: 120%; object-fit: cover; transform: skewX(8deg); }
-  .map-strip { display: grid; grid-template-rows: repeat(5, minmax(0, 1fr)); gap: 6px; min-height: 0; }
+  .map-strip { display: grid; grid-template-rows: repeat(7, minmax(0, 1fr)); gap: 5px; min-height: 0; }
   .mt { position: relative; overflow: hidden; padding: 0; border: 0; background: #0a0c12; transform: skewX(-6deg); min-height: 0; outline-offset: -3px; opacity: .72; transition: opacity .15s; }
   .mt.on { opacity: 1; box-shadow: inset 0 0 0 3px var(--hot); }
   .mt:hover:not(:disabled), .mt.focus { opacity: 1; }
   .mt:disabled { cursor: default; }
   .mti { position: absolute; inset: 0 -8%; transform: skewX(6deg); }
   .mti.rooftop { background: linear-gradient(180deg, #6a4a70, #ffc890); } .mti.overpass { background: linear-gradient(180deg, #8fb4bc, #3a4a4c); }
-  .mti.construction { background: linear-gradient(180deg, #6a3a52, #ffc070); } .mti.docks { background: linear-gradient(180deg, #1c3a46, #ffb468); }
-  .mti.helipad { background: linear-gradient(180deg, #4a1a5a, #ff4fd8); }
+  .mti.construction { background: linear-gradient(180deg, #6a3a52, #ffc070); } .mti.market { background: linear-gradient(180deg, #0c1e1c, #3ac08a); }
+  .mti.archive { background: linear-gradient(180deg, #0e1424, #9ab8ff); } .mti.foundry { background: linear-gradient(180deg, #8a7050, #d8b880); }
+  .mti.lab { background: linear-gradient(180deg, #0e0a18, #3affd8); }
   .mt-img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .mtn { position: absolute; left: 0; right: 0; bottom: 0; padding: 14px 10px 4px; text-align: left; transform: skewX(6deg); background: linear-gradient(0deg, rgba(0,0,0,0.85), transparent); font: 600 clamp(11px, 1.2vw, 15px) var(--cond); letter-spacing: .1em; text-transform: uppercase; color: #fff; }
   .mtn small { color: var(--hot); margin-right: 6px; font-size: .85em; }
@@ -808,7 +812,7 @@
     .mh-info { left: var(--s3); bottom: var(--s2); max-width: 62%; }
     .mh-name { font-size: min(34px, 9vh); margin-bottom: 4px; }
     .mh-blurb { font-size: 11.5px; margin-bottom: 4px; line-height: 1.3; }
-    .mh-danger em { display: none; }
+    .mh-danger:not(.safe) em { display: none; }
     .mh-arr { width: 32px; height: 46px; font-size: 15px; top: 34%; }
     .tpn { display: none; }
     .mh-vs { top: var(--s1); } .mv { width: 34px; height: 34px; }
@@ -819,7 +823,7 @@
   @media (orientation: portrait) and (max-width: 820px) {
     .map-screen { height: 100%; padding: var(--s1); }
     .map-main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
-    .map-strip { grid-template-rows: none; grid-template-columns: repeat(5, minmax(0, 1fr)); height: 74px; }
+    .map-strip { grid-template-rows: none; grid-template-columns: repeat(7, minmax(0, 1fr)); height: 64px; }
     .mtn { font-size: 9.5px; padding: 8px 4px 2px; letter-spacing: .04em; } .mtn small { display: none; }
     .mh-info { max-width: none; right: var(--s3); left: var(--s3); }
     .map-hero { clip-path: none; }

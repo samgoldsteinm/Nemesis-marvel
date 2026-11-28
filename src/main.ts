@@ -6,7 +6,7 @@ import { updatePadCursor, hidePadCursor } from './padcursor';
 import { VFX } from './vfx';
 import { TRAITS } from './traits';
 import * as THREE from 'three';
-import { Arena, LAYOUTS, LayoutId } from './arena';
+import { Arena, LAYOUTS, LayoutId, layoutOr } from './arena';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -122,17 +122,29 @@ const PALETTES: Record<LayoutId, Palette> = {
     hemi: [0xd8b0a0, 0x3a2a2a, 0.8], sun: [0xffb070, 2.6], sunPos: [-18, 14, 22], rim: [0x7a90ff, 1.0], shadow: [24, 18],
     grade: { sat: 0.85, lift: [0.04, 0.03, 0.035], shadowTint: [0.9, 0.9, 1.1], highTint: [1.05, 0.95, 0.84], gamma: 0.97 }, bloom: [0.4, 0.45, 0.82],
   },
-  // Night pier: cold teal fog, sodium-orange key light from the lamps, black water.
-  docks: {
-    sky: [[0, '#03070c'], [0.5, '#0a1a26'], [0.8, '#1c3a46'], [1, '#0a1218']], fog: 0x1a323c, fogNear: 30, fogFar: 170,
-    hemi: [0x7aa0c0, 0x182430, 1.05], sun: [0xffb468, 2.2], sunPos: [8, 30, 10], rim: [0x5ad0ff, 1.3], shadow: [30, 14],
-    grade: { sat: 0.85, lift: [0.035, 0.05, 0.07], shadowTint: [0.8, 0.95, 1.2], highTint: [1.08, 0.98, 0.86], gamma: 0.97 }, bloom: [0.5, 0.5, 0.78],
+  // Night market street: green-teal sodium/mercury light, wet asphalt, steam.
+  market: {
+    sky: [[0, '#040a0a'], [0.5, '#0c1e1c'], [0.82, '#1c3a34'], [1, '#081210']], fog: 0x1a302c, fogNear: 30, fogFar: 120,
+    hemi: [0x7ab8a8, 0x101a18, 1.0], sun: [0xc8ffe8, 1.9], sunPos: [-10, 30, 14], rim: [0x5affc8, 1.2], shadow: [22, 16],
+    grade: { sat: 0.82, lift: [0.02, 0.045, 0.04], shadowTint: [0.82, 1.08, 1.05], highTint: [0.98, 1.04, 0.94], gamma: 0.96 }, bloom: [0.5, 0.5, 0.78],
   },
-  // Neon district at night: cool moonlight key, magenta rim, violet haze.
-  helipad: {
-    sky: [[0, '#06030e'], [0.5, '#1a0a30'], [0.78, '#4a1a5a'], [0.9, '#8a2a7a'], [1, '#1a0a20']], fog: 0x2a1438, fogNear: 40, fogFar: 200,
-    hemi: [0x8a6ad8, 0x1a0a20, 0.85], sun: [0xb8d8ff, 1.8], sunPos: [12, 30, -10], rim: [0xff4fd8, 1.4], shadow: [14, 14],
-    grade: { sat: 0.95, lift: [0.04, 0.02, 0.06], shadowTint: [0.95, 0.85, 1.2], highTint: [1.0, 0.92, 1.05], gamma: 0.96 }, bloom: [0.55, 0.5, 0.75],
+  // Gothic hall: cold blue skylight key, warm firelight, deep shadows.
+  archive: {
+    sky: [[0, '#06080e'], [0.5, '#0e1424'], [1, '#080a12']], fog: 0x141a2a, fogNear: 25, fogFar: 90,
+    hemi: [0x8aa0d8, 0x1a1418, 0.95], sun: [0xb8ccff, 2.0], sunPos: [6, 34, 8], rim: [0x9ab8ff, 1.1], shadow: [20, 14],
+    grade: { sat: 0.78, lift: [0.025, 0.03, 0.05], shadowTint: [0.86, 0.92, 1.18], highTint: [1.06, 0.98, 0.9], gamma: 0.96 }, bloom: [0.48, 0.5, 0.8],
+  },
+  // Factory roof in smog: sepia haze, low warm sun.
+  foundry: {
+    sky: [[0, '#4a3a2a'], [0.45, '#8a7050'], [0.75, '#d8b880'], [1, '#6a5038']], fog: 0x9a8060, fogNear: 28, fogFar: 140,
+    hemi: [0xe0c8a0, 0x3a2c20, 0.9], sun: [0xffd8a0, 2.4], sunPos: [-20, 22, 14], rim: [0xffe0b0, 0.9], shadow: [22, 16],
+    grade: { sat: 0.62, lift: [0.05, 0.04, 0.025], shadowTint: [1.05, 0.95, 0.82], highTint: [1.08, 0.98, 0.84], gamma: 0.97 }, bloom: [0.42, 0.5, 0.82],
+  },
+  // Reactor chamber: dark purple and teal with red accents.
+  lab: {
+    sky: [[0, '#06040c'], [1, '#0e0a18']], fog: 0x140e22, fogNear: 25, fogFar: 80,
+    hemi: [0x8a7ac8, 0x0c0a14, 0.95], sun: [0xc8d0ff, 1.7], sunPos: [4, 30, 10], rim: [0x3affd8, 1.3], shadow: [18, 14],
+    grade: { sat: 0.92, lift: [0.035, 0.025, 0.06], shadowTint: [0.92, 0.86, 1.2], highTint: [1.0, 0.96, 1.04], gamma: 0.96 }, bloom: [0.55, 0.5, 0.76],
   },
 };
 // Sky reflections: an environment map rendered from the palette's sky and sun, so car paint,
@@ -204,8 +216,10 @@ const PREVIEW_SHOT: Record<LayoutId, { pos: [number, number, number]; look: [num
   rooftop: { pos: [17, 15, 30], look: [0, 0, 0], fov: 46 },
   overpass: { pos: [15, 19, 17], look: [-1, 0, 0], fov: 50 },
   construction: { pos: [17, 14, 27], look: [0, 1, 0], fov: 46 },
-  docks: { pos: [15, 15, 18], look: [0, 0, 0], fov: 50 },
-  helipad: { pos: [13, 11, 21], look: [0, 0, 0], fov: 46 },
+  market: { pos: [12, 7, 10], look: [-2, 1.5, -3], fov: 58 },
+  archive: { pos: [12, 8, 9], look: [-2, 2.5, -3], fov: 58 },
+  foundry: { pos: [12, 8, 10], look: [-2, 1.5, -3], fov: 58 },
+  lab: { pos: [11, 7, 9], look: [-2, 2, -3], fov: 58 },
 };
 function queueArenaPreviews() {
   if (previewQueue.length) return;
@@ -458,7 +472,7 @@ const online = new Online({
   rerender: () => onlineRefresh(),
   toast: (m) => toast(m),
   startMatch: (cfg: MatchCfg) => {
-    setup.mode = 'online'; setup.p1 = cfg.p1; setup.p2 = cfg.p2; setup.arena = cfg.arena as LayoutId; setup.lives = cfg.lives;
+    setup.mode = 'online'; setup.p1 = cfg.p1; setup.p2 = cfg.p2; setup.arena = layoutOr(cfg.arena); setup.lives = cfg.lives;
     goLandscape();
     startMatch(false, cfg.seed);
     sceneWarm = false; // the frame loop stops drawing the scene until its shaders are compiled
@@ -506,7 +520,7 @@ function syncOnlineSelect() {
   if (online.side === 0) { setup.p1 = mine.pick; setup.p2 = theirs.pick; } else { setup.p1 = theirs.pick; setup.p2 = mine.pick; }
   locked[online.side] = mine.locked; locked[1 - online.side] = theirs.locked;
   selectSide = online.side;
-  setup.arena = s.arena as LayoutId; setup.lives = s.lives;
+  setup.arena = layoutOr(s.arena); setup.lives = s.lives;
 }
 /** Lobby state changed: both locked in → everyone moves on to the arena screen; an unlock sends both back. */
 function onlineRefresh() {
@@ -887,7 +901,8 @@ function renderSelect() {
 /** How likely a ring-out is (1–5), shown on the arena screen. */
 const DANGER: Record<LayoutId, [number, string]> = {
   rooftop: [2, 'Fence holds — until it breaks'], overpass: [4, 'Open sides, weak barriers'], construction: [3, 'Mesh edges, swinging crane'],
-  docks: [3, 'Railings over black water'], helipad: [5, 'Almost no rim at all'],
+  market: [0, 'No ring-outs: shop fronts all round'], archive: [0, 'No ring-outs: walled hall'],
+  foundry: [0, 'No ring-outs: walled roof'], lab: [0, 'No ring-outs: sealed chamber'],
 };
 function arenaImg(id: LayoutId, cls: string) {
   const u = arenaPreviews.get(id);
@@ -920,7 +935,7 @@ function renderMap() {
             <div class="mh-num">ARENA ${i + 1} / ${LAYOUTS.length}</div>
             <div class="mh-name">${cur.name}</div>
             <p class="mh-blurb">${cur.blurb}</p>
-            <div class="mh-danger"><span>Ring-out danger</span><i>${[1, 2, 3, 4, 5].map((k) => `<b class="${k <= danger ? 'on' : ''}"></b>`).join('')}</i><em>${dangerNote}</em></div>
+            ${danger ? `<div class="mh-danger"><span>Ring-out danger</span><i>${[1, 2, 3, 4, 5].map((k) => `<b class="${k <= danger ? 'on' : ''}"></b>`).join('')}</i><em>${dangerNote}</em></div>` : `<div class="mh-danger safe"><span class="noro">No ring-outs</span><em>${dangerNote.replace('No ring-outs: ', '')} · K.O. and finishers only</em></div>`}
           </div>
         </div>
         <div class="map-strip">${LAYOUTS.map((l, k) => `
@@ -1096,7 +1111,7 @@ function act(a: string, arg?: string) {
       if (screen === 'select') { showScreen('map'); break; }
       goLandscape(); startMatch(); break;
     case 'mapback': showScreen('select'); setFocus(focusables().findIndex((e) => e.dataset.act === 'fight')); break; // fighters stay locked
-    case 'arena': setup.arena = arg as LayoutId; rerender(); break;
+    case 'arena': setup.arena = layoutOr(arg); rerender(); break;
     case 'arenaStep': {
       const i = LAYOUTS.findIndex((l) => l.id === setup.arena);
       setup.arena = LAYOUTS[(i + Number(arg) + LAYOUTS.length) % LAYOUTS.length].id;
@@ -1433,7 +1448,7 @@ const hooks = {
   forced,
   online,
   cpus: () => cpus,
-  start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal', arenaId: LayoutId = 'rooftop') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; setup.arena = arenaId; startMatch(false); },
+  start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal', arenaId: LayoutId = 'rooftop') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; setup.arena = layoutOr(arenaId); startMatch(false); },
   setLives(n: number) { setup.lives = n; },
   startWithIntro(p1: string, p2: string) { setup.p1 = p1; setup.p2 = p2; setup.mode = 'cpu'; startMatch(true); },
   rematch,

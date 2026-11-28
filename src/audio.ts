@@ -469,7 +469,7 @@ class Track {
 
   private fightStep(t: number, s: number) {
     const st = s % 16, bar = Math.floor(s / 16), sect = Math.floor(bar / 4) % 4; // A A B A, 4 bars each
-    const over = this.variant === 'overpass' || this.variant === 'helipad';
+    const over = this.variant === 'overpass' || this.variant === 'lab';
     // Riff in D phrygian (degrees; -1 = rest). Section B moves up to Bb/C for lift.
     const A = over ? [0, -1, 0, 0, 1, -1, 0, -1, 0, 0, 3, -1, 1, -1, 0, 6 - 7] : [0, -1, 0, 1, -1, 0, -1, 0, 0, -1, 3, -1, 2, 1, -1, 0];
     const B = over ? [5 - 7, -1, 5 - 7, 5 - 7, 6 - 7, -1, 5 - 7, -1, 3, -1, 3, 1, -1, 1, 0, -1] : [5 - 7, -1, 5 - 7, 6 - 7, -1, 5 - 7, 6 - 7, -1, 3, -1, 3, 4, -1, 3, 1, -1];
@@ -502,8 +502,8 @@ function pump() {
   cur.schedule(ctx.currentTime + 0.18);
 }
 
-/** Fight tempo per arena: the overpass and helipad drive harder, the docks drag. */
-const TEMPO: Record<string, number> = { rooftop: 128, overpass: 136, construction: 132, docks: 120, helipad: 140 };
+/** Fight tempo per arena: the overpass and lab drive harder, the archive and market drag. */
+const TEMPO: Record<string, number> = { rooftop: 128, overpass: 136, construction: 132, market: 122, archive: 116, foundry: 130, lab: 140 };
 
 /** Start (or crossfade to) a music track: 'menu' or 'fight' (variant: arena id for flavour). */
 export function startMusic(kind: Kind = 'fight', variant = '') {
