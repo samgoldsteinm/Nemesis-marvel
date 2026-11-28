@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CamCollider } from './camcollide';
 import { srand } from './rng';
 import type { LiftClass } from './characters';
 import { addOutline } from './rig';
@@ -294,6 +295,8 @@ export class Arena {
   setLayout(id: LayoutId) {
     id = layoutOr(id);
     this.layout = id;
+    this.camColl = null;
+    this.camJob = null;
     this.enclosed = !!LAYOUTS.find((l) => l.id === id)!.enclosed;
     this.ambient = null;
     this.name = LAYOUTS.find((l) => l.id === id)!.name;
@@ -326,6 +329,33 @@ export class Arena {
       buildLab(this);
     }
     this.reset();
+  }
+
+  private camColl: CamCollider | null = null;
+  private camJob: Generator<void, CamCollider, void> | null = null;
+  /**
+   * Camera collision grid for the current layout (static opaque geometry, fadeables excluded): covers the deck plus
+   * 40 m around it, where the camera can go. Cached until the next setLayout. `camCollider()` finishes it now;
+   * `camColliderStep(ms)` advances a time-sliced build and returns the grid once it's done (null until then).
+   */
+  camCollider() {
+    while (!this.camColl) this.camColliderStep(1e9);
+    return this.camColl!;
+  }
+  camColliderStep(budgetMs: number): CamCollider | null {
+    if (this.camColl) return this.camColl;
+    if (!this.camJob) {
+      const ex = new Set<THREE.Object3D>();
+      for (const f of this.fadeables) f.traverse((o) => ex.add(o));
+      const R = 40, hw = SHAPE.circle || BOUNDS.hw, hd = SHAPE.circle || BOUNDS.hd;
+      this.camJob = CamCollider.job(this.static, ex, { x0: -hw - R, x1: hw + R, y0: -30, y1: 45, z0: -hd - R, z1: hd + R });
+    }
+    const end = performance.now() + budgetMs;
+    for (;;) {
+      const r = this.camJob.next();
+      if (r.done) { this.camColl = r.value; this.camJob = null; return this.camColl; }
+      if (performance.now() > end) return null;
+    }
   }
 
   private city: CityBuilder | null = null;

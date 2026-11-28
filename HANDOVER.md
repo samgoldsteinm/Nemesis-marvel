@@ -134,6 +134,7 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 | 11-28 | Friends list (`src/friends.ts`, Friends screen from the title menu and the online screen): permanent 8-char friend code per device (`bl.fid`, shown as XXXX-XXXX, plus a `?friend=CODE` invite link), list saved per device (`bl.friends`, max 50). Presence on the online relay (`net.ts openBus`): own topic `breakline/v1/p/<CODE>`, heartbeat every 20 s + on status change (menu / room / match), offline after 50 s of silence or an explicit 'off' on pagehide/hidden; start-up query so online friends answer at once. Adding someone sends them an "added you · Add back" banner (`#frnote`); Invite hosts a room and sends its code → friend gets "invited you to fight · Join". Only listed friends can invite. Off under webdriver unless `?net=local`; tests use `?fid=` per tab |
 | 11-28 | Balance: Aerin's Flight Dash and Magna's Magnet Ram cost 12 energy, hit stun 28→20 (kb 12→13), and every mobility attack (LB+X) has a 50-tick cooldown via `Fighter.mobilityAttack()` (was free and chainable from the air: infinite flight + stun-lock). Ground recovery (Basalt, Vanta, Ember) improved: brakes to 25 % (was 45 %), +6 m/s back toward the arena centre, hop 9 (was 5): saves a short launch, still not a long one. New checks for both |
 | 11-28 | Rage: the R tap works while walking/running (the neutral-stick requirement is gone) and also from guard/lift. Grabs easier: reach radii+0.9→+1.25, works unless the target is behind you (facing > −0.15, was 0.3), whiffed grab 20→14 ticks, and a grab pressed up to 6 ticks before a light (non-launch) punch lands catches the puncher instead (`TUNING.grabBeatsWindow`, "CAUGHT!"). |
+| 11-28 | Camera collision (user: "the camera goes out of the map / inside a building"): `src/camcollide.ts` voxelises each arena's static opaque geometry (deck, huts, girders, walls, every surrounding building) into a 1 m occupancy grid once per layout (`Arena.camCollider()` / time-sliced `camColliderStep(ms)` from the frame loop; the online loading phase waits for it). `VersusCamera.collide`: a pose is clear when the focus and each fighter's head see it and there's room around the lens; if the fitted pose isn't, ease to the cheapest clear detour from a generated grid (`AVOID`: yaw swing × height × distance scale — closer/higher or closer/lower for halls); if the result still isn't clear, slide toward a pivot 2.5 m above the action and stop at the first clear point (snap in, ease out). Fighters falling off the map are framed at the edge at shoulder height (`onDeck`); the lens never goes below y = 1 or 2 m for detours; Overpass camera stays under the roof (`maxY`); walled arenas keep it inside the room (`room`); cinematics use it too; controls follow the actual view direction. `tests/camsweep.js` (`camSweep` posed sweep, `camBout` seeded CPU bouts, ground truth = ray casts against the real meshes; fighters pressed into scenery and poses where no camera position could see everyone are reported separately) + a check in checks.cjs |
 
 ## 5. Problems we hit and how they were fixed (don't repeat these)
 
@@ -218,6 +219,34 @@ RT/RB power modifier. Internally the actions are still named attack/jump/grab/gu
 - Inline SVG data URLs used inside a double-quoted `style="..."` attribute must use single quotes in `url('...')`, or the attribute ends early and the backdrop silently vanishes.
 - Portrait variants (`portraits.ts`): pose, comic (posterised), face (duotone), profile (duotone) — all rendered once at load; faces need the camera ~1.9× head scale away or they crop to the forehead.
 - The Press Start screen is `screen = 'start'`; test hooks (`__game.start`) bypass it.
+
+**Camera**
+- "Camera goes inside a building / can't see the map" (11-28): the camera only fitted its distance to the fighters
+  (up to 28 m × zoom) and knew nothing about geometry, so near deck edges, with a launched fighter, or following one
+  falling off the map it backed into the surrounding buildings (inside them you see their interior rooms), behind
+  parapets/girders or into container stacks. Measured with `tests/camsweep.js` on the 5 arenas of the time × 3
+  zooms: 60 failing poses (inside / fighter hidden / near plane grazing) and 86 failing checks in real CPU bouts →
+  0 and 0 after the fix. On the 7 current arenas (11-28): never inside geometry or grazing it; a fighter hidden in
+  0.9 % of posed checks (11/~1,250: launches near ceilings, a few Foundry/Archive spots) and 0.9 % of sampled bout
+  frames (37/~4,100: mostly Lab fighters standing inside the wall consoles, Market corners). Rooftop, Overpass and
+  Foundry bouts 0. Known gap: fighters in exactly opposite corners of the Archive hall can't both be framed from
+  inside the room; the camera shows the hall until they close in.
+  Rules: new static scenery is collided automatically if it's opaque and in `arena.static`;
+  see-through things must be `transparent`/`alphaTest` (or a fadeable) or the camera will avoid them; moving scenery
+  must not live in `arena.static` (the grid is baked once per layout).
+- Fallbacks that pulled the camera straight toward the focus (hip height) left it on the floor in the middle of
+  the fight in small walled rooms; the last resort now slides toward a pivot above the action. The march may only
+  skip solid cells right at its start (0.8 m): skipping 2 m let a ray that began against a wall pass through it and
+  the camera ended up outside the walled arenas.
+- Lab (and a few Market corners): fighters can walk ~1 m into the wall consoles / shop fronts, which have no
+  `fixedSolids`; no camera can show a fighter inside scenery. Fix in the map (add solids), not the camera.
+- The sweep must only use positions a fighter can occupy (not inside `fixedSolids`, below `arena.ceiling`, no
+  falls on enclosed arenas) or it reports false failures.
+- The grid build is 0.2–0.8 s on a desktop core, seconds on a phone: never build it synchronously at match start
+  (time-sliced from the frame loop; tests call `arena.camCollider()` to finish it).
+- Offline the stick basis follows the camera's actual view (detours rotate it). The `__game.start` test hook finishes
+  the grid synchronously: when it completed mid-test, the first run's camera differed from the next one's and the
+  determinism check failed (online is unaffected: it uses the fixed `CANON` basis).
 
 **Online / determinism**
 - Online "screen froze on start for a long time" (11-28). Measured with `tools/online-e2e.cjs` + `?netdebug`, not

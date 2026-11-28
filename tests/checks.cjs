@@ -44,6 +44,8 @@ const URL = process.argv[2] || 'http://localhost:5173/';
     };
   });
 
+  await page.addScriptTag({ path: require('path').join(__dirname, 'camsweep.js') });
+
   const results = [];
   async function check(name, fn) {
     try {
@@ -637,6 +639,29 @@ const URL = process.argv[2] || 'http://localhost:5173/';
       out.push(`${arena}:${d < 0 ? 'same' : 'DIFF@' + (d + 1) * 60}`);
     }
     return { pass: ok, info: out.join(' ') };
+  });
+
+  await check('Camera: never inside or behind walls/buildings, fighters stay in view (every arena, zoom 100/140 %, sampled poses + seeded bouts)', async () => {
+    // tests/camsweep.js: posed sweep (deck grid, corners, far apart, launches, falls, intro/finisher cinematics) and a
+    // seeded CPU-vs-CPU bout per arena; ray casts against the real static meshes from the settled camera.
+    // Strict: the camera is never inside geometry or grazing it. Tolerant (< 2 %): a fighter hidden for a sampled
+    // frame (e.g. pressed into wall decoration that has no collision solid, which no camera can see through).
+    const out = [];
+    let n = 0, hidden = 0, hard = [];
+    const tally = (label, r, total) => {
+      n += total;
+      for (const f of r.fails) { if (f.kind === 'hidden') hidden++; else hard.push(`${label} ${f.kind} ${f.pose} ${f.detail}`); }
+      out.push(`${label}:${r.fails.length}/${total}`);
+    };
+    for (const arena of ['rooftop', 'overpass', 'construction', 'market', 'archive', 'foundry', 'lab']) {
+      for (const [zoom, offset] of [[1, 0], [1.4, 1]]) { const r = await camSweep(arena, zoom, { every: 3, offset }); tally(`${arena}@${zoom}`, r, r.poses); }
+    }
+    for (const [arena, p1, p2] of [['rooftop', 'magna', 'vanta'], ['overpass', 'basalt', 'rift'], ['construction', 'ember', 'tether'], ['market', 'magna', 'vanta'], ['archive', 'shunt', 'aerin'], ['foundry', 'basalt', 'ember'], ['lab', 'rift', 'tether']]) {
+      const r = await camBout(arena, 1.4, [[p1, p2]], 1500); tally(`bout ${arena}`, r, r.checks);
+    }
+    window.__game.vcam.userZoom = 1;
+    const pass = hard.length === 0 && hidden / n < 0.02;
+    return { pass, info: `${n} samples, hidden ${hidden} (${(100 * hidden / n).toFixed(1)} %), inside/graze ${hard.length} | ` + out.join(' ') + (hard.length ? ' | ' + hard.slice(0, 3).join(' | ') : '') };
   });
 
   await check('SHUNT Displace drops the victim off an open edge for a ring-out', () => {

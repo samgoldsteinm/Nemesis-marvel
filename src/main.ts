@@ -8,7 +8,7 @@ import { updatePadCursor, hidePadCursor, cursorSpeed, setCursorSpeed, padListNav
 import { VFX } from './vfx';
 import { TRAITS } from './traits';
 import * as THREE from 'three';
-import { Arena, LAYOUTS, LayoutId, layoutOr } from './arena';
+import { Arena, LAYOUTS, LayoutId, layoutOr, BOUNDS, SHAPE } from './arena';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -459,6 +459,12 @@ function startMatch(withIntro = true, seed?: number) {
   if (arena.layout !== setup.arena) arena.setLayout(setup.arena);
   applyPalette(setup.arena);
   vcam.zLimit = setup.arena === 'overpass' ? 5.8 : Infinity;
+  // Camera collision against this arena's buildings and solids (built once per layout, cached by the arena;
+  // time-sliced: finished by the frame loop over the next frames if it isn't cached yet).
+  vcam.collider = arena.camColliderStep(6);
+  vcam.deck = { hw: BOUNDS.hw, hd: BOUNDS.hd, circle: SHAPE.circle };
+  vcam.maxY = setup.arena === 'overpass' ? arena.ceiling - 0.3 : Infinity;
+  vcam.room = arena.enclosed ? { hw: BOUNDS.hw - 0.3, hd: BOUNDS.hd - 0.3 } : null;
   match = new Match(scene, arena, fx, vcam, d);
   if (seed !== undefined) match.restart(seed);
   match.setLives(setup.lives);
@@ -501,6 +507,7 @@ const online = new Online({
     netlog(`shaders compiled in ${Math.round(performance.now() - t)} ms (${renderer.info.programs?.length ?? '?'} programs)`);
     sceneWarm = true;
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(null))));
+    while (!vcam.collider) await new Promise((r) => requestAnimationFrame(() => r(null))); // camera collision grid (built by the frame loop)
     await Promise.race([introVoicesReady(), new Promise((r) => setTimeout(r, 4000))]); // intro timing uses the voice manifest
   },
   playIntro: () => {
@@ -1517,6 +1524,10 @@ function frame(now: number) {
 
   friends.setStatus(match ? 'match' : online.active ? 'room' : 'menu');
   if (previewQueue.length && screen !== 'none' && !match) captureArenaPreview();
+  if (match && !vcam.collider) {
+    vcam.collider = arena.camColliderStep(6);
+    if (vcam.collider) console.info(`[cam] ${arena.layout} collision grid: ${vcam.collider.tris} tris → ${vcam.collider.solid} solid cells, ${Math.round(vcam.collider.ms)} ms spread over frames`);
+  }
   if (screen !== 'none') menuInput(rawDt * 1000);
   else hidePadCursor();
   // Online the intro keeps running behind the pause menu (the opponent is waiting on it).
@@ -1625,7 +1636,7 @@ const hooks = {
   online,
   friends,
   cpus: () => cpus,
-  start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal', arenaId: LayoutId = 'rooftop') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; setup.arena = layoutOr(arenaId); startMatch(false); },
+  start(p1: string, p2: string, mode: Mode = 'cpu', diff: Difficulty = 'normal', arenaId: LayoutId = 'rooftop') { setup.p1 = p1; setup.p2 = p2; setup.mode = mode; setup.diff = diff; setup.arena = layoutOr(arenaId); startMatch(false); vcam.collider = arena.camCollider(); }, // tests: camera collision complete from the first tick (the game builds it over frames)
   setLives(n: number) { setup.lives = n; },
   startWithIntro(p1: string, p2: string) { setup.p1 = p1; setup.p2 = p2; setup.mode = 'cpu'; startMatch(true); },
   rematch,
@@ -1644,6 +1655,8 @@ const hooks = {
   isTouchActive,
   renderer,
   vcam,
+  bounds: () => ({ hw: BOUNDS.hw, hd: BOUNDS.hd }),
+  circle: () => SHAPE.circle,
 };
 
 // Load the rigged body model, then open the menu. Falls back to procedural bodies if it fails.
