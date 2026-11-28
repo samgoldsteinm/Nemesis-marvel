@@ -162,6 +162,14 @@ export function duotone(src: HTMLCanvasElement, dark: number, light: number, gam
   return c;
 }
 
+/** First row (from the top) with an opaque pixel; the height if there is none. */
+function topRow(c: HTMLCanvasElement) {
+  const { width: w, height: h } = c;
+  const d = c.getContext('2d')!.getImageData(0, 0, w, h).data;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (d[(y * w + x) * 4 + 3] > 24) return y;
+  return h;
+}
+
 /** True if any opaque pixel sits in the top 2% rows or the outer 1% columns (the subject is cropped). */
 function touchesEdge(c: HTMLCanvasElement) {
   const g = c.getContext('2d')!;
@@ -219,7 +227,7 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
       },
     },
     bust: {
-      w: 300, h: 600, rotY: 0, fov: 26,
+      w: 512, h: 1024, rotY: 0, fov: 26, // sharp on 3x phones and 1080p: panels are up to ~1000 device px tall
       cam: (sk, def, cam) => {
         // Tall title-menu panel: head in the upper quarter, down to about the waist.
         const f = BUST[def.id] ?? BUST.default;
@@ -232,6 +240,10 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
         const viewH = 2 * d * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
         cam.lookAt(fc.clone().add(new THREE.Vector3(0, -0.24 * viewH + (f.aimY ?? 0) * s, 0)));
         if (f.roll) cam.rotateZ(f.roll);
+        // Centre the face horizontally: narrow panels crop the sides, never the face.
+        cam.updateMatrixWorld(true);
+        const v = fc.clone().project(cam);
+        cam.translateX(v.x * viewH * cam.aspect / 2);
       },
     },
     profile: {
@@ -284,6 +296,16 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
         return out;
       };
       let c = shoot();
+      // Busts: the top of the head (horns, spikes, hood) sits ~6% below the panel top, never cut off.
+      if (kind === 'bust') {
+        const viewH = 2 * cam.position.distanceTo(head) * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
+        for (let tries = 0; tries < 2; tries++) {
+          const err = sh.h * 0.06 - topRow(c);
+          if (Math.abs(err) < sh.h * 0.01) break;
+          cam.translateY((err / sh.h) * viewH);
+          c = shoot();
+        }
+      }
       // Full-body poses must never be cropped (Basalt's head spike, raised arms, wings): if anything touches the
       // top or side edges, pull the camera back along its view line and shoot again.
       if (kind === 'pose') {
@@ -300,7 +322,7 @@ export function renderPortraits(renderer: THREE.WebGLRenderer) {
         portraits.set(def.id, cropped.toDataURL('image/png'));
         comics.set(def.id, (def.look!.golem ? posterizeStone(cropped) : posterize(cropped)).toDataURL('image/png'));
       } else if (kind === 'bust') {
-        busts.set(def.id, duotone(c, 0x021312, 0x9cefe2, 0.7).toDataURL('image/png'));
+        busts.set(def.id, duotone(c, 0x021312, 0x9cefe2, 0.7).toDataURL('image/webp', 0.92));
       } else if (kind === 'face') {
         faces.set(def.id, duotone(c, 0x0a2436, 0xd6f3ff, 0.62).toDataURL('image/png'));
       } else {

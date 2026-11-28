@@ -790,18 +790,21 @@ const TITLE_ITEMS: [string, string, string, string][] = [
   ['online', '', 'Play Online', '1v1 with a friend · room code'],
   ['moves', '', 'How to Play', 'Controls, combat basics and move lists'],
 ];
+/** Panel order on the title band (alternating facing directions; the first two sit left of the menu). */
+const TITLE_ORDER = ['tether', 'aerin', 'shunt', 'vanta', 'basalt', 'magna', 'ember', 'rift'].map((id) => charById(id));
 /** Title menu: a letterboxed band of tall slanted duotone busts, with the menu in a dark gap between them. */
 function renderTitle() {
   const panel = (c: CharacterDef, i: number) => {
     const b = bustOf(c);
-    return `<div class="tp" style="--i:${i}"><div class="tpi">${b ? `<img src="${b}" alt="">` : `<b class="tpx">${c.name[0]}</b>`}</div><span class="tpn">${c.name}</span></div>`;
+    // Background image + cover (not a %-height <img>): re-lays out reliably when a phone rotates.
+    return `<div class="tp" style="--i:${i}"><div class="tpi"${b ? ` style="background-image:url('${b}')"` : ''}>${b ? '' : `<b class="tpx">${c.name[0]}</b>`}</div><span class="tpn">${c.name}</span></div>`;
   };
   const pads = connectedPads().length;
   return `
     <div class="screen home">
       <div class="home-top">${prompts([['confirm', 'Select']])}<span class="home-tag">ROOFTOP · OVERPASS · NO WAY DOWN</span></div>
-      <div class="home-band">
-        <div class="home-panels">${ROSTER.slice(0, 2).map(panel).join('')}<div class="home-gap"></div>${ROSTER.slice(2).map((c, i) => panel(c, i + 2)).join('')}</div>
+      <div class="home-band" style="--sky:${skyline(23)}"><span class="hb-fx"><i class="hb-haze"></i><i class="hb-streak"></i></span>
+        <div class="home-panels">${TITLE_ORDER.slice(0, 2).map(panel).join('')}<div class="home-gap"></div>${TITLE_ORDER.slice(2).map((c, i) => panel(c, i + 2)).join('')}</div>
         <nav class="home-menu">
           <h1 class="chrome small">BREAK<span>LINE</span></h1>
           <div class="hm-list">${TITLE_ITEMS.map(([a, arg, label, sub]) => `<button class="hm-item" data-nav data-act="${a}"${arg ? ` data-arg="${arg}"` : ''}><span>${label}</span><small>${sub}</small></button>`).join('')}</div>
@@ -820,6 +823,11 @@ function renderTitle() {
       </div>
     </div>`;
 }
+// Rotating a phone (or resizing) redraws the title menu from scratch, so nothing keeps the old orientation's layout.
+let titleResizeT = 0;
+function onTitleResize() { clearTimeout(titleResizeT); titleResizeT = window.setTimeout(() => { if (screen === 'title') rerender(); }, 150); }
+window.addEventListener('resize', onTitleResize);
+window.addEventListener('orientationchange', onTitleResize);
 /** One side of the fighter select: a comic-toned pose over a duotone skyline, with the fighter's info. */
 /** Phones: each select panel's stats are tucked behind a tap so the fighter art can be big. */
 const statsOpen: [boolean, boolean] = [false, false];
